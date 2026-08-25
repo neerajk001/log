@@ -25,7 +25,12 @@ export default function LiftPage() {
   const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
 
   const selectedDay = selectedDayId ? allDays.find((d) => d.id === selectedDayId) : day;
-  const exercises = (selectedDay?.exercises ?? []) as { name: string; sets: number; reps: string }[];
+  const exercises = (selectedDay?.exercises ?? []) as {
+    name: string;
+    sets: number;
+    reps: string;
+    last_log: { weight_kg: number; reps: number } | null;
+  }[];
   const selectedDayName = selectedDay?.day_name ?? null;
 
   const [openEx, setOpenEx] = useState<Record<string, boolean>>({});
@@ -40,6 +45,33 @@ export default function LiftPage() {
   const [todayLifts, setTodayLifts] = useState<LiftLog[]>([]);
   const [todayLoading, setTodayLoading] = useState(true);
   const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({});
+
+  const [recent, setRecent] = useState<{ name: string; weight_kg: number; reps: number }[]>([]);
+  useEffect(() => {
+    const to = todayStr();
+    const fromD = new Date();
+    fromD.setDate(fromD.getDate() - 120);
+    const from = fromD.toISOString().slice(0, 10);
+    api
+      .getLiftLogsRange(from, to)
+      .then((logs) => {
+        const last: Record<string, LiftLog> = {};
+        for (const l of logs) if (!last[l.exercise_name]) last[l.exercise_name] = l;
+        setRecent(
+          Object.values(last).map((l) => ({
+            name: l.exercise_name,
+            weight_kg: l.weight_kg,
+            reps: l.reps,
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
+
+  function fillFromRecent(item: { name: string; weight_kg: number; reps: number }) {
+    setManualName(item.name);
+    setManualSets([{ weight: String(item.weight_kg), reps: String(item.reps) }]);
+  }
 
   async function refreshToday() {
     setTodayLoading(true);
@@ -214,12 +246,17 @@ export default function LiftPage() {
                     onClick={() => toggleOpen(ex.name, ex.sets)}
                     className="flex w-full items-center justify-between gap-3 text-left"
                   >
-                    <div>
-                      <div className="font-body text-chalk">{ex.name}</div>
-                      <div className="font-mono text-xs text-chalkDim">
-                        {ex.sets} sets × {ex.reps}
-                      </div>
-                    </div>
+                     <div>
+                       <div className="font-body text-chalk">{ex.name}</div>
+                       <div className="font-mono text-xs text-chalkDim">
+                         {ex.sets} sets × {ex.reps}
+                       </div>
+                       {ex.last_log && (
+                         <div className="font-mono text-xs text-steel">
+                           Last: {ex.last_log.weight_kg}kg × {ex.last_log.reps}
+                         </div>
+                       )}
+                     </div>
                     <div className="flex items-center gap-3">
                       {completed.length > 0 && (
                         <span className="font-mono text-xs text-moss">
@@ -305,6 +342,25 @@ export default function LiftPage() {
           {day ? 'Not on your plan? Log manually' : 'Log a lift'}
         </div>
         <div className="mt-2 space-y-3 rounded-card border border-hairline bg-surface p-4">
+          {recent.length > 0 && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
+                Recent — tap to reuse
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {recent.map((r) => (
+                  <button
+                    key={r.name}
+                    type="button"
+                    onClick={() => fillFromRecent(r)}
+                    className="rounded-full border border-hairline bg-graphite px-2.5 py-1 font-mono text-xs text-chalk hover:border-rust"
+                  >
+                    {r.name} · {r.weight_kg}kg × {r.reps}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="block">
             <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
               Exercise

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Lock, Unlock } from 'lucide-react';
 import type { DailyField } from '@/src/api/types';
 
 type Props = {
@@ -12,9 +13,22 @@ type Props = {
   onSave: (field: DailyField, value: number) => void;
   showRetry?: boolean;
   onRetry?: () => void;
+  locked?: boolean;
+  onToggleLock?: () => void;
 };
 
-export function LogField({ label, unit, value, placeholder, field, onSave, showRetry, onRetry }: Props) {
+export function LogField({
+  label,
+  unit,
+  value,
+  placeholder,
+  field,
+  onSave,
+  showRetry,
+  onRetry,
+  locked,
+  onToggleLock,
+}: Props) {
   const [draft, setDraft] = useState<string>(value != null ? String(value) : '');
   const focused = useRef(false);
 
@@ -23,11 +37,24 @@ export function LogField({ label, unit, value, placeholder, field, onSave, showR
     if (!focused.current && value != null) setDraft(String(value));
   }, [value]);
 
-  const display = draft !== '' ? draft : placeholder != null ? String(placeholder) : '—';
-
   return (
     <div className="rounded-card border border-hairline bg-surface p-4">
-      <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">{label}</div>
+      <div className="flex items-center justify-between">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">{label}</div>
+        {onToggleLock && (
+          <button
+            type="button"
+            onClick={onToggleLock}
+            title={locked ? 'Repeat this value daily (locked)' : 'Lock to repeat daily'}
+            className={`flex items-center gap-1 font-mono text-[10px] ${
+              locked ? 'text-moss' : 'text-steel hover:text-chalk'
+            }`}
+          >
+            {locked ? <Lock size={12} /> : <Unlock size={12} />}
+            {locked ? 'repeat' : 'lock'}
+          </button>
+        )}
+      </div>
       <div className="mt-2 flex items-baseline gap-1">
         <input
           inputMode="decimal"

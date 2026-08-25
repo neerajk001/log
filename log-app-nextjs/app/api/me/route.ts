@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { requireUserId, toErrorResponse, ApiError } from '@/lib/error';
 import { prisma } from '@/lib/db/client';
 import { serializeUser } from '@/lib/serialize';
@@ -31,6 +32,12 @@ export async function PUT(req: Request) {
       data: {
         proteinTargetG: parsed.data.protein_target_g,
         calorieTarget: parsed.data.calorie_target,
+        dailyDefaults:
+          parsed.data.daily_defaults === undefined
+            ? undefined
+            : parsed.data.daily_defaults === null
+              ? Prisma.JsonNull
+              : parsed.data.daily_defaults,
       },
     });
     return NextResponse.json(serializeUser(user));

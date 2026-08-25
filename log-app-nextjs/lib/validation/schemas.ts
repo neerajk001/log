@@ -33,10 +33,21 @@ export const liftLogSchema = z.object({
   plan_day_id: z.string().uuid().nullable().optional(),
 });
 
+export const dailyDefaultsSchema = z
+  .object({
+    weight_kg: z.number().positive().max(999).nullable().optional(),
+    calories: z.number().int().positive().max(99999).nullable().optional(),
+    protein_g: z.number().int().positive().max(99999).nullable().optional(),
+    sleep_hours: z.number().positive().max(24).nullable().optional(),
+  })
+  .partial()
+  .nullable();
+
 export const meUpdateSchema = z
   .object({
     protein_target_g: z.number().int().positive().max(9999),
     calorie_target: z.number().int().positive().max(99999),
+    daily_defaults: dailyDefaultsSchema,
   })
   .partial();
 

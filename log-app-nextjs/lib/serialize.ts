@@ -13,6 +13,7 @@ export function serializeUser(u: User) {
     id: u.id,
     protein_target_g: u.proteinTargetG,
     calorie_target: u.calorieTarget,
+    daily_defaults: (u.dailyDefaults as Record<string, number> | null) ?? null,
     created_at: u.createdAt.toISOString(),
   };
 }

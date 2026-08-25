@@ -13,6 +13,7 @@ model User {
   clerkUserId      String        @unique @map("clerk_user_id") @db.Text
   proteinTargetG   Int?          @map("protein_target_g")
   calorieTarget    Int?          @map("calorie_target")
+  dailyDefaults    Json?         @map("daily_defaults")
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   dailyLogs        DailyLog[]
   liftLogs         LiftLog[]

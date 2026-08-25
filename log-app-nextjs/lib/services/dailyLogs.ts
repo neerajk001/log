@@ -67,3 +67,9 @@ export async function getPreviousDailyLog(userId: string, date: string) {
     orderBy: { date: 'desc' },
   });
 }
+
+export async function deleteDailyLog(userId: string, date: string) {
+  return prisma.dailyLog.deleteMany({
+    where: { userId, date: parseDate(date) },
+  });
+}

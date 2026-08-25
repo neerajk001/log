@@ -59,3 +59,9 @@ export async function getLiftHistoryRange(
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
   });
 }
+
+export async function deleteLiftLog(userId: string, id: string) {
+  return prisma.liftLog.deleteMany({
+    where: { userId, id },
+  });
+}

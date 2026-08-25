@@ -31,14 +31,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getMe: () => request<UserProfile>('/me', { method: 'GET' }),
-  updateMe: (patch: Partial<Pick<UserProfile, 'protein_target_g' | 'calorie_target'>>) =>
-    request<UserProfile>('/me', { method: 'PUT', body: JSON.stringify(patch) }),
+  updateMe: (
+    patch: Partial<
+      Pick<UserProfile, 'protein_target_g' | 'calorie_target' | 'daily_defaults'>
+    >,
+  ) => request<UserProfile>('/me', { method: 'PUT', body: JSON.stringify(patch) }),
 
   getDailyLog: (date: string) => request<DailyLog | null>(`/logs/daily/${date}`, { method: 'GET' }),
   getDailyLogs: (from: string, to: string) =>
     request<DailyLog[]>(`/logs/daily?from=${from}&to=${to}`, { method: 'GET' }),
   upsertDailyLog: (date: string, patch: Record<string, number>) =>
     request<DailyLog>(`/logs/daily/${date}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteDailyLog: (date: string) =>
+    request<{ ok: true }>(`/logs/daily/${date}`, { method: 'DELETE' }),
 
   createLiftLog: (input: {
     date: string;
@@ -51,6 +56,8 @@ export const api = {
     request<LiftLog[]>(`/logs/lift?exercise=${encodeURIComponent(exercise)}&weeks=${weeks}`, { method: 'GET' }),
   getLiftLogsRange: (from: string, to: string) =>
     request<LiftLog[]>(`/logs/lift?from=${from}&to=${to}`, { method: 'GET' }),
+  deleteLiftLog: (id: string) =>
+    request<{ ok: true }>(`/logs/lift/${id}`, { method: 'DELETE' }),
 
   listPlans: () => request<Plan[]>('/plans', { method: 'GET' }),
   createPlan: (input: { name: string; source: 'manual' | 'ai_parsed'; days: { day_name: string; exercises: PlanExercise[] }[] }) =>

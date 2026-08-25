@@ -1,7 +1,15 @@
+export interface DailyDefaults {
+  weight_kg?: number | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  sleep_hours?: number | null;
+}
+
 export interface UserProfile {
   id: string;
   protein_target_g: number | null;
   calorie_target: number | null;
+  daily_defaults: DailyDefaults | null;
   created_at: string;
 }
 
