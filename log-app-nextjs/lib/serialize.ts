@@ -1,4 +1,4 @@
-import type { DailyLog, LiftLog, User } from '@prisma/client';
+import type { DailyLog, LiftLog, User, ActivityLog } from '@prisma/client';
 
 function toDateStr(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -42,6 +42,21 @@ export function serializeLiftLog(l: LiftLog) {
     reps: l.reps,
     plan_day_id: l.planDayId,
     created_at: l.createdAt.toISOString(),
+  };
+}
+
+export function serializeActivityLog(a: ActivityLog) {
+  return {
+    id: a.id,
+    user_id: a.userId,
+    date: toDateStr(a.date),
+    activity_type: a.activityType,
+    name: a.name,
+    duration_min: a.durationMin,
+    distance_km: a.distanceKm != null ? Number(a.distanceKm) : null,
+    calories_burned: a.caloriesBurned,
+    notes: a.notes,
+    created_at: a.createdAt.toISOString(),
   };
 }
 

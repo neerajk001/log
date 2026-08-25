@@ -36,6 +36,21 @@ export interface LiftLog {
   created_at: string;
 }
 
+export type ActivityType = 'run' | 'cycle' | 'walk' | 'swim' | 'other';
+
+export interface ActivityLog {
+  id: string;
+  user_id: string;
+  date: string;
+  activity_type: ActivityType;
+  name: string;
+  duration_min: number;
+  distance_km: number | null;
+  calories_burned: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
 export type DailyField = 'weight_kg' | 'calories' | 'protein_g' | 'sleep_hours';
 
 export type ApiErrorInfo = { code: string; message: string };

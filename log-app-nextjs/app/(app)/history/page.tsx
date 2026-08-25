@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, ApiError } from '@/src/api/client';
-import type { DailyLog, LiftLog } from '@/src/api/types';
+import type { ActivityLog, DailyLog, LiftLog } from '@/src/api/types';
 
 const RANGES = [7, 30, 90];
 
@@ -30,10 +30,12 @@ export default function HistoryPage() {
   const [days, setDays] = useState(30);
   const [daily, setDaily] = useState<DailyLog[]>([]);
   const [lifts, setLifts] = useState<LiftLog[]>([]);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openDaily, setOpenDaily] = useState<Record<string, boolean>>({});
   const [openLifts, setOpenLifts] = useState<Record<string, boolean>>({});
+  const [openActivity, setOpenActivity] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -45,13 +47,15 @@ export default function HistoryPage() {
       fromD.setDate(fromD.getDate() - (days - 1));
       const from = fromD.toISOString().slice(0, 10);
       try {
-        const [d, l] = await Promise.all([
+        const [d, l, a] = await Promise.all([
           api.getDailyLogs(from, to),
           api.getLiftLogsRange(from, to),
+          api.getActivityLogs(from, to),
         ]);
         if (!cancelled) {
           setDaily(d);
           setLifts(l);
+          setActivities(a);
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof ApiError ? e.message : 'Failed to load history');
@@ -96,6 +100,20 @@ export default function HistoryPage() {
       });
   }, [lifts]);
 
+  const activityGroups = useMemo(() => {
+    const byDate: Record<string, ActivityLog[]> = {};
+    for (const a of activities) (byDate[a.date] ??= []).push(a);
+    return Object.keys(byDate)
+      .sort()
+      .reverse()
+      .map((date) => ({ date, items: byDate[date] }));
+  }, [activities]);
+
+  const workoutDays = useMemo(
+    () => new Set([...liftGroups.map((g) => g.date), ...activityGroups.map((g) => g.date)]).size,
+    [liftGroups, activityGroups],
+  );
+
   async function handleDeleteDaily(date: string) {
     if (!window.confirm('Delete this day’s daily log?')) return;
     try {
@@ -127,6 +145,16 @@ export default function HistoryPage() {
       setLifts((prev) => prev.filter((l) => l.date !== date));
     } catch {
       window.alert('Could not delete those lifts.');
+    }
+  }
+
+  async function handleDeleteActivity(id: string) {
+    if (!window.confirm('Delete this activity?')) return;
+    try {
+      await api.deleteActivityLog(id);
+      setActivities((prev) => prev.filter((a) => a.id !== id));
+    } catch {
+      window.alert('Could not delete that activity.');
     }
   }
 
@@ -162,7 +190,7 @@ export default function HistoryPage() {
             </div>
             <div className="flex-1 rounded-card border border-hairline bg-surface px-3 py-2">
               <div className="font-mono text-[9px] uppercase tracking-[0.1em] text-chalkDim">Workouts</div>
-              <div className="mt-0.5 font-mono text-lg text-chalk">{liftGroups.length}</div>
+              <div className="mt-0.5 font-mono text-lg text-chalk">{workoutDays}</div>
             </div>
           </div>
 
@@ -302,6 +330,69 @@ export default function HistoryPage() {
                             </div>
                           </div>
                         )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section className="mt-6">
+            <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
+              Activity logs
+            </div>
+            {activityGroups.length === 0 ? (
+              <p className="mt-2 font-mono text-sm text-steel">No activity logged in this range.</p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {activityGroups.map((g) => {
+                  const open = !!openActivity[g.date];
+                  return (
+                    <div key={g.date} className="rounded-card border border-hairline bg-surface">
+                      <button
+                        type="button"
+                        onClick={() => setOpenActivity((p) => ({ ...p, [g.date]: !p[g.date] }))}
+                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                      >
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono text-sm text-chalk">{fmtDate(g.date)}</span>
+                          <span className="font-mono text-xs text-chalkDim">{fmtWeekday(g.date)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-chalkDim">
+                            {g.items.length} {g.items.length === 1 ? 'session' : 'sessions'}
+                          </span>
+                          {open ? (
+                            <ChevronDown size={16} className="text-steel" />
+                          ) : (
+                            <ChevronRight size={16} className="text-steel" />
+                          )}
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="space-y-2 border-t border-hairline px-4 pb-4 pt-3">
+                          {g.items.map((a) => (
+                            <div key={a.id} className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="truncate font-body text-sm text-chalk">{a.name}</div>
+                                <div className="font-mono text-xs text-chalkDim">
+                                  {a.duration_min} min
+                                  {a.distance_km != null ? ` · ${a.distance_km} km` : ''}
+                                  {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ''}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteActivity(a.id)}
+                                title="Delete activity"
+                                className="shrink-0 p-1 text-steel hover:text-rustSoft"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}

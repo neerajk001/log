@@ -67,3 +67,15 @@ export const planCreateSchema = z.object({
   source: z.enum(['manual', 'ai_parsed']),
   days: z.array(planDayInputSchema).min(1),
 });
+
+export const activityTypeSchema = z.enum(['run', 'cycle', 'walk', 'swim', 'other']);
+
+export const activityLogSchema = z.object({
+  date: dateStr,
+  activity_type: activityTypeSchema,
+  name: z.string().min(1).max(200),
+  duration_min: z.number().int().positive().max(9999),
+  distance_km: z.number().positive().max(9999).nullable().optional(),
+  calories_burned: z.number().int().positive().max(99999).nullable().optional(),
+  notes: z.string().max(1000).nullable().optional(),
+});

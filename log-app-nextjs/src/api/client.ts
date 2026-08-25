@@ -1,4 +1,4 @@
-import type { ApiErrorInfo, UserProfile, DailyLog, LiftLog, Plan, PlanDay, PlanExercise, PlanToday, TrendsResult, VerdictResult } from './types';
+import type { ApiErrorInfo, UserProfile, DailyLog, LiftLog, ActivityLog, Plan, PlanDay, PlanExercise, PlanToday, TrendsResult, VerdictResult } from './types';
 
 export class ApiError extends Error {
   code: string;
@@ -58,6 +58,20 @@ export const api = {
     request<LiftLog[]>(`/logs/lift?from=${from}&to=${to}`, { method: 'GET' }),
   deleteLiftLog: (id: string) =>
     request<{ ok: true }>(`/logs/lift/${id}`, { method: 'DELETE' }),
+
+  getActivityLogs: (from: string, to: string) =>
+    request<ActivityLog[]>(`/logs/activity?from=${from}&to=${to}`, { method: 'GET' }),
+  createActivityLog: (input: {
+    date: string;
+    activity_type: 'run' | 'cycle' | 'walk' | 'swim' | 'other';
+    name: string;
+    duration_min: number;
+    distance_km?: number | null;
+    calories_burned?: number | null;
+    notes?: string | null;
+  }) => request<ActivityLog>('/logs/activity', { method: 'POST', body: JSON.stringify(input) }),
+  deleteActivityLog: (id: string) =>
+    request<{ ok: true }>(`/logs/activity/${id}`, { method: 'DELETE' }),
 
   listPlans: () => request<Plan[]>('/plans', { method: 'GET' }),
   createPlan: (input: { name: string; source: 'manual' | 'ai_parsed'; days: { day_name: string; exercises: PlanExercise[] }[] }) =>
