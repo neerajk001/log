@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Trash2 } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronRight } from 'lucide-react';
 import { api, ApiError } from '@/src/api/client';
 import type { DailyLog, LiftLog } from '@/src/api/types';
 
@@ -32,6 +32,8 @@ export default function HistoryPage() {
   const [lifts, setLifts] = useState<LiftLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [openDaily, setOpenDaily] = useState<Record<string, boolean>>({});
+  const [openLifts, setOpenLifts] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -158,42 +160,58 @@ export default function HistoryPage() {
               <p className="mt-2 font-mono text-sm text-steel">No daily logs in this range.</p>
             ) : (
               <div className="mt-2 space-y-2">
-                {dailyRows.map((d) => (
-                   <div key={d.id} className="rounded-card border border-hairline bg-surface p-4">
-                     <div className="flex items-center justify-between">
-                       <div className="flex items-baseline gap-2">
-                         <span className="font-mono text-sm text-chalk">{fmtDate(d.date)}</span>
-                         <span className="font-mono text-xs text-chalkDim">{fmtWeekday(d.date)}</span>
-                       </div>
-                       <button
-                         type="button"
-                         onClick={() => handleDeleteDaily(d.date)}
-                         title="Delete day"
-                         className="text-steel hover:text-rustSoft"
-                       >
-                         <Trash2 size={14} />
-                       </button>
-                     </div>
-                    <div className="mt-3 grid grid-cols-4 gap-2">
-                      <Metric
-                        label="Weight"
-                        value={d.weight_kg != null ? `${d.weight_kg}kg` : '—'}
-                      />
-                      <Metric
-                        label="Kcal"
-                        value={d.calories != null ? `${d.calories}` : '—'}
-                      />
-                      <Metric
-                        label="Protein"
-                        value={d.protein_g != null ? `${d.protein_g}g` : '—'}
-                      />
-                      <Metric
-                        label="Sleep"
-                        value={d.sleep_hours != null ? `${d.sleep_hours}h` : '—'}
-                      />
+                {dailyRows.map((d) => {
+                  const open = !!openDaily[d.date];
+                  const parts = [
+                    d.weight_kg != null ? `${d.weight_kg}kg` : null,
+                    d.calories != null ? `${d.calories}` : null,
+                    d.protein_g != null ? `${d.protein_g}g` : null,
+                    d.sleep_hours != null ? `${d.sleep_hours}h` : null,
+                  ].filter(Boolean) as string[];
+                  return (
+                    <div key={d.id} className="rounded-card border border-hairline bg-surface">
+                      <button
+                        type="button"
+                        onClick={() => setOpenDaily((p) => ({ ...p, [d.date]: !p[d.date] }))}
+                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                      >
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono text-sm text-chalk">{fmtDate(d.date)}</span>
+                          <span className="font-mono text-xs text-chalkDim">{fmtWeekday(d.date)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-chalkDim">
+                            {parts.length ? parts.join(' · ') : 'empty'}
+                          </span>
+                          {open ? (
+                            <ChevronDown size={16} className="text-steel" />
+                          ) : (
+                            <ChevronRight size={16} className="text-steel" />
+                          )}
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="border-t border-hairline px-4 pb-4 pt-3">
+                          <div className="grid grid-cols-4 gap-2">
+                            <Metric label="Weight" value={d.weight_kg != null ? `${d.weight_kg}kg` : '—'} />
+                            <Metric label="Kcal" value={d.calories != null ? `${d.calories}` : '—'} />
+                            <Metric label="Protein" value={d.protein_g != null ? `${d.protein_g}g` : '—'} />
+                            <Metric label="Sleep" value={d.sleep_hours != null ? `${d.sleep_hours}h` : '—'} />
+                          </div>
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteDaily(d.date)}
+                              className="flex items-center gap-1 font-mono text-[11px] text-steel hover:text-rustSoft"
+                            >
+                              <Trash2 size={13} /> delete
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
@@ -206,41 +224,64 @@ export default function HistoryPage() {
               <p className="mt-2 font-mono text-sm text-steel">No lift logs in this range.</p>
             ) : (
               <div className="mt-2 space-y-2">
-                {liftGroups.map((g) => (
-                  <div key={g.date} className="rounded-card border border-hairline bg-surface p-4">
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-mono text-sm text-chalk">{fmtDate(g.date)}</span>
-                      <span className="font-mono text-xs text-chalkDim">
-                        {g.exercises.length} {g.exercises.length === 1 ? 'exercise' : 'exercises'}
-                      </span>
-                    </div>
-                    <div className="mt-3 space-y-3">
-                      {g.exercises.map((ex) => (
-                        <div key={ex.name}>
-                          <div className="font-body text-sm text-chalk">{ex.name}</div>
-                          <div className="mt-1.5 flex flex-wrap gap-1.5">
-                             {ex.sets.map((s) => (
-                               <span
-                                 key={s.id}
-                                 className="flex items-center gap-1 rounded-full border border-hairline bg-graphite px-2 py-0.5 font-mono text-xs text-chalk"
-                               >
-                                 {s.weight_kg} × {s.reps}
-                                 <button
-                                   type="button"
-                                   onClick={() => handleDeleteLift(s.id)}
-                                   title="Delete set"
-                                   className="text-steel hover:text-rustSoft"
-                                 >
-                                   ×
-                                 </button>
-                               </span>
-                             ))}
+                {liftGroups.map((g) => {
+                  const open = !!openLifts[g.date];
+                  const totalSets = g.exercises.reduce((n, ex) => n + ex.sets.length, 0);
+                  return (
+                    <div key={g.date} className="rounded-card border border-hairline bg-surface">
+                      <button
+                        type="button"
+                        onClick={() => setOpenLifts((p) => ({ ...p, [g.date]: !p[g.date] }))}
+                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                      >
+                        <div className="flex items-baseline gap-2">
+                          <span className="font-mono text-sm text-chalk">{fmtDate(g.date)}</span>
+                          <span className="font-mono text-xs text-chalkDim">{fmtWeekday(g.date)}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-chalkDim">
+                            {g.exercises.length} {g.exercises.length === 1 ? 'exercise' : 'exercises'} ·{' '}
+                            {totalSets} {totalSets === 1 ? 'set' : 'sets'}
+                          </span>
+                          {open ? (
+                            <ChevronDown size={16} className="text-steel" />
+                          ) : (
+                            <ChevronRight size={16} className="text-steel" />
+                          )}
+                        </div>
+                      </button>
+                      {open && (
+                        <div className="border-t border-hairline px-4 pb-4 pt-3">
+                          <div className="space-y-3">
+                            {g.exercises.map((ex) => (
+                              <div key={ex.name}>
+                                <div className="font-body text-sm text-chalk">{ex.name}</div>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  {ex.sets.map((s) => (
+                                    <span
+                                      key={s.id}
+                                      className="flex items-center gap-1 rounded-full border border-hairline bg-graphite px-2 py-0.5 font-mono text-xs text-chalk"
+                                    >
+                                      {s.weight_kg} × {s.reps}
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteLift(s.id)}
+                                        title="Delete set"
+                                        className="text-steel hover:text-rustSoft"
+                                      >
+                                        ×
+                                      </button>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </section>
