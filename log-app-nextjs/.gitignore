@@ -1,0 +1,19 @@
+# dependencies
+/node_modules
+/.next
+/out
+
+# env
+.env
+.env.local
+.env*.local
+
+# prisma generated client is fine to ignore for repo; keep migrations
+# /prisma/generated
+
+# logs
+npm-debug.log*
+*.log
+
+# misc
+.DS_Store

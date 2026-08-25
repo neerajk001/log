@@ -1,0 +1,96 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String        @id @default(uuid()) @db.Uuid
+  clerkUserId      String        @unique @map("clerk_user_id") @db.Text
+  proteinTargetG   Int?          @map("protein_target_g")
+  calorieTarget    Int?          @map("calorie_target")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  dailyLogs        DailyLog[]
+  liftLogs         LiftLog[]
+  workoutPlans     WorkoutPlan[]
+  weeklyVerdicts   WeeklyVerdict[]
+
+  @@map("users")
+}
+
+model DailyLog {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  date         DateTime  @db.Date
+  weightKg     Decimal?  @map("weight_kg") @db.Decimal(5, 2)
+  calories     Int?
+  proteinG     Int?      @map("protein_g")
+  sleepHours   Decimal?  @map("sleep_hours") @db.Decimal(3, 1)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user         User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@map("daily_logs")
+}
+
+model LiftLog {
+  id            String     @id @default(uuid()) @db.Uuid
+  userId        String     @map("user_id") @db.Uuid
+  date          DateTime   @db.Date
+  exerciseName  String     @map("exercise_name") @db.Text
+  weightKg      Decimal    @map("weight_kg") @db.Decimal(6, 2)
+  reps          Int
+  planDayId     String?    @map("plan_day_id") @db.Uuid
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  user          User       @relation(fields: [userId], references: [id])
+  planDay       PlanDay?   @relation(fields: [planDayId], references: [id])
+
+  @@index([userId, exerciseName, date])
+  @@map("lift_logs")
+}
+
+model WorkoutPlan {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  name       String     @db.Text
+  source     String     @db.Text
+  isActive   Boolean    @default(true) @map("is_active")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+  user       User       @relation(fields: [userId], references: [id])
+  planDays   PlanDay[]
+
+  @@map("workout_plans")
+}
+
+model PlanDay {
+  id         String       @id @default(uuid()) @db.Uuid
+  planId     String       @map("plan_id") @db.Uuid
+  dayName    String       @map("day_name") @db.Text
+  dayOrder   Int          @map("day_order")
+  exercises  Json         @db.JsonB
+  plan       WorkoutPlan  @relation(fields: [planId], references: [id])
+  liftLogs   LiftLog[]
+
+  @@map("plan_days")
+}
+
+model WeeklyVerdict {
+  id                   String    @id @default(uuid()) @db.Uuid
+  userId               String    @map("user_id") @db.Uuid
+  weekStartDate        DateTime  @map("week_start_date") @db.Date
+  verdict              String    @db.Text
+  weightTrendKgPerWeek Decimal?  @map("weight_trend_kg_per_week") @db.Decimal(4, 2)
+  strengthTrend        String?   @map("strength_trend") @db.Text
+  adherencePct         Int?      @map("adherence_pct")
+  reasoning            Json      @db.JsonB
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  user                 User      @relation(fields: [userId], references: [id])
+
+  @@unique([userId, weekStartDate])
+  @@map("weekly_verdicts")
+}

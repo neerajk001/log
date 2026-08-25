@@ -1,0 +1,10 @@
+- Uses Google Gemini API (not Anthropic/Claude) for AI/model calls in this project. Confidence: 0.9
+- Keeps project documentation in sync with the actual implementation when a technology decision changes (updates docs to match code). Confidence: 0.6
+- Shares raw browser/app console dumps directly for debugging rather than describing issues in prose. Confidence: 0.8
+- Expects the assistant to proactively fix issues (e.g., wrong .env IP), not just explain what's wrong. Confidence: 0.8
+- When debugging, wants the assistant to add logging/instrumentation across the full stack (client + server) to trace the issue, not just read existing logs. Confidence: 0.8
+- Tests the mobile app via Expo web (platform=web) in addition to native. Confidence: 0.7
+- For workout/lift logging features, expects support for multiple sets per exercise (varying weight and reps per set), not just a single set entry — reflects real-world strength training where sets often differ in weight/reps (e.g., drop sets, pyramids). Confidence: 0.95
+- When a multi-item save flow exists, expects all items to actually persist (not silently dropped by debounce/refs/race conditions) — surfaced bugs in concurrent-save paths matter and must be fixed at the hook layer, not papered over. Confidence: 0.8
+- When reporting bugs, writes in casual lowercase with run-on phrasing and minor typos rather than polished prose — keep responses concise and action-oriented, not pedantic about grammar. Confidence: 0.7
+- Prefers accordion/collapsed grouped UI for repeated items (e.g., workout name once, sets nested inside, tap to expand) over flat lists where the parent label repeats per row — explicitly dislikes redundant repetition of the same key. Confidence: 0.85

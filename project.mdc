@@ -1,0 +1,44 @@
+---
+description: Core project rules for the "Log" fitness tracking app
+alwaysApply: true
+---
+
+# Project: Log
+
+A minimal, honest fitness-tracking app. Two repos: `log-app-mobile`
+(Expo/React Native) and `log-app-backend` (Node/Express). Full docs live
+in `/docs` at the project root — read `AGENTS.md` first if you have not
+already in this session.
+
+## Stack (do not deviate without explicit instruction)
+
+- Mobile: Expo + Expo Router + TypeScript, Clerk for auth
+- Backend: Node.js + Express + TypeScript, Drizzle ORM + `pg`, Neon
+  Postgres, Clerk backend SDK, Anthropic API (server-side only)
+- Hosting: self-managed VPS, Nginx + PM2
+
+## Hard rules
+
+1. The mobile app never queries the database or calls Anthropic directly —
+   everything goes through the Express API. No exceptions.
+2. Every database query must scope to the authenticated user's ID derived
+   from the verified Clerk token (`req.userId`) — never a client-supplied
+   ID. See `docs/security.md`.
+3. Do not invent database tables, API routes, or screens not documented in
+   `/docs`. If something seems missing, stop and flag it rather than
+   guessing.
+4. Follow `docs/design-system.md` tokens exactly — no ad-hoc colors,
+   fonts, or spacing values.
+5. The weekly verdict is computed by a deterministic rule function
+   (`services/verdictEngine.ts`), never by an LLM call.
+6. No offline sync engine, no push notifications, no social features — see
+   `docs/product.md` out-of-scope list. Do not add these even if they seem
+   like natural extensions.
+7. Work through `tasks/phase-01.md` → `phase-02.md` → `phase-03.md` in
+   order. Do not begin a later phase's tasks before the current phase's
+   acceptance criteria all pass.
+
+## When in doubt
+
+Check the relevant doc in `/docs` before making an architectural decision.
+If the docs don't cover it, ask rather than assume.
