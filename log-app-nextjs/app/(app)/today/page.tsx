@@ -2,11 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useTodayLog } from '@/src/hooks/useTodayLog';
 import { api, ApiError } from '@/src/api/client';
 import type { DailyDefaults, DailyField, VerdictResult } from '@/src/api/types';
 import { LogField } from '@/src/components/LogField';
+
+function fmtLong(d: string): string {
+  return new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+function shift(d: string, delta: number): string {
+  const dt = new Date(`${d}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + delta);
+  return dt.toISOString().slice(0, 10);
+}
 
 const VERDICT_SHORT: Record<string, string> = {
   hold: 'Hold steady',
@@ -17,7 +31,9 @@ const VERDICT_SHORT: Record<string, string> = {
 const FIELDS: DailyField[] = ['weight_kg', 'calories', 'protein_g', 'sleep_hours'];
 
 export default function TodayPage() {
-  const { today, todayLog, yesterday, loading, error, retry, save, retrySave } = useTodayLog();
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [activeDate, setActiveDate] = useState(todayStr);
+  const { todayLog, yesterday, loading, error, retry, save, retrySave } = useTodayLog(activeDate);
   const [verdict, setVerdict] = useState<VerdictResult | null>(null);
   const [verdictError, setVerdictError] = useState(false);
   const [defaults, setDefaults] = useState<DailyDefaults | null>(null);
@@ -74,8 +90,41 @@ export default function TodayPage() {
   return (
     <div>
       <div className="flex items-baseline justify-between">
-        <h1 className="font-display text-[28px] font-semibold tracking-[0.5px] text-chalk">Today</h1>
-        <span className="font-mono text-xs text-chalkDim">{today}</span>
+        <h1 className="font-display text-[28px] font-semibold tracking-[0.5px] text-chalk">
+          {activeDate === todayStr ? 'Today' : fmtLong(activeDate)}
+        </h1>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between rounded-card border border-hairline bg-surface px-2 py-2">
+        <button
+          type="button"
+          onClick={() => setActiveDate((d) => shift(d, -1))}
+          className="p-2 text-chalkDim hover:text-chalk"
+          aria-label="Previous day"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <div className="text-center">
+          <div className="font-mono text-sm text-chalk">{fmtLong(activeDate)}</div>
+          {activeDate !== todayStr && (
+            <button
+              type="button"
+              onClick={() => setActiveDate(todayStr)}
+              className="font-mono text-[10px] text-rustSoft"
+            >
+              jump to today
+            </button>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setActiveDate((d) => shift(d, 1))}
+          disabled={activeDate >= todayStr}
+          className="p-2 text-chalkDim hover:text-chalk disabled:opacity-30"
+          aria-label="Next day"
+        >
+          <ChevronRight size={18} />
+        </button>
       </div>
 
       {loading && <p className="mt-4 font-mono text-sm text-steel">Loading…</p>}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { api, ApiError } from '@/src/api/client';
 import { usePlanToday } from '@/src/hooks/usePlanToday';
 import type { LiftLog } from '@/src/api/types';
@@ -191,6 +192,17 @@ export default function LiftPage() {
     }
   }
 
+  async function deleteLiftSet(id: string) {
+    try {
+      await api.deleteLiftLog(id);
+      setTodayLifts((prev) => prev.filter((l) => l.id !== id));
+      await refreshToday();
+      reload();
+    } catch {
+      window.alert('Could not delete that set.');
+    }
+  }
+
   return (
     <div>
       <h1 className="font-display text-[28px] font-semibold tracking-[0.5px] text-chalk">Lift</h1>
@@ -272,8 +284,18 @@ export default function LiftPage() {
                   {completed.length > 0 && (
                     <div className="mt-2 space-y-1">
                       {completed.map((s, i) => (
-                        <div key={s.id} className="font-mono text-xs text-chalkDim">
-                          Set {i + 1}: {s.weight_kg}kg × {s.reps}
+                        <div key={s.id} className="flex items-center justify-between font-mono text-xs text-chalkDim">
+                          <span>
+                            Set {i + 1}: {s.weight_kg}kg × {s.reps}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => deleteLiftSet(s.id)}
+                            title="Delete set"
+                            className="text-steel hover:text-rustSoft"
+                          >
+                            <Trash2 size={12} />
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -450,14 +472,24 @@ export default function LiftPage() {
                   </button>
                   {isOpen && (
                     <div className="mt-2 space-y-1 border-t border-hairline pt-2">
-                      {group.sets.map((s, i) => (
-                        <div key={s.id} className="flex items-center justify-between font-mono text-xs">
-                          <span className="text-chalkDim">Set {i + 1}</span>
-                          <span className="text-chalk">
-                            {s.weight_kg}kg × {s.reps}
-                          </span>
-                        </div>
-                      ))}
+                       {group.sets.map((s, i) => (
+                         <div key={s.id} className="flex items-center justify-between font-mono text-xs">
+                           <span>
+                             <span className="text-chalkDim">Set {i + 1}</span>{' '}
+                             <span className="text-chalk">
+                               {s.weight_kg}kg × {s.reps}
+                             </span>
+                           </span>
+                           <button
+                             type="button"
+                             onClick={() => deleteLiftSet(s.id)}
+                             title="Delete set"
+                             className="text-steel hover:text-rustSoft"
+                           >
+                             <Trash2 size={12} />
+                           </button>
+                         </div>
+                       ))}
                     </div>
                   )}
                 </div>
