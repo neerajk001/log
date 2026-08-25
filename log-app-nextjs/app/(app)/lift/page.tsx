@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/src/api/client';
 import { usePlanToday } from '@/src/hooks/usePlanToday';
-import type { LiftLog, PlanTodayExercise } from '@/src/api/types';
+import type { LiftLog } from '@/src/api/types';
 
 type SetEntry = { weight: string; reps: string };
 
@@ -20,8 +20,13 @@ function todayStr(): string {
 }
 
 export default function LiftPage() {
-  const { planToday, loading: planLoading, error: planError, reload } = usePlanToday();
-  const day = planToday?.day ?? null;
+  const { planId, planName, day, allDays, loading: planLoading, error: planError, reload } = usePlanToday();
+
+  const [selectedDayId, setSelectedDayId] = useState<string | null>(null);
+
+  const selectedDay = selectedDayId ? allDays.find((d) => d.id === selectedDayId) : day;
+  const exercises = (selectedDay?.exercises ?? []) as { name: string; sets: number; reps: string }[];
+  const selectedDayName = selectedDay?.day_name ?? null;
 
   const [openEx, setOpenEx] = useState<Record<string, boolean>>({});
   const [setsByEx, setSetsByEx] = useState<Record<string, SetEntry[]>>({});
@@ -164,10 +169,40 @@ export default function LiftPage() {
       {day && (
         <div className="mt-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
-            {planToday?.plan_name?.toUpperCase() ?? "Today's plan"} — {day.day_name}
+            {planName?.toUpperCase() ?? "Today's plan"}
+            {selectedDayName ? ` — ${selectedDayName}` : ''}
           </div>
+          {allDays.length > 1 && (
+            <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setSelectedDayId(null)}
+                className={`whitespace-nowrap rounded-full border px-3 py-1.5 font-mono text-xs ${
+                  selectedDayId === null
+                    ? 'border-rust bg-rust text-white'
+                    : 'border-hairline text-chalkDim'
+                }`}
+              >
+                Today
+              </button>
+              {allDays.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setSelectedDayId(d.id)}
+                  className={`whitespace-nowrap rounded-full border px-3 py-1.5 font-mono text-xs ${
+                    selectedDayId === d.id
+                      ? 'border-rust bg-rust text-white'
+                      : 'border-hairline text-chalkDim'
+                  }`}
+                >
+                  {d.day_name}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="mt-2 space-y-3">
-            {day.exercises.map((ex: PlanTodayExercise) => {
+            {exercises.map((ex) => {
               const isOpen = !!openEx[ex.name];
               const completed = todayLifts.filter((l) => l.exercise_name === ex.name);
               const sets = getSets(ex.name, ex.sets);
@@ -249,7 +284,7 @@ export default function LiftPage() {
                         <button
                           type="button"
                           disabled={st?.saving}
-                          onClick={() => saveSets(ex.name, day.id, ex.sets)}
+                          onClick={() => saveSets(ex.name, selectedDay?.id ?? null, ex.sets)}
                           className="rounded-card bg-rust px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
                         >
                           {st?.saving ? 'Saving…' : 'Save all'}

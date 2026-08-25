@@ -2,10 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '@/src/api/client';
-import type { PlanToday } from '@/src/api/types';
+import type { PlanDay, PlanToday } from '@/src/api/types';
 
 export function usePlanToday() {
-  const [planToday, setPlanToday] = useState<PlanToday | null>(null);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [planName, setPlanName] = useState<string | null>(null);
+  const [day, setDay] = useState<PlanToday['day']>(null);
+  const [allDays, setAllDays] = useState<PlanDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,11 +19,17 @@ export function usePlanToday() {
       const plans = await api.listPlans();
       const active = plans.find((p) => p.is_active) ?? null;
       if (!active) {
-        setPlanToday(null);
+        setPlanId(null);
+        setPlanName(null);
+        setDay(null);
+        setAllDays([]);
         return;
       }
+      setPlanId(active.id);
+      setPlanName(active.name);
+      setAllDays(active.days);
       const today = await api.getPlanToday(active.id);
-      setPlanToday(today);
+      setDay(today.day);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Failed to load plan');
     } finally {
@@ -32,5 +41,5 @@ export function usePlanToday() {
     load();
   }, [load]);
 
-  return { planToday, loading, error, reload: load };
+  return { planId, planName, day, allDays, loading, error, reload: load };
 }
