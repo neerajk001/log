@@ -292,7 +292,7 @@ export default function LiftPage() {
                             type="button"
                             onClick={() => deleteLiftSet(s.id)}
                             title="Delete set"
-                            className="text-steel hover:text-rustSoft"
+                            className="p-1 text-steel hover:text-rustSoft"
                           >
                             <Trash2 size={12} />
                           </button>

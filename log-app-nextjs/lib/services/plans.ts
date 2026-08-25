@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db/client';
+import { ApiError } from '@/lib/error';
 import { resolvePlanDay } from '@/lib/services/planRotation';
 
 export type PlanDayExercise = { name: string; sets: number; reps: string };
@@ -44,6 +45,31 @@ export async function listPlans(userId: string) {
     where: { userId },
     include: { planDays: true },
     orderBy: { createdAt: 'desc' },
+  });
+}
+
+export async function updatePlan(userId: string, id: string, input: CreatePlanInput) {
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.workoutPlan.findFirst({ where: { id, userId } });
+    if (!existing) throw new ApiError('NOT_FOUND', 'Plan not found', 404);
+
+    await tx.planDay.deleteMany({ where: { planId: id } });
+
+    return tx.workoutPlan.update({
+      where: { id },
+      data: {
+        name: input.name,
+        source: input.source,
+        planDays: {
+          create: input.days.map((d, i) => ({
+            dayName: d.day_name,
+            dayOrder: i + 1,
+            exercises: d.exercises as unknown as object,
+          })),
+        },
+      },
+      include: { planDays: true },
+    });
   });
 }
 

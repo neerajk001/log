@@ -116,6 +116,20 @@ export default function HistoryPage() {
     }
   }
 
+  async function handleDeleteLiftDay(date: string) {
+    const group = liftGroups.find((g) => g.date === date);
+    if (!group) return;
+    const ids = group.exercises.flatMap((ex) => ex.sets.map((s) => s.id));
+    if (ids.length === 0) return;
+    if (!window.confirm('Delete all lifts for this day?')) return;
+    try {
+      await Promise.all(ids.map((id) => api.deleteLiftLog(id)));
+      setLifts((prev) => prev.filter((l) => l.date !== date));
+    } catch {
+      window.alert('Could not delete those lifts.');
+    }
+  }
+
   return (
     <div>
       <div className="flex items-baseline justify-between">
@@ -250,35 +264,44 @@ export default function HistoryPage() {
                           )}
                         </div>
                       </button>
-                      {open && (
-                        <div className="border-t border-hairline px-4 pb-4 pt-3">
-                          <div className="space-y-3">
-                            {g.exercises.map((ex) => (
-                              <div key={ex.name}>
-                                <div className="font-body text-sm text-chalk">{ex.name}</div>
-                                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                                  {ex.sets.map((s) => (
-                                    <span
-                                      key={s.id}
-                                      className="flex items-center gap-1 rounded-full border border-hairline bg-graphite px-2 py-0.5 font-mono text-xs text-chalk"
-                                    >
-                                      {s.weight_kg} × {s.reps}
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteLift(s.id)}
-                                        title="Delete set"
-                                        className="text-steel hover:text-rustSoft"
+                        {open && (
+                          <div className="border-t border-hairline px-4 pb-4 pt-3">
+                            <div className="space-y-3">
+                              {g.exercises.map((ex) => (
+                                <div key={ex.name}>
+                                  <div className="font-body text-sm text-chalk">{ex.name}</div>
+                                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {ex.sets.map((s) => (
+                                      <span
+                                        key={s.id}
+                                        className="flex items-center gap-1 rounded-full border border-hairline bg-graphite px-2 py-0.5 font-mono text-xs text-chalk"
                                       >
-                                        ×
-                                      </button>
-                                    </span>
-                                  ))}
+                                        {s.weight_kg} × {s.reps}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteLift(s.id)}
+                                          title="Delete set"
+                                          className="text-steel hover:text-rustSoft"
+                                        >
+                                          <Trash2 size={12} />
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLiftDay(g.date)}
+                                className="flex items-center gap-1 font-mono text-[11px] text-steel hover:text-rustSoft"
+                              >
+                                <Trash2 size={13} /> delete
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
                     </div>
                   );
                 })}

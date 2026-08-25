@@ -38,6 +38,7 @@ function inferMuscleGroups(dayName: string): string[] {
 
 export default function PlanPage() {
   const [view, setView] = useState<'library' | 'edit'>('library');
+  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
 
   // library
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -78,6 +79,7 @@ export default function PlanPage() {
   const activePlan = plans.find((p) => p.is_active) ?? plans[0] ?? null;
 
   function startEdit() {
+    setEditingPlanId(null);
     setText('');
     setFile(null);
     setDraft(null);
@@ -86,6 +88,25 @@ export default function PlanPage() {
     setError(null);
     setManualDays([{ ...EMPTY_DAY }]);
     setMode('ai');
+    setView('edit');
+  }
+
+  function startEditExisting() {
+    if (!activePlan) return;
+    setEditingPlanId(activePlan.id);
+    setText('');
+    setFile(null);
+    setDraft(null);
+    setPlanName(activePlan.name);
+    setParseError(null);
+    setError(null);
+    setManualDays(
+      activePlan.days.map((d) => ({
+        day_name: d.day_name,
+        exercises: d.exercises.map((e) => ({ name: e.name, sets: e.sets, reps: e.reps })),
+      })),
+    );
+    setMode('manual');
     setView('edit');
   }
 
@@ -112,7 +133,16 @@ export default function PlanPage() {
         source === 'ai_parsed'
           ? (draft ?? []).map((d) => ({ day_name: d.day_name, exercises: d.exercises }))
           : manualDays;
-      await api.createPlan({ name: planName || 'My Plan', source, days });
+      if (editingPlanId) {
+        await api.updatePlan(editingPlanId, {
+          name: planName || 'My Plan',
+          source: (activePlan?.source ?? 'manual') as 'manual' | 'ai_parsed',
+          days,
+        });
+      } else {
+        await api.createPlan({ name: planName || 'My Plan', source, days });
+      }
+      setEditingPlanId(null);
       setView('library');
       await loadPlans();
     } catch (e) {
@@ -218,10 +248,19 @@ export default function PlanPage() {
           </div>
 
           <div className="mt-5 space-y-2">
+            {activePlan && (
+              <button
+                type="button"
+                onClick={startEditExisting}
+                className="w-full rounded-card bg-rust py-3 font-mono text-sm font-medium text-white"
+              >
+                Edit plan
+              </button>
+            )}
             <button
               type="button"
               onClick={startEdit}
-              className="w-full rounded-card bg-rust py-3 font-mono text-sm font-medium text-white"
+              className="w-full rounded-card border border-hairline py-3 font-mono text-sm text-chalk"
             >
               {activePlan ? 'Replace plan' : 'Add a plan'}
             </button>
@@ -469,7 +508,10 @@ export default function PlanPage() {
 
           <button
             type="button"
-            onClick={() => setView('library')}
+            onClick={() => {
+              setEditingPlanId(null);
+              setView('library');
+            }}
             className="mx-auto mt-3 block font-mono text-xs text-chalkDim underline"
           >
             Cancel

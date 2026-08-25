@@ -62,6 +62,10 @@ export const api = {
   listPlans: () => request<Plan[]>('/plans', { method: 'GET' }),
   createPlan: (input: { name: string; source: 'manual' | 'ai_parsed'; days: { day_name: string; exercises: PlanExercise[] }[] }) =>
     request<Plan>('/plans', { method: 'POST', body: JSON.stringify(input) }),
+  updatePlan: (
+    id: string,
+    input: { name: string; source: 'manual' | 'ai_parsed'; days: { day_name: string; exercises: PlanExercise[] }[] },
+  ) => request<Plan>(`/plans/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   parsePlan: (payload: { text?: string; file?: File }) => {
     if (payload.file) {
       const fd = new FormData();
