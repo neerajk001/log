@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CalendarDays, Dumbbell, TrendingUp, Award, ClipboardList } from 'lucide-react';
+import { CalendarDays, Dumbbell, TrendingUp, Award, ClipboardList, History } from 'lucide-react';
 
 const TABS = [
   { href: '/today', label: 'Today', Icon: CalendarDays },
   { href: '/lift', label: 'Lift', Icon: Dumbbell },
   { href: '/trends', label: 'Trends', Icon: TrendingUp },
   { href: '/verdict', label: 'Verdict', Icon: Award },
+  { href: '/history', label: 'History', Icon: History },
   { href: '/plan', label: 'Plan', Icon: ClipboardList },
 ];
 

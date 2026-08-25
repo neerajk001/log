@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireUserId, toErrorResponse } from '@/lib/error';
-import { createLiftLog, getLiftHistory } from '@/lib/services/liftLogs';
+import { createLiftLog, getLiftHistory, getLiftHistoryRange } from '@/lib/services/liftLogs';
 import { serializeLiftLog } from '@/lib/serialize';
 import { liftLogSchema } from '@/lib/validation/schemas';
 
@@ -32,16 +32,36 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const exercise = searchParams.get('exercise');
-    const weeks = Number(searchParams.get('weeks') ?? '4');
+    const from = searchParams.get('from');
+    const to = searchParams.get('to');
+    const days = searchParams.get('days');
 
-    if (!exercise) {
+    if (exercise) {
+      const weeks = Number(searchParams.get('weeks') ?? '4');
+      const logs = await getLiftHistory(userId, exercise, weeks);
+      return NextResponse.json(logs.map(serializeLiftLog));
+    }
+
+    let fromDate = from ?? undefined;
+    let toDate = to ?? undefined;
+    if (!fromDate && days) {
+      const d = new Date();
+      d.setDate(d.getDate() - Number(days));
+      fromDate = d.toISOString().slice(0, 10);
+    }
+    if (!fromDate && !toDate) {
       return NextResponse.json(
-        { error: { code: 'VALIDATION_ERROR', message: 'exercise query param is required' } },
+        {
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Provide exercise, or a date range via from/to/days',
+          },
+        },
         { status: 400 },
       );
     }
 
-    const logs = await getLiftHistory(userId, exercise, weeks);
+    const logs = await getLiftHistoryRange(userId, fromDate, toDate);
     return NextResponse.json(logs.map(serializeLiftLog));
   } catch (err) {
     return toErrorResponse(err);

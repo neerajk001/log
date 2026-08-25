@@ -41,3 +41,21 @@ export async function getLiftHistory(
     orderBy: { date: 'desc' },
   });
 }
+
+/** All of a user's lift logs within an optional inclusive date range (any exercise). */
+export async function getLiftHistoryRange(
+  userId: string,
+  from?: string,
+  to?: string,
+) {
+  return prisma.liftLog.findMany({
+    where: {
+      userId,
+      date: {
+        gte: from ? parseDate(from) : undefined,
+        lte: to ? parseDate(to) : undefined,
+      },
+    },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+  });
+}

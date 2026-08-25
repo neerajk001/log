@@ -1,206 +1,379 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/src/api/client';
-import { useLiftLog } from '@/src/hooks/useLiftLog';
 import { usePlanToday } from '@/src/hooks/usePlanToday';
-import type { PlanTodayExercise } from '@/src/api/types';
+import type { LiftLog, PlanTodayExercise } from '@/src/api/types';
 
+type SetEntry = { weight: string; reps: string };
+
+function makeSets(n: number): SetEntry[] {
+  return Array.from({ length: Math.max(1, n) }, () => ({ weight: '', reps: '' }));
+}
+function validSet(s: SetEntry): boolean {
+  const w = parseFloat(s.weight);
+  const r = parseInt(s.reps, 10);
+  return !Number.isNaN(w) && w > 0 && !Number.isNaN(r) && r > 0;
+}
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function PlanExerciseCard({
-  ex,
-  planDayId,
-  onLogged,
-}: {
-  ex: PlanTodayExercise;
-  planDayId: string;
-  onLogged: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const w = parseFloat(weight);
-    const r = parseInt(reps, 10);
-    if (Number.isNaN(w) || Number.isNaN(r)) return;
-    setSaving(true);
-    setErr(null);
-    try {
-      await api.createLiftLog({
-        date: todayStr(),
-        exercise_name: ex.name,
-        weight_kg: w,
-        reps: r,
-        plan_day_id: planDayId,
-      });
-      setOpen(false);
-      setWeight('');
-      setReps('');
-      onLogged();
-    } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : 'Failed to log');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div
-      className={`rounded-card border p-4 ${
-        ex.logged ? 'border-moss/40 bg-moss/5' : 'border-hairline bg-surface'
-      }`}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="font-body text-chalk">{ex.name}</div>
-          <div className="font-mono text-xs text-chalkDim">
-            {ex.sets} × {ex.reps}
-          </div>
-        </div>
-        <div className="text-right">
-          {ex.logged ? (
-            <span className="font-mono text-xs text-moss">
-              done{ex.last_log ? ` · ${ex.last_log.weight_kg}kg×${ex.last_log.reps}` : ''}
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              className="rounded-card bg-rust px-3 py-1.5 font-mono text-xs font-medium text-white"
-            >
-              Log
-            </button>
-          )}
-        </div>
-      </div>
-
-      {open && (
-        <form onSubmit={submit} className="mt-3 grid grid-cols-2 gap-3">
-          <input
-            inputMode="decimal"
-            placeholder="kg"
-            className="rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
-            value={weight}
-            onChange={(e) => setWeight(e.target.value)}
-          />
-          <input
-            inputMode="numeric"
-            placeholder="reps"
-            className="rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
-            value={reps}
-            onChange={(e) => setReps(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={saving}
-            className="col-span-2 rounded-card bg-rust py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
-          >
-            {saving ? 'Saving…' : 'Save Set'}
-          </button>
-          {err && <p className="col-span-2 font-mono text-xs text-rustSoft">{err}</p>}
-        </form>
-      )}
-    </div>
-  );
-}
-
 export default function LiftPage() {
-  const { planToday, loading, error: planError, reload } = usePlanToday();
-  const { submit, submitting, error } = useLiftLog();
-  const [exercise, setExercise] = useState('');
-  const [weight, setWeight] = useState('');
-  const [reps, setReps] = useState('');
-  const [done, setDone] = useState<string | null>(null);
+  const { planToday, loading: planLoading, error: planError, reload } = usePlanToday();
+  const day = planToday?.day ?? null;
 
-  async function handleManual(e: React.FormEvent) {
-    e.preventDefault();
-    const w = parseFloat(weight);
-    const r = parseInt(reps, 10);
-    if (!exercise.trim() || Number.isNaN(w) || Number.isNaN(r)) return;
-    const saved = await submit({ exercise_name: exercise.trim(), weight_kg: w, reps: r });
-    if (saved) {
-      setDone(`${saved.exercise_name} ${saved.weight_kg}kg × ${saved.reps}`);
-      setExercise('');
-      setWeight('');
-      setReps('');
+  const [openEx, setOpenEx] = useState<Record<string, boolean>>({});
+  const [setsByEx, setSetsByEx] = useState<Record<string, SetEntry[]>>({});
+  const [saveState, setSaveState] = useState<Record<string, { saving: boolean; err: string | null }>>({});
+
+  const [manualName, setManualName] = useState('');
+  const [manualSets, setManualSets] = useState<SetEntry[]>([{ weight: '', reps: '' }]);
+  const [manualSaving, setManualSaving] = useState(false);
+  const [manualErr, setManualErr] = useState<string | null>(null);
+
+  const [todayLifts, setTodayLifts] = useState<LiftLog[]>([]);
+  const [todayLoading, setTodayLoading] = useState(true);
+  const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({});
+
+  async function refreshToday() {
+    setTodayLoading(true);
+    try {
+      const t = todayStr();
+      setTodayLifts(await api.getLiftLogsRange(t, t));
+    } catch {
+      /* ignore */
+    } finally {
+      setTodayLoading(false);
+    }
+  }
+  useEffect(() => {
+    refreshToday();
+  }, []);
+
+  const grouped = useMemo(() => {
+    const map: Record<string, LiftLog[]> = {};
+    for (const l of todayLifts) (map[l.exercise_name] ??= []).push(l);
+    const out: { name: string; sets: LiftLog[] }[] = [];
+    const seen: Record<string, boolean> = {};
+    for (const l of todayLifts) {
+      if (seen[l.exercise_name]) continue;
+      seen[l.exercise_name] = true;
+      out.push({ name: l.exercise_name, sets: map[l.exercise_name] });
+    }
+    return out;
+  }, [todayLifts]);
+
+  function getSets(name: string, planned: number): SetEntry[] {
+    return setsByEx[name] ?? makeSets(planned);
+  }
+  function updateSet(name: string, i: number, patch: Partial<SetEntry>) {
+    setSetsByEx((p) => {
+      const cur = p[name] ?? [];
+      return { ...p, [name]: cur.map((s, j) => (j === i ? { ...s, ...patch } : s)) };
+    });
+  }
+  function addSet(name: string, planned: number) {
+    setSetsByEx((p) => {
+      const cur = p[name] ?? makeSets(planned);
+      const last = cur[cur.length - 1];
+      return { ...p, [name]: [...cur, { weight: last?.weight ?? '', reps: last?.reps ?? '' }] };
+    });
+  }
+  function removeSet(name: string, i: number) {
+    setSetsByEx((p) => {
+      const cur = p[name] ?? [];
+      if (cur.length <= 1) return p;
+      return { ...p, [name]: cur.filter((_, j) => j !== i) };
+    });
+  }
+  function toggleOpen(name: string, planned: number) {
+    setOpenEx((p) => ({ ...p, [name]: !p[name] }));
+    setSetsByEx((p) => (p[name] ? p : { ...p, [name]: makeSets(planned) }));
+  }
+
+  async function saveSets(name: string, planDayId: string | null, planned: number) {
+    const sets = setsByEx[name] ?? [];
+    const valid = sets.filter(validSet);
+    if (valid.length === 0) return;
+    setSaveState((p) => ({ ...p, [name]: { saving: true, err: null } }));
+    try {
+      await Promise.all(
+        valid.map((s) =>
+          api.createLiftLog({
+            date: todayStr(),
+            exercise_name: name,
+            weight_kg: parseFloat(s.weight),
+            reps: parseInt(s.reps, 10),
+            plan_day_id: planDayId,
+          }),
+        ),
+      );
+      setOpenEx((p) => ({ ...p, [name]: false }));
+      setSetsByEx((p) => {
+        const n = { ...p };
+        delete n[name];
+        return n;
+      });
+      await refreshToday();
+      reload();
+    } catch (e) {
+      setSaveState((p) => ({
+        ...p,
+        [name]: { saving: false, err: e instanceof ApiError ? e.message : 'Failed to save' },
+      }));
+    } finally {
+      setSaveState((p) => ({ ...p, [name]: { ...(p[name] ?? { err: null }), saving: false } }));
     }
   }
 
-  const day = planToday?.day ?? null;
+  async function saveManual() {
+    const valid = manualSets.filter(validSet);
+    if (!manualName.trim() || valid.length === 0) return;
+    setManualSaving(true);
+    setManualErr(null);
+    try {
+      await Promise.all(
+        valid.map((s) =>
+          api.createLiftLog({
+            date: todayStr(),
+            exercise_name: manualName.trim(),
+            weight_kg: parseFloat(s.weight),
+            reps: parseInt(s.reps, 10),
+          }),
+        ),
+      );
+      setManualName('');
+      setManualSets([{ weight: '', reps: '' }]);
+      await refreshToday();
+      reload();
+    } catch (e) {
+      setManualErr(e instanceof ApiError ? e.message : 'Failed to save');
+    } finally {
+      setManualSaving(false);
+    }
+  }
 
   return (
     <div>
       <h1 className="font-display text-[28px] font-semibold tracking-[0.5px] text-chalk">Lift</h1>
 
-      {loading && <p className="mt-4 font-mono text-sm text-steel">Loading plan…</p>}
+      {planLoading && <p className="mt-4 font-mono text-sm text-steel">Loading plan…</p>}
       {planError && <p className="mt-4 font-mono text-sm text-rustSoft">{planError}</p>}
 
       {day && (
         <div className="mt-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
-            Today · {day.day_name}
+            {planToday?.plan_name?.toUpperCase() ?? "Today's plan"} — {day.day_name}
           </div>
           <div className="mt-2 space-y-3">
-            {day.exercises.map((ex) => (
-              <PlanExerciseCard key={ex.name} ex={ex} planDayId={day.id} onLogged={reload} />
-            ))}
+            {day.exercises.map((ex: PlanTodayExercise) => {
+              const isOpen = !!openEx[ex.name];
+              const completed = todayLifts.filter((l) => l.exercise_name === ex.name);
+              const sets = getSets(ex.name, ex.sets);
+              const st = saveState[ex.name];
+              return (
+                <div key={ex.name} className="rounded-card border border-hairline bg-surface p-4">
+                  <button
+                    type="button"
+                    onClick={() => toggleOpen(ex.name, ex.sets)}
+                    className="flex w-full items-center justify-between gap-3 text-left"
+                  >
+                    <div>
+                      <div className="font-body text-chalk">{ex.name}</div>
+                      <div className="font-mono text-xs text-chalkDim">
+                        {ex.sets} sets × {ex.reps}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {completed.length > 0 && (
+                        <span className="font-mono text-xs text-moss">
+                          ✓ {completed.length}/{ex.sets}
+                        </span>
+                      )}
+                      <span className="font-mono text-sm font-medium text-rustSoft">
+                        {isOpen ? 'Cancel' : 'Log'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {completed.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {completed.map((s, i) => (
+                        <div key={s.id} className="font-mono text-xs text-chalkDim">
+                          Set {i + 1}: {s.weight_kg}kg × {s.reps}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2">
+                      {sets.map((set, i) => (
+                        <div key={i} className="flex items-center gap-2">
+                          <span className="w-12 font-mono text-xs text-chalkDim">Set {i + 1}</span>
+                          <input
+                            inputMode="decimal"
+                            placeholder="kg"
+                            className="w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
+                            value={set.weight}
+                            onChange={(e) => updateSet(ex.name, i, { weight: e.target.value })}
+                          />
+                          <input
+                            inputMode="numeric"
+                            placeholder="reps"
+                            className="w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
+                            value={set.reps}
+                            onChange={(e) => updateSet(ex.name, i, { reps: e.target.value })}
+                          />
+                          {sets.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeSet(ex.name, i)}
+                              className="px-2 font-mono text-lg text-steel"
+                              aria-label="Remove set"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between pt-1">
+                        <button
+                          type="button"
+                          onClick={() => addSet(ex.name, ex.sets)}
+                          className="font-mono text-sm font-medium text-rustSoft"
+                        >
+                          + Add set
+                        </button>
+                        <button
+                          type="button"
+                          disabled={st?.saving}
+                          onClick={() => saveSets(ex.name, day.id, ex.sets)}
+                          className="rounded-card bg-rust px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
+                        >
+                          {st?.saving ? 'Saving…' : 'Save all'}
+                        </button>
+                      </div>
+                      {st?.err && <p className="font-mono text-xs text-rustSoft">{st.err}</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
       <div className="mt-6">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
-          {day ? 'Not on your plan? Log manually' : 'Manual entry'}
+          {day ? 'Not on your plan? Log manually' : 'Log a lift'}
         </div>
-        <form onSubmit={handleManual} className="mt-2 space-y-3 rounded-card border border-hairline bg-surface p-4">
+        <div className="mt-2 space-y-3 rounded-card border border-hairline bg-surface p-4">
           <label className="block">
-            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">Exercise</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
+              Exercise
+            </span>
             <input
               className="mt-1 w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-body text-chalk outline-none focus:border-rust"
-              value={exercise}
-              onChange={(e) => setExercise(e.target.value)}
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
               placeholder="e.g. Barbell Bench Press"
             />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">Weight (kg)</span>
+          {manualSets.map((set, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-12 font-mono text-xs text-chalkDim">Set {i + 1}</span>
               <input
                 inputMode="decimal"
-                className="mt-1 w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
-                value={weight}
-                onChange={(e) => setWeight(e.target.value)}
-                placeholder="62.5"
+                placeholder="kg"
+                className="w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
+                value={set.weight}
+                onChange={(e) =>
+                  setManualSets((prev) => prev.map((s, j) => (j === i ? { ...s, weight: e.target.value } : s)))
+                }
               />
-            </label>
-            <label className="block">
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">Reps</span>
               <input
                 inputMode="numeric"
-                className="mt-1 w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
-                value={reps}
-                onChange={(e) => setReps(e.target.value)}
-                placeholder="5"
+                placeholder="reps"
+                className="w-full rounded-card border border-hairline bg-graphite px-3 py-2 font-mono text-chalk outline-none focus:border-rust"
+                value={set.reps}
+                onChange={(e) =>
+                  setManualSets((prev) => prev.map((s, j) => (j === i ? { ...s, reps: e.target.value } : s)))
+                }
               />
-            </label>
+              {manualSets.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setManualSets((prev) => (prev.length <= 1 ? prev : prev.filter((_, j) => j !== i)))
+                  }
+                  className="px-2 font-mono text-lg text-steel"
+                  aria-label="Remove set"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setManualSets((prev) => [...prev, { weight: '', reps: '' }])}
+              className="font-mono text-sm font-medium text-rustSoft"
+            >
+              + Add set
+            </button>
+            <button
+              type="button"
+              disabled={manualSaving}
+              onClick={saveManual}
+              className="rounded-card bg-rust px-4 py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
+            >
+              {manualSaving ? 'Saving…' : 'Save all'}
+            </button>
           </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-card bg-rust py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? 'Saving…' : 'Save Lift'}
-          </button>
-          {error && <p className="font-mono text-xs text-rustSoft">{error}</p>}
-          {done && <p className="font-mono text-xs text-moss">Saved · {done}</p>}
-        </form>
+          {manualErr && <p className="font-mono text-xs text-rustSoft">{manualErr}</p>}
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">Today's lifts</div>
+        {todayLoading ? (
+          <p className="mt-2 font-mono text-sm text-steel">Loading…</p>
+        ) : grouped.length === 0 ? (
+          <p className="mt-2 font-mono text-sm text-steel">No lifts logged today</p>
+        ) : (
+          <div className="mt-2 space-y-2">
+            {grouped.map((group) => {
+              const isOpen = !!openHistory[group.name];
+              return (
+                <div key={group.name} className="rounded-card border border-hairline bg-surface p-4">
+                  <button
+                    type="button"
+                    onClick={() => setOpenHistory((p) => ({ ...p, [group.name]: !p[group.name] }))}
+                    className="flex w-full items-center justify-between"
+                  >
+                    <span className="font-body text-chalk">{group.name}</span>
+                    <span className="font-mono text-sm text-rustSoft">{isOpen ? '−' : '+'}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="mt-2 space-y-1 border-t border-hairline pt-2">
+                      {group.sets.map((s, i) => (
+                        <div key={s.id} className="flex items-center justify-between font-mono text-xs">
+                          <span className="text-chalkDim">Set {i + 1}</span>
+                          <span className="text-chalk">
+                            {s.weight_kg}kg × {s.reps}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -49,6 +49,8 @@ export const api = {
   }) => request<LiftLog>('/logs/lift', { method: 'POST', body: JSON.stringify(input) }),
   getLiftHistory: (exercise: string, weeks = 4) =>
     request<LiftLog[]>(`/logs/lift?exercise=${encodeURIComponent(exercise)}&weeks=${weeks}`, { method: 'GET' }),
+  getLiftLogsRange: (from: string, to: string) =>
+    request<LiftLog[]>(`/logs/lift?from=${from}&to=${to}`, { method: 'GET' }),
 
   listPlans: () => request<Plan[]>('/plans', { method: 'GET' }),
   createPlan: (input: { name: string; source: 'manual' | 'ai_parsed'; days: { day_name: string; exercises: PlanExercise[] }[] }) =>
