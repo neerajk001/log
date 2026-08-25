@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Trash2 } from 'lucide-react';
 import { api, ApiError } from '@/src/api/client';
 import type { Plan, PlanDay, PlanExercise } from '@/src/api/types';
 
@@ -34,6 +35,52 @@ function inferMuscleGroups(dayName: string): string[] {
     }
   }
   return out;
+}
+
+type ExerciseRowProps = {
+  name: string;
+  sets: number;
+  reps: string;
+  onName: (v: string) => void;
+  onSets: (v: number) => void;
+  onReps: (v: string) => void;
+  onRemove: () => void;
+};
+
+function ExerciseRow({ name, sets, reps, onName, onSets, onReps, onRemove }: ExerciseRowProps) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        value={name}
+        onChange={(e) => onName(e.target.value)}
+        placeholder="Exercise"
+        className="min-w-0 flex-1 rounded-card border border-hairline bg-graphite px-2 py-1.5 font-body text-sm text-chalk outline-none focus:border-rust"
+      />
+      <div className="flex shrink-0 items-center gap-1">
+        <input
+          inputMode="numeric"
+          value={sets}
+          onChange={(e) => onSets(parseInt(e.target.value || '0', 10) || 0)}
+          className="w-11 rounded-card border border-hairline bg-graphite px-1 py-1.5 text-center font-mono text-sm text-chalk outline-none focus:border-rust"
+        />
+        <span className="font-mono text-sm text-chalkDim">×</span>
+        <input
+          value={reps}
+          onChange={(e) => onReps(e.target.value)}
+          placeholder="reps"
+          className="w-14 rounded-card border border-hairline bg-graphite px-2 py-1.5 text-center font-mono text-sm text-chalk outline-none focus:border-rust"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onRemove}
+        title="Remove exercise"
+        className="shrink-0 px-1 text-steel hover:text-rustSoft"
+      >
+        <Trash2 size={14} />
+      </button>
+    </div>
+  );
 }
 
 export default function PlanPage() {
@@ -78,16 +125,21 @@ export default function PlanPage() {
 
   const activePlan = plans.find((p) => p.is_active) ?? plans[0] ?? null;
 
-  function startEdit() {
+  function resetEditState() {
     setEditingPlanId(null);
     setText('');
     setFile(null);
     setDraft(null);
-    setPlanName(activePlan?.name ?? '');
+    setPlanName('');
     setParseError(null);
     setError(null);
     setManualDays([{ ...EMPTY_DAY }]);
     setMode('ai');
+  }
+
+  function startEdit() {
+    resetEditState();
+    setPlanName(activePlan?.name ?? '');
     setView('edit');
   }
 
@@ -97,9 +149,9 @@ export default function PlanPage() {
     setText('');
     setFile(null);
     setDraft(null);
-    setPlanName(activePlan.name);
     setParseError(null);
     setError(null);
+    setPlanName(activePlan.name);
     setManualDays(
       activePlan.days.map((d) => ({
         day_name: d.day_name,
@@ -123,6 +175,44 @@ export default function PlanPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function updateDraftDay(idx: number, patch: Partial<PlanDay>) {
+    setDraft((d) => (d ? d.map((day, i) => (i === idx ? { ...day, ...patch } : day)) : d));
+  }
+  function updateDraftExercise(dayIdx: number, exIdx: number, patch: Partial<PlanExercise>) {
+    setDraft((d) =>
+      d
+        ? d.map((day, i) =>
+            i === dayIdx
+              ? {
+                  ...day,
+                  exercises: day.exercises.map((ex, j) => (j === exIdx ? { ...ex, ...patch } : ex)),
+                }
+              : day,
+          )
+        : d,
+    );
+  }
+  function removeDraftExercise(dayIdx: number, exIdx: number) {
+    setDraft((d) =>
+      d
+        ? d.map((day, i) =>
+            i === dayIdx
+              ? { ...day, exercises: day.exercises.filter((_, j) => j !== exIdx) }
+              : day,
+          )
+        : d,
+    );
+  }
+  function addDraftExercise(dayIdx: number) {
+    setDraft((d) =>
+      d
+        ? d.map((day, i) =>
+            i === dayIdx ? { ...day, exercises: [...day.exercises, { name: '', sets: 1, reps: '' }] } : day,
+          )
+        : d,
+    );
   }
 
   async function handleConfirm(source: 'ai_parsed' | 'manual') {
@@ -150,24 +240,6 @@ export default function PlanPage() {
     } finally {
       setBusy(false);
     }
-  }
-
-  function updateDraftDay(idx: number, patch: Partial<PlanDay>) {
-    setDraft((d) => (d ? d.map((day, i) => (i === idx ? { ...day, ...patch } : day)) : d));
-  }
-  function updateDraftExercise(dayIdx: number, exIdx: number, patch: Partial<PlanExercise>) {
-    setDraft((d) =>
-      d
-        ? d.map((day, i) =>
-            i === dayIdx
-              ? {
-                  ...day,
-                  exercises: day.exercises.map((ex, j) => (j === exIdx ? { ...ex, ...patch } : ex)),
-                }
-              : day,
-          )
-        : d,
-    );
   }
 
   return (
@@ -211,17 +283,17 @@ export default function PlanPage() {
                         <button
                           type="button"
                           onClick={() => setOpenDayId(isOpen ? null : day.id)}
-                          className="flex w-full items-center justify-between p-4 text-left"
+                          className="flex w-full items-center justify-between gap-2 p-4 text-left"
                         >
-                          <div>
-                            <div className="font-body text-chalk">{day.day_name}</div>
-                            <div className="font-mono text-xs text-chalkDim">
-                              {groups.length > 0
-                                ? groups.join(' · ')
-                                : `${day.exercises.length} exercises`}
+                          <div className="min-w-0">
+                            <div className="truncate font-body text-chalk">{day.day_name}</div>
+                            <div className="truncate font-mono text-xs text-chalkDim">
+                              {groups.length > 0 ? groups.join(' · ') : `${day.exercises.length} exercises`}
                             </div>
                           </div>
-                          <span className="font-mono text-lg text-rustSoft">{isOpen ? '−' : '+'}</span>
+                          <span className="shrink-0 font-mono text-lg text-rustSoft">
+                            {isOpen ? '−' : '+'}
+                          </span>
                         </button>
                         {isOpen && (
                           <div className="space-y-1 border-t border-hairline px-4 py-3">
@@ -229,9 +301,11 @@ export default function PlanPage() {
                               <p className="font-mono text-xs text-steel">No exercises yet.</p>
                             ) : (
                               day.exercises.map((ex, i) => (
-                                <div key={i} className="flex items-center justify-between">
-                                  <span className="font-body text-sm text-chalk">{ex.name}</span>
-                                  <span className="font-mono text-sm text-chalkDim">
+                                <div key={i} className="flex items-center justify-between gap-2">
+                                  <span className="min-w-0 break-words font-body text-sm text-chalk">
+                                    {ex.name}
+                                  </span>
+                                  <span className="shrink-0 font-mono text-sm text-chalkDim">
                                     {ex.sets} × {ex.reps}
                                   </span>
                                 </div>
@@ -307,6 +381,7 @@ export default function PlanPage() {
             />
           </label>
 
+          {/* AI mode */}
           {mode === 'ai' && (
             <div className="mt-4 space-y-3">
               <textarea
@@ -352,35 +427,28 @@ export default function PlanPage() {
                         className="w-full bg-transparent font-display text-lg text-chalk outline-none"
                         value={day.day_name}
                         onChange={(e) => updateDraftDay(di, { day_name: e.target.value })}
+                        placeholder="Day name (e.g. Push)"
                       />
                       <div className="mt-2 space-y-2">
                         {day.exercises.map((ex, ei) => (
-                          <div key={ei} className="grid grid-cols-[1fr_56px_72px] gap-2">
-                            <input
-                              className="rounded-card border border-hairline bg-graphite px-2 py-1 font-body text-sm text-chalk outline-none"
-                              value={ex.name}
-                              onChange={(e) =>
-                                updateDraftExercise(di, ei, { name: e.target.value })
-                              }
-                            />
-                            <input
-                              inputMode="numeric"
-                              className="rounded-card border border-hairline bg-graphite px-2 py-1 font-mono text-sm text-chalk outline-none"
-                              value={ex.sets}
-                              onChange={(e) =>
-                                updateDraftExercise(di, ei, {
-                                  sets: parseInt(e.target.value || '0', 10) || 0,
-                                })
-                              }
-                            />
-                            <input
-                              className="rounded-card border border-hairline bg-graphite px-2 py-1 font-mono text-sm text-chalk outline-none"
-                              value={ex.reps}
-                              onChange={(e) => updateDraftExercise(di, ei, { reps: e.target.value })}
-                            />
-                          </div>
+                          <ExerciseRow
+                            key={ei}
+                            name={ex.name}
+                            sets={ex.sets}
+                            reps={ex.reps}
+                            onName={(v) => updateDraftExercise(di, ei, { name: v })}
+                            onSets={(v) => updateDraftExercise(di, ei, { sets: v })}
+                            onReps={(v) => updateDraftExercise(di, ei, { reps: v })}
+                            onRemove={() => removeDraftExercise(di, ei)}
+                          />
                         ))}
                       </div>
+                      <button
+                        onClick={() => addDraftExercise(di)}
+                        className="mt-2 font-mono text-xs text-rustSoft underline"
+                      >
+                        + exercise
+                      </button>
                     </div>
                   ))}
                   <button
@@ -388,13 +456,14 @@ export default function PlanPage() {
                     disabled={busy}
                     className="w-full rounded-card bg-rust py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
                   >
-                    Confirm &amp; Save Plan
+                    {editingPlanId ? 'Save changes' : 'Confirm & Save Plan'}
                   </button>
                 </div>
               )}
             </div>
           )}
 
+          {/* Manual mode */}
           {mode === 'manual' && (
             <div className="mt-4 space-y-3">
               {manualDays.map((day, di) => (
@@ -411,67 +480,63 @@ export default function PlanPage() {
                   />
                   <div className="mt-2 space-y-2">
                     {day.exercises.map((ex, ei) => (
-                      <div key={ei} className="grid grid-cols-[1fr_56px_72px] gap-2">
-                        <input
-                          className="rounded-card border border-hairline bg-graphite px-2 py-1 font-body text-sm text-chalk outline-none"
-                          value={ex.name}
-                          onChange={(e) =>
-                            setManualDays((d) =>
-                              d.map((x, i) =>
-                                i === di
-                                  ? {
-                                      ...x,
-                                      exercises: x.exercises.map((y, j) =>
-                                        j === ei ? { ...y, name: e.target.value } : y,
-                                      ),
-                                    }
-                                  : x,
-                              ),
-                            )
-                          }
-                          placeholder="Exercise"
-                        />
-                        <input
-                          inputMode="numeric"
-                          className="rounded-card border border-hairline bg-graphite px-2 py-1 font-mono text-sm text-chalk outline-none"
-                          value={ex.sets}
-                          onChange={(e) =>
-                            setManualDays((d) =>
-                              d.map((x, i) =>
-                                i === di
-                                  ? {
-                                      ...x,
-                                      exercises: x.exercises.map((y, j) =>
-                                        j === ei
-                                          ? { ...y, sets: parseInt(e.target.value || '0', 10) || 0 }
-                                          : y,
-                                      ),
-                                    }
-                                  : x,
-                              ),
-                            )
-                          }
-                        />
-                        <input
-                          className="rounded-card border border-hairline bg-graphite px-2 py-1 font-mono text-sm text-chalk outline-none"
-                          value={ex.reps}
-                          onChange={(e) =>
-                            setManualDays((d) =>
-                              d.map((x, i) =>
-                                i === di
-                                  ? {
-                                      ...x,
-                                      exercises: x.exercises.map((y, j) =>
-                                        j === ei ? { ...y, reps: e.target.value } : y,
-                                      ),
-                                    }
-                                  : x,
-                              ),
-                            )
-                          }
-                          placeholder="reps"
-                        />
-                      </div>
+                      <ExerciseRow
+                        key={ei}
+                        name={ex.name}
+                        sets={ex.sets}
+                        reps={ex.reps}
+                        onName={(v) =>
+                          setManualDays((d) =>
+                            d.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    exercises: x.exercises.map((y, j) =>
+                                      j === ei ? { ...y, name: v } : y,
+                                    ),
+                                  }
+                                : x,
+                            ),
+                          )
+                        }
+                        onSets={(v) =>
+                          setManualDays((d) =>
+                            d.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    exercises: x.exercises.map((y, j) =>
+                                      j === ei ? { ...y, sets: v } : y,
+                                    ),
+                                  }
+                                : x,
+                            ),
+                          )
+                        }
+                        onReps={(v) =>
+                          setManualDays((d) =>
+                            d.map((x, i) =>
+                              i === di
+                                ? {
+                                    ...x,
+                                    exercises: x.exercises.map((y, j) =>
+                                      j === ei ? { ...y, reps: v } : y,
+                                    ),
+                                  }
+                                : x,
+                            ),
+                          )
+                        }
+                        onRemove={() =>
+                          setManualDays((d) =>
+                            d.map((x, i) =>
+                              i === di
+                                ? { ...x, exercises: x.exercises.filter((_, j) => j !== ei) }
+                                : x,
+                            ),
+                          )
+                        }
+                      />
                     ))}
                   </div>
                   <button
@@ -499,7 +564,7 @@ export default function PlanPage() {
                 disabled={busy}
                 className="w-full rounded-card bg-rust py-2 font-mono text-sm font-medium text-white disabled:opacity-50"
               >
-                Save Plan
+                {editingPlanId ? 'Save changes' : 'Save Plan'}
               </button>
             </div>
           )}
