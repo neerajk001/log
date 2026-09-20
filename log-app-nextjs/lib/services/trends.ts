@@ -1,5 +1,11 @@
 import { prisma } from '@/lib/db/client';
-import { evaluateVerdict, type StrengthTrend, type VerdictInput } from '@/lib/services/verdictEngine';
+import {
+  evaluateVerdict,
+  hasEnoughWeightData,
+  MIN_DAYS_FOR_VERDICT,
+  type StrengthTrend,
+  type VerdictInput,
+} from '@/lib/services/verdictEngine';
 
 export interface TrendWeightPoint {
   week_start: string;
@@ -111,7 +117,7 @@ export async function computeTrends(userId: string): Promise<TrendsResult> {
   return { weight, lifts, adherence_pct };
 }
 
-async function computeVerdictInput(userId: string): Promise<VerdictInput> {
+async function computeVerdictInput(userId: string): Promise<VerdictInput & { weightPointCount: number }> {
   const today = new Date();
   const ws = weekStart(today);
   const from = new Date(ws);
@@ -191,14 +197,33 @@ async function computeVerdictInput(userId: string): Promise<VerdictInput> {
   const thisWeekDaily = dailyLogs.filter((d) => new Date(d.date.getTime()) >= ws);
   const met = target ? thisWeekDaily.filter((d) => d.proteinG != null && d.proteinG >= target).length : 0;
   const adherencePct = Math.round((met / 7) * 100);
+  const weightPointCount = thisWeekDaily.filter((d) => d.weightKg != null).length;
 
-  return { weightTrendKgPerWeek, strengthTrend, strengthDownWeeks, stalledWeeks, adherencePct };
+  return {
+    weightTrendKgPerWeek,
+    strengthTrend,
+    strengthDownWeeks,
+    stalledWeeks,
+    adherencePct,
+    weightPointCount,
+  };
 }
 
 export async function computeAndStoreVerdict(userId: string) {
   const input = await computeVerdictInput(userId);
-  const result = evaluateVerdict(input);
   const weekStartKey = key(weekStart(new Date()));
+
+  const result = hasEnoughWeightData(input.weightPointCount)
+    ? evaluateVerdict(input)
+    : {
+        verdict: 'hold' as const,
+        weightTrendKgPerWeek: null,
+        strengthTrend: null,
+        adherencePct: input.adherencePct,
+        reasoning: [
+          `Need at least ${MIN_DAYS_FOR_VERDICT} days of weight data to compute a verdict.`,
+        ],
+      };
 
   await prisma.weeklyVerdict.upsert({
     where: { userId_weekStartDate: { userId, weekStartDate: new Date(`${weekStartKey}T00:00:00.000Z`) } },

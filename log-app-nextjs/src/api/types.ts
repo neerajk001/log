@@ -116,8 +116,8 @@ export type VerdictValue = 'hold' | 'adjust_calories' | 'check_recovery';
 export interface VerdictResult {
   verdict: VerdictValue;
   week_start_date: string;
-  weight_trend_kg_per_week: number;
-  strength_trend: string;
+  weight_trend_kg_per_week: number | null;
+  strength_trend: string | null;
   adherence_pct: number;
   reasoning: string[];
 }

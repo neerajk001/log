@@ -5,9 +5,10 @@ import { api, ApiError } from '@/src/api/client';
 import type { VerdictResult, TrendsResult, TrendWeightPoint } from '@/src/api/types';
 import { VerdictStamp } from '@/src/components/VerdictStamp';
 
-function trendLabel(v: string): string {
+function trendLabel(v: string | null): string {
   if (v === 'up') return 'Up';
   if (v === 'down') return 'Down';
+  if (v == null) return '—';
   return 'Flat';
 }
 
@@ -71,13 +72,27 @@ export default function InsightsPage() {
       {loading && <p className="mt-4 font-mono text-sm text-steel">Loading…</p>}
       {error && <p className="mt-4 font-mono text-sm text-rustSoft">{error}</p>}
 
-      {verdict && (
+      {verdict && verdict.weight_trend_kg_per_week == null && (
+        <div className="mt-6 rounded-card border border-hairline bg-surface p-6 text-center">
+          <p className="font-display text-lg uppercase tracking-wide text-chalkDim">
+            Not enough data
+          </p>
+          <p className="mt-2 font-mono text-xs text-steel">
+            {verdict.reasoning[0] ?? 'Keep logging to unlock your weekly verdict.'}
+          </p>
+        </div>
+      )}
+
+      {verdict && verdict.weight_trend_kg_per_week != null && (
         <div className="mt-6 flex flex-col items-center">
           <VerdictStamp verdict={verdict.verdict} />
           <p className="mt-3 font-mono text-xs text-chalkDim">Week of {verdict.week_start_date}</p>
 
           <div className="mt-6 w-full space-y-3">
-            <SignalRow label="Weight trend" value={`${verdict.weight_trend_kg_per_week.toFixed(2)} kg/wk`} />
+            <SignalRow
+              label="Weight trend"
+              value={`${verdict.weight_trend_kg_per_week.toFixed(2)} kg/wk`}
+            />
             <SignalRow label="Strength trend" value={trendLabel(verdict.strength_trend)} />
             <SignalRow label="Protein adherence" value={`${verdict.adherence_pct}%`} />
           </div>

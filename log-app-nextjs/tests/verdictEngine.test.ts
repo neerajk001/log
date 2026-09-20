@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluateVerdict } from '@/lib/services/verdictEngine';
+import { evaluateVerdict, hasEnoughWeightData, MIN_DAYS_FOR_VERDICT } from '@/lib/services/verdictEngine';
 
 describe('evaluateVerdict', () => {
   it('branch 1: strength down 2+ weeks → check_recovery', () => {
@@ -90,5 +90,21 @@ describe('evaluateVerdict', () => {
       adherencePct: 50,
     });
     expect(r.verdict).toBe('adjust_calories');
+  });
+});
+
+describe('hasEnoughWeightData', () => {
+  it('requires MIN_DAYS_FOR_VERDICT days', () => {
+    expect(MIN_DAYS_FOR_VERDICT).toBe(4);
+  });
+
+  it('is false below the threshold', () => {
+    expect(hasEnoughWeightData(0)).toBe(false);
+    expect(hasEnoughWeightData(3)).toBe(false);
+  });
+
+  it('is true at and above the threshold', () => {
+    expect(hasEnoughWeightData(4)).toBe(true);
+    expect(hasEnoughWeightData(7)).toBe(true);
   });
 });

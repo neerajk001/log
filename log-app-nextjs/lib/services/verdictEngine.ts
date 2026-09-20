@@ -85,3 +85,11 @@ export function evaluateVerdict(input: VerdictInput): VerdictResult {
     ],
   };
 }
+
+/** Minimum logged weight days in the trailing week before a verdict is meaningful. */
+export const MIN_DAYS_FOR_VERDICT = 4;
+
+/** Whether enough weight data was logged this week to compute a verdict. */
+export function hasEnoughWeightData(weightPoints: number): boolean {
+  return weightPoints >= MIN_DAYS_FOR_VERDICT;
+}

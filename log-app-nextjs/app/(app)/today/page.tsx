@@ -11,9 +11,11 @@ import {
   Bike,
   Waves,
   Activity as ActivityIcon,
+  Settings,
 } from 'lucide-react';
 import { useTodayLog } from '@/src/hooks/useTodayLog';
 import { api, ApiError } from '@/src/api/client';
+import { MIN_DAYS_FOR_VERDICT } from '@/lib/services/verdictEngine';
 import type {
   ActivityLog,
   ActivityType,
@@ -277,10 +279,13 @@ export default function TodayPage() {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-center justify-between">
         <h1 className="font-display text-[28px] font-semibold tracking-[0.5px] text-chalk">
           {activeDate === todayStr ? 'Today' : fmtLong(activeDate)}
         </h1>
+        <Link href="/settings" aria-label="Settings" className="p-1 text-chalkDim hover:text-chalk">
+          <Settings size={18} />
+        </Link>
       </div>
 
       <div className="mt-3 flex items-center justify-between rounded-card border border-hairline bg-surface px-2 py-2">
@@ -475,7 +480,16 @@ export default function TodayPage() {
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-chalkDim">
           Weekly Verdict
         </div>
-        {verdict ? (
+        {verdict && verdict.weight_trend_kg_per_week == null ? (
+          <>
+            <p className="mt-2 font-display text-lg uppercase tracking-wide text-chalkDim">
+              Not enough data
+            </p>
+            <p className="mt-1 font-mono text-xs text-steel">
+              Log at least {MIN_DAYS_FOR_VERDICT} days to receive a verdict
+            </p>
+          </>
+        ) : verdict ? (
           <p className="mt-2 font-display text-lg uppercase tracking-wide text-rustSoft">
             {VERDICT_SHORT[verdict.verdict]}
           </p>

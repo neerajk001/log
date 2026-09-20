@@ -45,8 +45,8 @@ export const dailyDefaultsSchema = z
 
 export const meUpdateSchema = z
   .object({
-    protein_target_g: z.number().int().positive().max(9999),
-    calorie_target: z.number().int().positive().max(99999),
+    protein_target_g: z.number().int().positive().max(9999).nullable(),
+    calorie_target: z.number().int().positive().max(99999).nullable(),
     daily_defaults: dailyDefaultsSchema,
   })
   .partial();
