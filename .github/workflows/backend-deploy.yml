@@ -65,6 +65,8 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
             set -euo pipefail
+            # VPS_APP_DIR is the repo root; the compose stack lives one level
+            # deeper in log-app-backend/.
             cd ${{ secrets.VPS_APP_DIR }}
             echo "--- retire pm2 (one-time docker migration) ---"
             if command -v pm2 >/dev/null 2>&1; then
@@ -73,6 +75,9 @@ jobs:
             fi
             echo "--- git pull ---"
             git pull origin main
+            cd log-app-backend
+            echo "--- docker daemon check ---"
+            docker info >/dev/null
             echo "--- build image ---"
             docker compose build
             echo "--- migrate ---"
