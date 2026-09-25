@@ -1,40 +1,39 @@
 # Deployment
 
-## Backend — self-managed VPS
+## Backend — self-managed VPS (Docker)
 
-**Stack on the VPS:** Nginx (reverse proxy + TLS termination) → PM2
-(process manager) → Node/Express app on `localhost:3000`.
+**Stack on the VPS:** Nginx (reverse proxy + TLS termination) → Docker
+Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
+(external) — only the API runs on the VPS.
 
 ### One-time setup
 
 1. Provision VPS (Ubuntu LTS recommended), point a domain's A record at
    its IP.
-2. Install Node.js (LTS), PM2 (`npm i -g pm2`), Nginx, Certbot.
-3. Clone `log-app-backend`, copy `.env.example` → `.env`, fill in secrets
-   (`DATABASE_URL` from Neon, `CLERK_SECRET_KEY`, `GEMINI_API_KEY`, and
-   optionally `GEMINI_MODEL`).
-4. `npm ci && npm run build`
-5. Run migrations: `npx prisma migrate deploy`
-6. Start with PM2: `pm2 start dist/index.js --name log-api` and
-   `pm2 save` + `pm2 startup` (survive reboots).
+2. Install Docker Engine + the Compose plugin, Nginx, Certbot. (No Node.js
+   or PM2 needed on the host.)
+3. Clone the repo, copy `log-app-backend/.env.example` →
+   `log-app-backend/.env`, fill in secrets (`DATABASE_URL` from Neon,
+   `CLERK_SECRET_KEY`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`,
+   plus `PORT`).
+4. `cd log-app-backend && docker compose up -d --build`
+5. Run migrations: `docker compose run --rm api npx prisma migrate deploy`
+6. If a previous PM2-based install exists: `pm2 delete log-api` /
+   `pm2 delete param-api` (the CI deploy does this automatically once).
 7. Configure Nginx as a reverse proxy from `https://api.<domain>` to
-   `localhost:3000`; issue a certificate with `certbot --nginx`.
+   `localhost:$PORT` (same value as in `.env`); issue a certificate with
+   `certbot --nginx`.
 
-### Deploy flow (MVP — manual, no CI/CD yet)
+### Deploy flow (automated — GitHub Actions, no manual steps)
 
-```bash
-ssh user@vps
-cd log-app-backend
-git pull origin main
-npm ci
-npm run build
-npx prisma migrate deploy  # only if schema changed
-pm2 reload log-api
-```
+Push to `main` (or Run workflow manually) runs `.github/workflows/
+backend-deploy.yml`: backend CI (install, build, tests), then over SSH —
+`git pull` → `docker compose build` → `docker compose run --rm api npx
+prisma migrate deploy` → `docker compose up -d` → `curl
+localhost:$PORT/health` gate → `docker image prune`.
 
-GitHub Actions automation is a known post-MVP improvement (noted in
-`AGENTS.md` open decisions) — do not build it during Phase 1-3 unless
-explicitly requested.
+The image never contains secrets: `.env` is excluded via `.dockerignore`
+and supplied at run time through compose `env_file`.
 
 ### Environment variables
 

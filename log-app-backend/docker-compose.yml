@@ -1,0 +1,19 @@
+# Production stack on the VPS. Postgres lives in Neon (external) — only
+# the API runs here. Runtime secrets come from the `.env` file next to this
+# file (created once during VPS setup, never committed, never baked into
+# images). The host PORT is reused inside the container, so Nginx always
+# proxies to `localhost:$PORT` regardless of its value.
+services:
+  api:
+    build: .
+    image: param-api:latest
+    container_name: param-api
+    restart: unless-stopped
+    # `environment` wins over `env_file`: the container always runs in
+    # production mode even if the VPS .env still says development.
+    environment:
+      NODE_ENV: production
+    env_file:
+      - .env
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"

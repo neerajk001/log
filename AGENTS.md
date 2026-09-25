@@ -60,7 +60,7 @@ Do not start Phase 2 work until every acceptance criterion in Phase 1 passes.
 | ORM        | Prisma ORM + `pg` (standard pooled Postgres driver)    |
 | Database   | Neon Postgres                                         |
 | AI parsing | Gemini Flash via Google Gemini API (server-side only)   |
-| Hosting    | Self-managed VPS — Nginx + PM2 + Let's Encrypt        |
+| Hosting    | Self-managed VPS — Nginx + Docker Compose + Let's Encrypt        |
 
 ## Open decisions still owned by the product owner
 
