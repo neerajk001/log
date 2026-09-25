@@ -1,0 +1,96 @@
+name: backend-deploy
+
+# CI + CD for log-app-backend only.
+# Push to main (touching the backend or this workflow) runs tests/build,
+# then SSHs into the VPS and does the documented manual deploy steps:
+#   git pull -> npm ci -> npm run build -> prisma migrate deploy -> pm2 reload
+# (see deployment.md). The VPS .env file is never touched by CI.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "log-app-backend/**"
+      - ".github/workflows/backend-deploy.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: backend-deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: backend CI (install, typecheck/build, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: log-app-backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: log-app-backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc)
+        run: npm run build
+
+      - name: Test (vitest)
+        run: npm test
+        env:
+          # Unit tests must not need real secrets; dummy values keep
+          # config loading from crashing if a test imports it.
+          DATABASE_URL: postgresql://user:password@localhost:5432/log?sslmode=require
+          CLERK_SECRET_KEY: sk_test_dummy_for_ci
+          OPENAI_API_KEY: dummy_for_ci
+
+  deploy:
+    name: deploy to VPS over SSH
+    needs: ci
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.VPS_APP_DIR }}
+            echo "--- git pull ---"
+            git pull origin main
+            echo "--- install ---"
+            npm ci
+            echo "--- build ---"
+            npm run build
+            echo "--- migrate ---"
+            npx prisma migrate deploy
+            echo "--- reload pm2 ---"
+            if pm2 describe param-api >/dev/null 2>&1; then
+              pm2 reload ecosystem.config.js --env production
+            else
+              # one-time rename: drop the old process name if it exists,
+              # otherwise the old + new processes would fight over PORT.
+              if pm2 describe log-api >/dev/null 2>&1; then
+                pm2 delete log-api
+              fi
+              pm2 start ecosystem.config.js --env production
+            fi
+            pm2 save
+            echo "--- health check ---"
+            sleep 5
+            pm2 describe param-api
+            PORT_VALUE="$(grep -E '^PORT=' .env | cut -d= -f2 | tr -d ' \r')"
+            PORT_VALUE="${PORT_VALUE:-3000}"
+            curl -fsS "http://localhost:${PORT_VALUE}/health"
+            echo ""
+            echo "DEPLOY OK"
