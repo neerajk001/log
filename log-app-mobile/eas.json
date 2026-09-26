@@ -7,11 +7,19 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://api.neerajx.site",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_ZGFyaW5nLWZhbGNvbi01Mi5jbGVyay5hY2NvdW50cy5kZXYk"
       }
     },
     "production": {
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://api.neerajx.site",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_ZGFyaW5nLWZhbGNvbi01Mi5jbGVyay5hY2NvdW50cy5kZXYk"
       }
     }
   },
