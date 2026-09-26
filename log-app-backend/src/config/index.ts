@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { parseAllowedOrigins } from "../cors";
 
 dotenv.config();
 
@@ -11,10 +12,19 @@ export const config = {
   },
   database: {
     url: process.env.DATABASE_URL || "",
+    sslNoVerify: process.env.DATABASE_SSL_NO_VERIFY === "true",
   },
   openai: {
     apiKey: process.env.OPENAI_API_KEY || "",
     model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  },
+  cors: {
+    allowedOrigins: parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS),
+  },
+  sentry: {
+    dsn: process.env.SENTRY_DSN || "",
+    environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || "development",
+    release: process.env.SENTRY_RELEASE || undefined,
   },
 };
 

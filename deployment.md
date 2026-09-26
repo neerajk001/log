@@ -15,7 +15,7 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
 3. Clone the repo, copy `log-app-backend/.env.example` →
    `log-app-backend/.env`, fill in secrets (`DATABASE_URL` from Neon,
    `CLERK_SECRET_KEY`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`,
-   plus `PORT`).
+   plus `PORT` and `SENTRY_DSN` for error monitoring).
 4. `cd log-app-backend && docker compose up -d --build`
 5. Run migrations: `docker compose run --rm api npx prisma migrate deploy`
 6. If a previous PM2-based install exists: `pm2 delete log-api` /
