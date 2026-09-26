@@ -1,0 +1,13 @@
+# Single-package project (keeps install behavior unchanged) + the new home
+# for build-script approvals: recent pnpm versions ignore the "pnpm" field
+# in package.json, and EAS cloud builders fail installs without this file.
+packages:
+  - "."
+
+onlyBuiltDependencies:
+  - "@clerk/shared"
+  - browser-tabs-lock
+  - bufferutil
+  - core-js
+  - unrs-resolver
+  - utf-8-validate
