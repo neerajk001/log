@@ -1,6 +1,11 @@
-# Single-package project (keeps install behavior unchanged) + the new home
-# for build-script approvals: recent pnpm versions ignore the "pnpm" field
-# in package.json, and EAS cloud builders fail installs without this file.
+# Single-package project (keeps install behavior unchanged).
+#
+# Build-script approvals (supply-chain gate) live here because recent pnpm
+# versions ignore the "pnpm" field in package.json. The key name depends on
+# the pnpm major, so BOTH are declared — each version reads its own and
+# ignores the other:
+#   - pnpm 10.x reads `onlyBuiltDependencies`
+#   - pnpm 11.x (EAS cloud builders) reads `allowBuilds`
 packages:
   - "."
 
@@ -11,3 +16,11 @@ onlyBuiltDependencies:
   - core-js
   - unrs-resolver
   - utf-8-validate
+
+allowBuilds:
+  "@clerk/shared": true
+  browser-tabs-lock: true
+  bufferutil: true
+  core-js: true
+  unrs-resolver: true
+  utf-8-validate: true
