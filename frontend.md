@@ -28,6 +28,18 @@ export async function upsertDailyLog(date: string, patch: Partial<DailyLog>): Pr
 
 Every function attaches the Clerk token (see `docs/auth.md`) and throws a
 typed `ApiError` on non-2xx responses, caught by the calling hook.
+`useApiClient().get()` caches successful responses for 30s (per-path TTL,
+overridable via `{ ttlMs, force }`) and every successful mutation clears
+the cache — so tab switches and remounts don't refetch, while saves always
+read fresh afterwards. Fetch-once-on-focus lives in the hook
+(`useFocusEffect`, which also fires on mount — don't add a duplicate
+`useEffect`).
+- Never snapshot the date with `todayIso()` during render for a screen —
+  it goes stale past midnight. Use `useCurrentDate()` (midnight timer +
+  foreground refresh) so Today, Lift, History, and the exercise logger roll
+  into the new day while open. Server-computed "today" data (plan rotation)
+  additionally needs a forced refetch past the GET cache — see
+  `usePlanToday(scopeDate)`.
 
 ## Data-fetching hook pattern
 
@@ -55,6 +67,16 @@ One hook per screen's primary data need, e.g. `useTodayLog()`,
   no inline hex values, no ad-hoc colors.
 - StyleSheet.create per component; no CSS-in-JS library needed for this
   scope.
+- Theming is the one sanctioned cross-screen state (exception to the
+  no-global-state rule above): `ThemeProvider` (plain React context, not a
+  state library) in `app/_layout.tsx` exposes `useTheme()` returning
+  `{ scheme, colors, typography, isDark, preference, setPreference }`.
+  Never import palette values statically from `src/theme/colors` — always
+  read them from `useTheme()`, and build stylesheets with
+  `makeUseStyles((t) => StyleSheet.create({ ... }))` from
+  `src/theme/ThemeContext.tsx` so they rebuild when the theme changes.
+  Static `colors`/`typography` value exports were removed; only types and
+  the `palettes`/`lightColors` constants remain importable.
 
 ## Screens (5, matching `docs/user-flows.md`)
 

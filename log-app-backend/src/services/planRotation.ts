@@ -26,12 +26,13 @@ export function resolvePlanDayForDate<T extends PlanDayLike>(
   date: Date,
 ): T | null {
   if (planDays.length === 0) return null;
+  const sorted = [...planDays].sort((a, b) => a.dayOrder - b.dayOrder);
 
   const daysSince = wholeDaysBetween(toUtcDateString(startDate), toUtcDateString(date));
   if (daysSince < 0) {
-    return planDays[0];
+    return sorted[0];
   }
 
-  const index = daysSince % planDays.length;
-  return planDays[index];
+  const index = daysSince % sorted.length;
+  return sorted[index];
 }

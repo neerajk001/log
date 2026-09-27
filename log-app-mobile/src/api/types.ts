@@ -1,4 +1,5 @@
 export interface DailyLog {
+  id?: string;
   date: string;
   weight_kg: number | null;
   calories: number | null;
@@ -12,6 +13,15 @@ export interface DailyLogUpsert {
   protein_g?: number | null;
   sleep_hours?: number | null;
 }
+
+export interface DailyDefaults {
+  weight_kg?: number | null;
+  calories?: number | null;
+  protein_g?: number | null;
+  sleep_hours?: number | null;
+}
+
+export type DailyField = "weight_kg" | "calories" | "protein_g" | "sleep_hours";
 
 export interface LiftLog {
   id: string;
@@ -30,10 +40,34 @@ export interface LiftLogCreate {
   plan_day_id?: string | null;
 }
 
+export type ActivityType = "run" | "cycle" | "walk" | "swim" | "other";
+
+export interface ActivityLog {
+  id: string;
+  date: string;
+  activity_type: ActivityType;
+  name: string;
+  duration_min: number;
+  distance_km: number | null;
+  calories_burned: number | null;
+  notes: string | null;
+}
+
+export interface ActivityLogCreate {
+  date: string;
+  activity_type: ActivityType;
+  name: string;
+  duration_min: number;
+  distance_km?: number | null;
+  calories_burned?: number | null;
+  notes?: string | null;
+}
+
 export interface UserProfile {
   id: string;
   protein_target_g: number | null;
   calorie_target: number | null;
+  daily_defaults?: DailyDefaults | null;
 }
 
 export interface PlanExercise {
@@ -67,15 +101,17 @@ export interface PlanTodayExercise extends PlanExercise {
   last_log: { weight_kg: number; reps: number } | null;
 }
 
+export interface PlanDayToday {
+  id: string;
+  day_name: string;
+  day_order: number;
+  exercises: PlanTodayExercise[];
+}
+
 export interface PlanToday {
   plan_id: string;
   plan_name: string;
-  day: {
-    id: string;
-    day_name: string;
-    day_order: number;
-    exercises: PlanTodayExercise[];
-  } | null;
+  day: PlanDayToday | null;
 }
 
 export interface CreatePlanInput {

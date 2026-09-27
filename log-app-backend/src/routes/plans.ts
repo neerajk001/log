@@ -22,7 +22,14 @@ import {
 const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === "application/pdf" || file.mimetype === "text/plain") {
+      cb(null, true);
+    } else {
+      cb(new AppError(400, "VALIDATION_ERROR", "Only PDF or text files are accepted"));
+    }
+  },
 });
 
 const parseRateLimit = rateLimit({
@@ -75,29 +82,13 @@ async function handleParseRequest(
   next: NextFunction,
 ): Promise<void> {
   try {
-    console.log("[plans/parse] content-type:", req.headers["content-type"]);
-    console.log(
-      "[plans/parse] has file:",
-      !!req.file,
-      "body keys:",
-      Object.keys(req.body ?? {}),
-    );
     let text: string | undefined;
 
     if (req.file) {
-      console.log(
-        "[plans/parse] file:",
-        req.file.originalname,
-        "size:",
-        req.file.size,
-        "mimetype:",
-        req.file.mimetype,
-      );
       const result = await parsePlanPdf(
         req.file.buffer,
         req.file.mimetype || "application/pdf",
       );
-      console.log("[plans/parse] parsed PDF OK, days:", result.days.length);
       res.json(result);
       return;
     } else {
@@ -107,7 +98,6 @@ async function handleParseRequest(
         return;
       }
       text = parsed.data.text;
-      console.log("[plans/parse] text input length:", text?.length);
     }
 
     if (!text || text.trim().length === 0) {
@@ -115,12 +105,9 @@ async function handleParseRequest(
       return;
     }
 
-    console.log("[plans/parse] calling OpenAI...");
     const result = await parsePlanText(text);
-    console.log("[plans/parse] parsed OK, days:", result.days.length);
     res.json(result);
   } catch (err) {
-    console.error("[plans/parse] error:", err);
     if (err instanceof PlanParseError) {
       next(new AppError(422, "PARSE_FAILED", err.message));
     } else {
@@ -133,7 +120,15 @@ router.post(
   "/parse",
   requireAuth,
   parseRateLimit,
-  upload.single("file"),
+  (req, res, next) => {
+    upload.single("file")(req, res, (err) => {
+      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+        next(new AppError(400, "VALIDATION_ERROR", "File is too large. Maximum size is 2 MB."));
+        return;
+      }
+      next(err);
+    });
+  },
   handleParseRequest,
 );
 
@@ -254,6 +249,54 @@ router.get(
           }),
         },
       });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.put(
+  "/:id",
+  requireAuth,
+  validate(planIdParamSchema, "params"),
+  validate(createPlanSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const planId = req.params.id as string;
+      const { name, source, days } = req.body as CreatePlanInput;
+
+      const existing = await prisma.workoutPlan.findFirst({
+        where: { id: planId, userId: req.userId },
+      });
+      if (!existing) {
+        next(new AppError(404, "NOT_FOUND", "Plan not found"));
+        return;
+      }
+
+      const plan = await prisma.$transaction(async (tx) => {
+        await tx.planDay.deleteMany({ where: { planId, plan: { userId: req.userId } } });
+        const updated = await tx.workoutPlan.updateMany({
+          where: { id: planId, userId: req.userId },
+          data: { name, source },
+        });
+        if (updated.count === 0) {
+          throw new AppError(404, "NOT_FOUND", "Plan not found");
+        }
+        await tx.planDay.createMany({
+          data: days.map((day, index) => ({
+            planId,
+            dayName: day.day_name,
+            dayOrder: index + 1,
+            exercises: day.exercises as unknown as Prisma.InputJsonValue,
+          })),
+        });
+        return tx.workoutPlan.findFirstOrThrow({
+          where: { id: planId, userId: req.userId },
+          include: { planDays: { orderBy: { dayOrder: "asc" } } },
+        });
+      });
+
+      res.json(serializePlan(plan));
     } catch (err) {
       next(err);
     }

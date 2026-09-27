@@ -3,19 +3,23 @@ import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { dailyLogSchema, dateParamSchema, dailyLogsQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
-import { AppError } from "../middleware/errorHandler";
+import { assertRangeSize } from "../utils/range";
 
 const router = Router();
 
 router.get("/daily", requireAuth, validate(dailyLogsQuerySchema, "query"), async (req, res: Response) => {
-  const { from, to } = req.query as unknown as { from: string; to: string };
+  const { from, to } = req.query as unknown as { from?: string; to?: string };
+  const toDate = to ?? new Date().toISOString().slice(0, 10);
+  const fromDate = from ?? toDate;
+  assertRangeSize(fromDate, toDate);
 
   const logs = await prisma.dailyLog.findMany({
     where: {
       userId: req.userId,
-      date: { gte: new Date(from), lte: new Date(to) },
+      date: { gte: new Date(fromDate), lte: new Date(toDate) },
     },
     orderBy: { date: "asc" },
+    take: 5000,
     select: {
       id: true,
       date: true,
@@ -105,6 +109,21 @@ router.put(
       protein_g: log.proteinG,
       sleep_hours: log.sleepHours,
     });
+  },
+);
+
+router.delete(
+  "/daily/:date",
+  requireAuth,
+  validate(dateParamSchema, "params"),
+  async (req, res: Response) => {
+    const date = req.params.date as string;
+
+    await prisma.dailyLog.deleteMany({
+      where: { userId: req.userId, date: new Date(date) },
+    });
+
+    res.json({ ok: true });
   },
 );
 

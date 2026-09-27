@@ -1,8 +1,47 @@
 import { useAuth } from "@clerk/clerk-expo";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
-const API_BASE_URL =
+export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+export const REQUEST_TIMEOUT_MS = 15000;
+const PDF_UPLOAD_TIMEOUT_MS = 120000;
+
+/**
+ * Tiny stale-avoidance cache for GETs. Tab switches and remounts within
+ * `GET_CACHE_TTL_MS` reuse the last response instead of refetching, so
+ * returning to a tab is instant with no loading flash. Any successful
+ * mutation clears the cache, and optimistic updates already keep the
+ * visible screen correct — the cache only affects future loads.
+ */
+const GET_CACHE_TTL_MS = 30_000;
+const GET_CACHE_MAX_ENTRIES = 200;
+const getCache = new Map<string, { expires: number; data: unknown }>();
+
+function getCached<T>(path: string): T | undefined {
+  const hit = getCache.get(path);
+  if (!hit) return undefined;
+  if (Date.now() > hit.expires) {
+    getCache.delete(path);
+    return undefined;
+  }
+  return hit.data as T;
+}
+
+function setCached(path: string, data: unknown, ttlMs: number): void {
+  if (getCache.size >= GET_CACHE_MAX_ENTRIES) getCache.clear();
+  getCache.set(path, { expires: Date.now() + ttlMs, data });
+}
+
+/** Cleared automatically after every successful mutation. */
+export function invalidateGetCache(): void {
+  getCache.clear();
+}
+
+if (!__DEV__ && API_BASE_URL.startsWith("http://")) {
+  throw new Error(
+    `Refusing to use insecure API base URL in production: ${API_BASE_URL}. Set EXPO_PUBLIC_API_BASE_URL to an https:// URL.`,
+  );
+}
 
 export class ApiError extends Error {
   constructor(
@@ -18,39 +57,46 @@ export class ApiError extends Error {
 export async function apiFetch<T = unknown>(
   path: string,
   getToken: () => Promise<string | null>,
-  options?: RequestInit,
+  options?: RequestInit & { timeoutMs?: number },
 ): Promise<T> {
   const token = await getToken();
+  if (!token) {
+    throw new ApiError(401, "UNAUTHORIZED", "Signed out. Please sign in again.");
+  }
+  const { timeoutMs, ...fetchOptions } = options ?? {};
   const isFormData =
-    typeof FormData !== "undefined" && options?.body instanceof FormData;
-
+    typeof FormData !== "undefined" && fetchOptions?.body instanceof FormData;
   const url = `${API_BASE_URL}${path}`;
-  console.log("[apiFetch]", options?.method ?? "GET", url, {
-    isFormData,
-    hasToken: !!token,
-  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(),
+    timeoutMs ?? REQUEST_TIMEOUT_MS,
+  );
 
   let res: Response;
   try {
     res = await fetch(url, {
-      ...options,
+      ...fetchOptions,
+      signal: controller.signal,
       headers: {
         ...(isFormData ? {} : { "Content-Type": "application/json" }),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...options?.headers,
+        Authorization: `Bearer ${token}`,
+        ...fetchOptions?.headers,
       },
     });
   } catch (err) {
-    console.error("[apiFetch] network error:", err);
-    throw err;
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ApiError(0, "NETWORK_ERROR", "Request timed out. Check your connection.");
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
+  } finally {
+    clearTimeout(timeout);
   }
-
-  console.log("[apiFetch] response:", res.status, res.statusText);
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    const error = body?.error ?? {};
-    console.error("[apiFetch] error body:", body);
+    const error = (body as { error?: { code?: string; message?: string } })?.error ?? {};
     throw new ApiError(
       res.status,
       error.code ?? "SERVER_ERROR",
@@ -58,34 +104,100 @@ export async function apiFetch<T = unknown>(
     );
   }
 
-  return res.json();
+  if (res.status === 204) return undefined as T;
+
+  const text = await res.text();
+  if (!text) return undefined as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiError(0, "SERVER_ERROR", "Request failed");
+  }
 }
 
 export function useApiClient() {
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
   const getTokenRef = useRef(getToken);
-  getTokenRef.current = getToken;
+  const signOutRef = useRef(signOut);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+    signOutRef.current = signOut;
+  }, [getToken, signOut]);
+
+  const wrap = useMemo(
+    () => async <T = unknown>(run: () => Promise<T>): Promise<T> => {
+      try {
+        return await run();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          try {
+            await signOutRef.current();
+          } catch {}
+        }
+        throw err;
+      }
+    },
+    [],
+  );
 
   return useMemo(
     () => ({
-      get: <T = unknown>(path: string) =>
-        apiFetch<T>(path, () => getTokenRef.current()),
+      get: <T = unknown>(path: string, opts?: { ttlMs?: number; force?: boolean }) => {
+        if (!opts?.force) {
+          const hit = getCached<T>(path);
+          if (hit !== undefined) return Promise.resolve(hit);
+        }
+        const ttlMs = opts?.ttlMs ?? GET_CACHE_TTL_MS;
+        return wrap(() =>
+          apiFetch<T>(path, () => getTokenRef.current()).then((data) => {
+            setCached(path, data, ttlMs);
+            return data;
+          }),
+        );
+      },
       put: <T = unknown>(path: string, body: unknown) =>
-        apiFetch<T>(path, () => getTokenRef.current(), {
-          method: "PUT",
-          body: JSON.stringify(body),
-        }),
+        wrap(() =>
+          apiFetch<T>(path, () => getTokenRef.current(), {
+            method: "PUT",
+            body: JSON.stringify(body),
+          }).then((data) => {
+            invalidateGetCache();
+            return data;
+          }),
+        ),
       post: <T = unknown>(path: string, body: unknown) =>
-        apiFetch<T>(path, () => getTokenRef.current(), {
-          method: "POST",
-          body: JSON.stringify(body),
-        }),
-      postFormData: <T = unknown>(path: string, formData: FormData) =>
-        apiFetch<T>(path, () => getTokenRef.current(), {
-          method: "POST",
-          body: formData,
-        }),
+        wrap(() =>
+          apiFetch<T>(path, () => getTokenRef.current(), {
+            method: "POST",
+            body: JSON.stringify(body),
+          }).then((data) => {
+            invalidateGetCache();
+            return data;
+          }),
+        ),
+      postFormData: <T = unknown>(
+        path: string,
+        formData: FormData,
+        timeoutMs = PDF_UPLOAD_TIMEOUT_MS,
+      ) =>
+        wrap(() =>
+          apiFetch<T>(path, () => getTokenRef.current(), {
+            method: "POST",
+            body: formData,
+            timeoutMs,
+          }).then((data) => {
+            invalidateGetCache();
+            return data;
+          }),
+        ),
+      del: <T = unknown>(path: string) =>
+        wrap(() =>
+          apiFetch<T>(path, () => getTokenRef.current(), { method: "DELETE" }).then((data) => {
+            invalidateGetCache();
+            return data;
+          }),
+        ),
     }),
-    [],
+    [wrap],
   );
 }

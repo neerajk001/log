@@ -13,9 +13,11 @@ model User {
   clerkUserId      String        @unique @map("clerk_user_id") @db.Text
   proteinTargetG   Int?          @map("protein_target_g")
   calorieTarget    Int?          @map("calorie_target")
+  dailyDefaults    Json?         @map("daily_defaults")
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   dailyLogs        DailyLog[]
   liftLogs         LiftLog[]
+  activityLogs     ActivityLog[]
   workoutPlans     WorkoutPlan[]
   weeklyVerdicts   WeeklyVerdict[]
 
@@ -93,4 +95,21 @@ model WeeklyVerdict {
 
   @@unique([userId, weekStartDate])
   @@map("weekly_verdicts")
+}
+
+model ActivityLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  date           DateTime @db.Date
+  activityType   String   @map("activity_type") @db.Text
+  name           String   @db.Text
+  durationMin    Int      @map("duration_min")
+  distanceKm     Float?   @map("distance_km")
+  caloriesBurned Int?     @map("calories_burned")
+  notes          String?  @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, date])
+  @@map("activity_logs")
 }

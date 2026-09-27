@@ -12,8 +12,14 @@ export interface PreviousVerdict {
   weightTrendKgPerWeek: number | null;
 }
 
+/** A weight observation pinned to its calendar offset (0–6) in the trailing week. */
+export interface WeightPoint {
+  day: number;
+  kg: number;
+}
+
 export interface VerdictInput {
-  weightSeriesKg: number[];
+  weightSeriesKg: (number | WeightPoint)[];
   perExercise: PerExerciseDelta[];
   adherencePct: number | null;
   previousVerdict: PreviousVerdict | null;
@@ -31,7 +37,11 @@ const STRENGTH_DELTA_THRESHOLD = 0.025;
 const MIN_DAYS_FOR_VERDICT = 4;
 
 export function linearRegressionSlopePerDay(values: number[]): number | null {
-  const n = values.length;
+  return linearRegressionSlope(values.map((y, i) => ({ x: i, y })));
+}
+
+function linearRegressionSlope(points: { x: number; y: number }[]): number | null {
+  const n = points.length;
   if (n < 2) return null;
 
   let sumX = 0;
@@ -39,9 +49,7 @@ export function linearRegressionSlopePerDay(values: number[]): number | null {
   let sumXY = 0;
   let sumXX = 0;
 
-  for (let i = 0; i < n; i++) {
-    const x = i;
-    const y = values[i];
+  for (const { x, y } of points) {
     sumX += x;
     sumY += y;
     sumXY += x * y;
@@ -88,7 +96,11 @@ export function computeVerdict(input: VerdictInput): VerdictOutput {
     };
   }
 
-  const slopePerDay = linearRegressionSlopePerDay(input.weightSeriesKg);
+  const slopePerDay = linearRegressionSlope(
+    input.weightSeriesKg.map((p, i) =>
+      typeof p === "number" ? { x: i, y: p } : { x: p.day, y: p.kg },
+    ),
+  );
   const weightTrendKgPerWeek = slopePerDay == null ? null : slopePerDay * 7;
   const strengthTrend = computeStrengthTrend(input.perExercise);
 

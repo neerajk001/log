@@ -1,18 +1,25 @@
 import { Tabs } from "expo-router";
+import { Platform, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../../src/theme/colors";
+import { useTheme } from "../../src/theme/ThemeContext";
 
-const TAB_ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
-  today: { focused: "today", unfocused: "today-outline" },
+type IconPair = {
+  focused: keyof typeof Ionicons.glyphMap;
+  unfocused: keyof typeof Ionicons.glyphMap;
+};
+
+const TAB_ICONS: Record<string, IconPair> = {
+  today: { focused: "home", unfocused: "home-outline" },
   lift: { focused: "barbell", unfocused: "barbell-outline" },
-  trends: { focused: "trending-up", unfocused: "trending-up-outline" },
-  verdict: { focused: "ribbon", unfocused: "ribbon-outline" },
+  insights: { focused: "stats-chart", unfocused: "stats-chart-outline" },
+  history: { focused: "time", unfocused: "time-outline" },
   plan: { focused: "clipboard", unfocused: "clipboard-outline" },
 };
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
 
   return (
     <Tabs
@@ -25,30 +32,27 @@ export default function TabLayout() {
             <Ionicons
               name={focused ? icons.focused : icons.unfocused}
               size={size}
-              color={focused ? colors.rustSoft : colors.steel}
+              color={focused ? colors.primary : colors.textMuted}
             />
           );
         },
         tabBarStyle: {
           backgroundColor: colors.surface,
-          borderTopColor: colors.hairline,
-          borderTopWidth: 1,
-          height: 48 + insets.bottom,
-          paddingBottom: insets.bottom,
+          borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          height: 56 + insets.bottom,
+          paddingBottom: insets.bottom + (Platform.OS === "android" ? 6 : 4),
           paddingTop: 6,
         },
-        tabBarActiveTintColor: colors.rustSoft,
-        tabBarInactiveTintColor: colors.steel,
-        tabBarLabelStyle: {
-          fontFamily: "Inter-Medium",
-          fontSize: 11,
-        },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
       })}
     >
       <Tabs.Screen name="today" options={{ title: "Today" }} />
       <Tabs.Screen name="lift" options={{ title: "Lift" }} />
-      <Tabs.Screen name="trends" options={{ title: "Trends" }} />
-      <Tabs.Screen name="verdict" options={{ title: "Verdict" }} />
+      <Tabs.Screen name="insights" options={{ title: "Insights" }} />
+      <Tabs.Screen name="history" options={{ title: "History" }} />
       <Tabs.Screen name="plan" options={{ title: "Plan" }} />
     </Tabs>
   );

@@ -1,38 +1,38 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback, useState } from "react";
+import { useFocusEffect } from "expo-router";
 import { useLiftLogsApi } from "../api/liftLogs";
 import type { LiftLog, LiftLogCreate } from "../api/types";
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-export function useLiftLogs() {
+/** Today's (or a given date's) logged lift sets, with optimistic add/delete. */
+export function useLiftLogs(date: string) {
   const api = useLiftLogsApi();
   const [entries, setEntries] = useState<LiftLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const all = await api.getLiftLogsByDate(today());
-      setEntries(all);
+      setEntries(await api.getLiftLogsRange(date, date));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(err instanceof Error ? err.message : "Failed to load lifts");
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, date]);
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
+  // useFocusEffect fires on mount too, so no separate useEffect — otherwise
+  // the screen would fetch the same range twice on first open.
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
 
   const addEntry = useCallback(
     async (data: LiftLogCreate): Promise<LiftLog> => {
       setError(null);
-
       const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const optimistic: LiftLog = {
         id: tempId,
@@ -43,28 +43,38 @@ export function useLiftLogs() {
         plan_day_id: data.plan_day_id ?? null,
       };
       setEntries((prev) => [optimistic, ...prev]);
-
       try {
         const saved = await api.createLiftLog(data);
-        setEntries((prev) =>
-          prev.map((e) => (e.id === tempId ? saved : e)),
-        );
+        setEntries((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
         return saved;
       } catch (err) {
         setEntries((prev) => prev.filter((e) => e.id !== tempId));
-        setError(err instanceof Error ? err.message : "Failed to save lift");
+        const message = err instanceof Error ? err.message : "Failed to save lift";
+        setError(message);
         throw err;
       }
     },
     [api],
   );
 
-  return {
-    entries,
-    loading,
-    error,
-    addEntry,
-    refetch: fetch,
-  };
-}
+  const deleteEntry = useCallback(
+    async (id: string) => {
+      if (id.startsWith("pending-")) {
+        setEntries((prev) => prev.filter((e) => e.id !== id));
+        return;
+      }
+      const removed = entries.find((e) => e.id === id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      try {
+        await api.deleteLiftLog(id);
+      } catch (err) {
+        if (removed) setEntries((prev) => [removed, ...prev]);
+        setError(err instanceof Error ? err.message : "Failed to delete set");
+        throw err;
+      }
+    },
+    [api, entries],
+  );
 
+  return { entries, loading, error, addEntry, deleteEntry, refetch: load };
+}

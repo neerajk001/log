@@ -59,12 +59,12 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       orderBy: { date: "asc" },
     });
 
-    const weightSeriesKg: number[] = [];
+    const weightSeriesKg: { day: number; kg: number }[] = [];
     for (let i = 0; i < 7; i++) {
       const day = addDays(trailing7Start, i);
       const log = dailyLogs.find((l) => toUtcDateString(l.date) === toUtcDateString(day));
       if (log?.weightKg != null) {
-        weightSeriesKg.push(Number(log.weightKg));
+        weightSeriesKg.push({ day: i, kg: Number(log.weightKg) });
       }
     }
 
@@ -76,7 +76,7 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       select: { date: true, exerciseName: true, weightKg: true },
     });
 
-    const exerciseNames = Array.from(new Set(liftLogs.map((l) => l.exerciseName)));
+    const exerciseNames = Array.from(new Set(liftLogs.map((l) => l.exerciseName))).slice(0, 200);
     const perExercise: PerExerciseDelta[] = exerciseNames.map((name) => ({
       name,
       thisWeekKg: topSetByWeek(liftLogs, currentWeekStart, addDays(currentWeekStart, 7)),
@@ -96,7 +96,11 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       for (const l of weekLogs) {
         if (l.proteinG != null && l.proteinG >= target) hits++;
       }
-      adherencePct = Math.max(0, Math.min(100, Math.round((hits / 7) * 100)));
+      const elapsedDays = Math.max(
+        1,
+        Math.min(7, Math.floor((now.getTime() - currentWeekStart.getTime()) / 86400000) + 1),
+      );
+      adherencePct = Math.max(0, Math.min(100, Math.round((hits / elapsedDays) * 100)));
     }
 
     const prevRow = await prisma.weeklyVerdict.findFirst({

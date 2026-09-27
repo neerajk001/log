@@ -5,15 +5,18 @@ import type { LiftLog, LiftLogCreate } from "./types";
 export function useLiftLogsApi() {
   const client = useApiClient();
 
-  return useMemo(() => ({
-    createLiftLog: (data: LiftLogCreate) => client.post<LiftLog>("/api/logs/lift", data),
-    getLiftLogsByDate: (date: string) =>
-      client.get<LiftLog[]>(`/api/logs/lift?date=${date}`),
-    getLiftLogs: (exercise: string, weeks?: number) => {
-      const query = weeks
-        ? `?exercise=${encodeURIComponent(exercise)}&weeks=${weeks}`
-        : `?exercise=${encodeURIComponent(exercise)}`;
-      return client.get<LiftLog[]>(`/api/logs/lift${query}`);
-    },
-  }), [client]);
+  return useMemo(
+    () => ({
+      createLiftLog: (data: LiftLogCreate) => client.post<LiftLog>("/api/logs/lift", data),
+      /** The Next.js API accepts `exercise`, or a `from`/`to` range. */
+      getLiftLogsRange: (from: string, to: string) =>
+        client.get<LiftLog[]>(`/api/logs/lift?from=${from}&to=${to}`),
+      getLiftHistory: (exercise: string, weeks = 8) =>
+        client.get<LiftLog[]>(
+          `/api/logs/lift?exercise=${encodeURIComponent(exercise)}&weeks=${weeks}`,
+        ),
+      deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
+    }),
+    [client],
+  );
 }

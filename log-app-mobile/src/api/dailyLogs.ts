@@ -5,11 +5,15 @@ import type { DailyLog, DailyLogUpsert } from "./types";
 export function useDailyLogsApi() {
   const client = useApiClient();
 
-  return useMemo(() => ({
-    getDailyLog: (date: string) => client.get<DailyLog>(`/api/logs/daily/${date}`),
-    upsertDailyLog: (date: string, patch: DailyLogUpsert) =>
-      client.put<DailyLog>(`/api/logs/daily/${date}`, patch),
-    getDailyLogsRange: (from: string, to: string) =>
-      client.get<DailyLog[]>(`/api/logs/daily?from=${from}&to=${to}`),
-  }), [client]);
+  return useMemo(
+    () => ({
+      getDailyLog: (date: string) => client.get<DailyLog | null>(`/api/logs/daily/${date}`),
+      upsertDailyLog: (date: string, patch: DailyLogUpsert) =>
+        client.put<DailyLog>(`/api/logs/daily/${date}`, patch),
+      getDailyLogsRange: (from: string, to: string) =>
+        client.get<DailyLog[]>(`/api/logs/daily?from=${from}&to=${to}`),
+      deleteDailyLog: (date: string) => client.del<{ ok: true }>(`/api/logs/daily/${date}`),
+    }),
+    [client],
+  );
 }

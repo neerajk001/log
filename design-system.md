@@ -31,6 +31,30 @@ Do not introduce a second accent color. `rust` is the only "action" color
 in the app; `moss` is reserved exclusively for positive-trend data, never
 for buttons or navigation.
 
+## Themes (light / dark / true black)
+
+The app ships three schemes behind one token key set (`Palette` in
+`src/theme/colors.ts`). Components never branch on theme — they read tokens
+via `useTheme()`.
+
+- `light` — the default light palette (`bg #F6F6F4`, `primary #F0552A`).
+- `dark` — soft charcoal, aligned with the original dark-first direction
+  above (`bg #15171B` graphite, `text #ECE8E0` chalk, `textDim #9A978F`
+  chalkDim, `textMuted #5B6470` steel, borders `#2C313A` hairline).
+  The action color stays in the rust family (`primary #F0552A` fills,
+  `#E0603A` rustSoft for accent text/icons on dark surfaces).
+- `trueBlack` — pure-black backgrounds (`bg #000000`, `surface #0B0B0C`)
+  with neutral-white text, for maximum contrast.
+
+Semantic and accent hues are brightened on the dark schemes so they stay
+readable on dark surfaces (e.g. `success #22A06B` → `#3DD68C`), and every
+`*Soft` background becomes a dark tint of its hue instead of a pastel.
+Tag text colors live in per-scheme tables in `src/utils/tags.ts`.
+
+The user picks System (default, follows the OS) / Light / Dark /
+True Black in Settings → Appearance; the choice persists in AsyncStorage
+(`log.theme-preference`). See `frontend.md` for the implementation pattern.
+
 ## Typography
 
 | Role                  | Font            | Notes                              |

@@ -1,0 +1,182 @@
+import { useState } from "react";
+import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { router } from "expo-router";
+import { useClerk, useUser } from "@clerk/clerk-expo";
+import Constants from "expo-constants";
+import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
+import type { ThemePreference } from "../src/theme/colors";
+import { spacing } from "../src/theme/spacing";
+import { ScreenHeader } from "../src/components/ScreenHeader";
+import { SettingField } from "../src/components/SettingField";
+import { SegmentedControl } from "../src/components/ui/controls";
+import { Banner, Button, Card, IconBadge, LoadingState, ErrorState } from "../src/components/ui/primitives";
+import { useMe } from "../src/hooks/useMe";
+import { lightTick, useHapticsPref } from "../src/hooks/useHaptics";
+import { invalidateGetCache } from "../src/api/client";
+
+const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "trueBlack", label: "True Black" },
+];
+
+/** Settings — account, appearance, targets, logging prefs, data, about. */
+export default function SettingsScreen() {
+  const { profile, loading, error, update, refetch } = useMe();
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const { colors, preference, setPreference, typography } = useTheme();
+  const styles = useStyles();
+  const { enabled: haptics, setEnabled: setHaptics } = useHapticsPref();
+  const [cacheCleared, setCacheCleared] = useState(false);
+
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  const version = Constants.expoConfig?.version ?? "1.0.0";
+
+  return (
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScreenHeader variant="detail" title="Settings" onBack={() => router.back()} />
+
+        {error ? <ErrorState message={error} onRetry={refetch} /> : null}
+
+        <Text style={styles.sectionLabel}>Account</Text>
+        <Card style={styles.accountCard}>
+          <IconBadge name="person" bg={colors.surfaceAlt} color={colors.textDim} size={44} rounded={false} />
+          <View style={styles.accountText}>
+            <Text style={typography.bodyStrong} numberOfLines={1}>
+              {email ?? "Signed in"}
+            </Text>
+            <Text style={typography.small}>Your logs sync to this account.</Text>
+          </View>
+        </Card>
+        <Button
+          label="Sign out"
+          icon="log-out-outline"
+          variant="outline"
+          onPress={() => signOut().catch(() => {})}
+        />
+
+        <Text style={styles.sectionLabel}>Appearance</Text>
+        <SegmentedControl
+          value={preference}
+          onChange={(v) => {
+            setPreference(v);
+            lightTick();
+          }}
+          options={APPEARANCE_OPTIONS}
+        />
+        <Text style={[typography.small, styles.hint]}>
+          {preference === "system"
+            ? "Following your phone's light/dark setting."
+            : preference === "trueBlack"
+              ? "Pure-black backgrounds for maximum contrast."
+              : preference === "dark"
+                ? "Soft charcoal backgrounds, easier on the eyes at night."
+                : "Light backgrounds."}
+        </Text>
+
+        {loading && !profile ? (
+          <LoadingState label="Loading settings…" />
+        ) : (
+          <>
+            <Text style={styles.sectionLabel}>Targets</Text>
+            <SettingField
+              label="Protein target"
+              unit="g"
+              value={profile?.protein_target_g ?? null}
+              hint="Powers the adherence signal in Insights and your weekly verdict."
+              onSave={async (v) => {
+                await update({ protein_target_g: v });
+              }}
+            />
+            <SettingField
+              label="Calorie target"
+              unit="kcal"
+              value={profile?.calorie_target ?? null}
+              hint="Used as a reference in your daily log."
+              onSave={async (v) => {
+                await update({ calorie_target: v });
+              }}
+            />
+
+            <Banner
+              tone="info"
+              message="Values save automatically when you leave a field. Clear a field to remove the target."
+            />
+          </>
+        )}
+
+        <Text style={styles.sectionLabel}>Logging</Text>
+        <Card style={styles.toggleRow}>
+          <View style={styles.toggleText}>
+            <Text style={typography.bodyStrong}>Haptic feedback</Text>
+            <Text style={typography.small}>A gentle tick confirms every save.</Text>
+          </View>
+          <Switch
+            value={haptics}
+            onValueChange={(v) => {
+              setHaptics(v);
+              if (v) lightTick();
+            }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.white}
+          />
+        </Card>
+        <Text style={[typography.small, styles.hint]}>
+          Lift sets save automatically about a second after you stop typing.
+        </Text>
+
+        <Text style={styles.sectionLabel}>Data</Text>
+        <Button
+          label="Clear cached data"
+          icon="refresh"
+          variant="outline"
+          onPress={() => {
+            invalidateGetCache();
+            setCacheCleared(true);
+            lightTick();
+          }}
+        />
+        <Text style={[typography.small, styles.hint]}>
+          {cacheCleared
+            ? "Cache cleared. Fresh data loads on next open."
+            : "Removes locally cached responses. Your logged data is never affected."}
+        </Text>
+        <View style={styles.versionRow}>
+          <Text style={typography.small}>App version</Text>
+          <Text style={typography.bodyStrong}>{version}</Text>
+        </View>
+
+        <Text style={styles.sectionLabel}>About</Text>
+        <Card style={styles.aboutCard}>
+          <Text style={typography.bodyStrong}>How your verdict works</Text>
+          <Text style={styles.aboutLine}>• Weight trend — your 7-day rolling average, week over week.</Text>
+          <Text style={styles.aboutLine}>{"• Strength trend — this week\u2019s top sets vs last week\u2019s, per exercise."}</Text>
+          <Text style={styles.aboutLine}>• Adherence — days this week you hit your protein target.</Text>
+          <Text style={[typography.small, styles.hint]}>
+            Rule-based and computed weekly from your own data — Hold Steady, Adjust Calories, or Check
+            Recovery. No AI guessing.
+          </Text>
+        </Card>
+      </ScrollView>
+    </View>
+  );
+}
+
+const useStyles = makeUseStyles((t) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: t.colors.bg },
+    scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.md },
+    sectionLabel: { ...t.typography.caption, color: t.colors.textDim, marginTop: spacing.sm },
+    hint: { color: t.colors.textDim },
+    accountCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    accountText: { flex: 1, gap: 2 },
+    toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    toggleText: { flex: 1, gap: 2 },
+    versionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    aboutCard: { gap: spacing.sm },
+    aboutLine: { ...t.typography.small, color: t.colors.text, lineHeight: 19 },
+  }),
+);

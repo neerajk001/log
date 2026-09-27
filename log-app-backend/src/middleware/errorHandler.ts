@@ -19,12 +19,12 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
-  console.error("Unhandled error:", err);
+  console.error("Unhandled error:", err instanceof Error ? err.message : err);
 
   res.status(500).json({
     error: {
       code: "SERVER_ERROR",
-      message: process.env.NODE_ENV === "production" ? "Internal server error" : err.message,
+      message: "Internal server error",
     },
   });
 }

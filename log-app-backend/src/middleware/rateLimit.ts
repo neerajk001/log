@@ -13,7 +13,9 @@ interface Hit {
 
 /**
  * Minimal in-memory fixed-window rate limiter. Sufficient for the single
- * costly endpoint (`POST /api/plans/parse`) — see security.md.
+ * costly endpoint (`POST /api/plans/parse`) on a single instance — see
+ * security.md. Multi-instance deployments need a shared store (Redis);
+ * entries are evicted lazily on access plus a sweep when the map grows.
  */
 export function rateLimit({ windowMs, max, keyGenerator }: RateLimitOptions) {
   const hits = new Map<string, Hit>();
@@ -22,8 +24,16 @@ export function rateLimit({ windowMs, max, keyGenerator }: RateLimitOptions) {
     const now = Date.now();
     const key = keyGenerator(req);
 
+    if (hits.size > 10000) {
+      for (const [k, v] of hits) {
+        if (v.resetAt <= now) hits.delete(k);
+        if (hits.size <= 10000) break;
+      }
+    }
+
     const entry = hits.get(key);
     if (!entry || entry.resetAt <= now) {
+      if (entry) hits.delete(key);
       hits.set(key, { count: 1, resetAt: now + windowMs });
       next();
       return;

@@ -111,7 +111,6 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
     console.error("[planParser] OpenAI error:", response.status, {
       model: config.openai.model,
       message: apiError?.message,
-      body: errBody,
     });
     if (invalidApiKey) {
       throw new PlanParseError(
@@ -145,6 +144,9 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
 }
 
 export function parsePlanText(text: string): Promise<ParsedPlan> {
+  // NOTE: AI strings are shape-validated by zod but stored verbatim. Clients
+  // must render them as plain text (React Native <Text>), never as HTML, or
+  // stored payloads become stored-XSS.
   return parsePlanParts([{ type: "input_text", text }]);
 }
 
