@@ -1,36 +1,40 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import * as Crypto from "expo-crypto";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { radii, shadows, spacing } from "../theme/spacing";
 import { exerciseTypeFor } from "../utils/derive";
 import { muscleTagStyle, typeTagStyle } from "../utils/tags";
 import { parsePositiveInt, parsePositiveNumber } from "../utils/parse";
 import type { LiftLog, LiftLogCreate } from "../api/types";
-import { useLiftHistory } from "../hooks/useLiftHistory";
-import { useCurrentDate } from "../hooks/useCurrentDate";
 import { successTick } from "../hooks/useHaptics";
 import { IconBadge, Tag } from "./ui/primitives";
 
 const AUTOSAVE_DELAY_MS = 1200;
 
-type RowStatus = "idle" | "editing" | "saving" | "saved" | "error";
+type RowStatus = "idle" | "editing" | "saving" | "error";
 
 interface Draft {
+  key: string;
+  requestId: string;
+  ordinal: number;
   weight: string;
   reps: string;
   status: RowStatus;
 }
 
-function blankDraft(): Draft {
-  return { weight: "", reps: "", status: "idle" };
+function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
+  return {
+    key: Crypto.randomUUID(),
+    requestId: Crypto.randomUUID(),
+    ordinal,
+    weight,
+    reps,
+    status: "idle",
+  };
 }
 
-/**
- * Expandable exercise row. Expanding shows every planned set row up front,
- * pre-filled with last session's values; each row autosaves ~2.5s after the
- * user stops typing. No checkboxes, no save button.
- */
 export function ExerciseRow({
   index,
   name,
@@ -45,7 +49,8 @@ export function ExerciseRow({
   onToggle,
   onAddSet,
   onDeleteSet,
-  showChevron = false,
+  logsLoading = false,
+  pendingIds,
 }: {
   index: number;
   name: string;
@@ -61,6 +66,8 @@ export function ExerciseRow({
   onAddSet?: (data: LiftLogCreate) => Promise<LiftLog>;
   onDeleteSet?: (id: string) => void;
   showChevron?: boolean;
+  logsLoading?: boolean;
+  pendingIds?: Set<string>;
 }) {
   const { colors, scheme, typography } = useTheme();
   const styles = useStyles();
@@ -68,126 +75,167 @@ export function ExerciseRow({
   const tagTheme = { colors, scheme };
   const muscleStyle = muscleTagStyle(muscle ?? "", tagTheme);
   const logged = useMemo(() => loggedSets ?? [], [loggedSets]);
+  const confirmedLogged = useMemo(
+    () => logged.filter((entry) => !pendingIds?.has(entry.id)),
+    [logged, pendingIds],
+  );
   const doneCount = logged.length;
 
-  const { logs: history } = useLiftHistory(expanded ? name : null);
-  const today = useCurrentDate();
-  const lastSession = useMemo(() => {
-    return history.find((h) => h.date < today) ?? history[0] ?? null;
-  }, [history, today]);
-  const seed = useMemo(
-    () =>
-      lastSession
-        ? { weight_kg: Number(lastSession.weight_kg), reps: lastSession.reps }
-        : lastLog,
-    [lastSession, lastLog],
-  );
-
-  const expandKey = `${name}:${sets}:${logged.map((l) => l.id).join(",")}`;
+  const scopeKey = `${date ?? ""}:${planDayId ?? ""}:${name}`;
+  const initializedScopeRef = useRef("");
   const [drafts, setDrafts] = useState<Draft[]>([]);
-  const prefilledKey = useRef("");
-  useEffect(() => {
-    if (!expanded) return;
-    if (prefilledKey.current === expandKey) return;
-    prefilledKey.current = expandKey;
-    const count = Math.max(1, sets - logged.length);
-    const fill =
-      seed != null
-        ? { weight: String(seed.weight_kg), reps: String(seed.reps) }
-        : { weight: "", reps: "" };
-    setDrafts(Array.from({ length: count }, () => ({ ...fill, status: "idle" as RowStatus })));
-  }, [expanded, expandKey, sets, logged.length, seed]);
-
-  const timers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
-  const savedSig = useRef<Record<number, string>>({});
-  const savingRef = useRef<Record<number, boolean>>({});
   const draftsRef = useRef<Draft[]>([]);
-  useEffect(() => {
-    draftsRef.current = drafts;
-  }, [drafts]);
+  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const inFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+  const focusedRowRef = useRef<string | null>(null);
 
-  const clearTimer = useCallback((i: number) => {
-    const t = timers.current[i];
-    if (t) {
-      clearTimeout(t);
-      delete timers.current[i];
+  const applyDrafts = useCallback((update: (current: Draft[]) => Draft[]) => {
+    const next = update(draftsRef.current);
+    draftsRef.current = next;
+    setDrafts(next);
+  }, []);
+
+  const clearTimer = useCallback((key: string) => {
+    const timer = timers.current[key];
+    if (timer) {
+      clearTimeout(timer);
+      delete timers.current[key];
     }
   }, []);
 
-  useEffect(
-    () => () => {
-      for (const t of Object.values(timers.current)) clearTimeout(t);
-      timers.current = {};
-    },
-    [],
-  );
+  const clearAllTimers = useCallback(() => {
+    for (const timer of Object.values(timers.current)) clearTimeout(timer);
+    timers.current = {};
+  }, []);
+
+  useEffect(() => {
+    if (!expanded || logsLoading) return;
+    if (initializedScopeRef.current === scopeKey) return;
+    initializedScopeRef.current = scopeKey;
+    const count = Math.max(1, sets - confirmedLogged.length);
+    const next = Array.from({ length: count }, (_, draftIndex) =>
+      makeDraft(confirmedLogged.length + draftIndex + 1),
+    );
+    draftsRef.current = next;
+    setDrafts(next);
+  }, [confirmedLogged.length, expanded, logsLoading, scopeKey, sets]);
+
+  useEffect(() => clearAllTimers, [clearAllTimers]);
 
   const commitSet = useCallback(
-    async (i: number) => {
-      if (!onAddSet || !date || savingRef.current[i]) return;
-      const d = draftsRef.current[i];
-      if (!d) return;
-      const weight = parsePositiveNumber(d.weight.trim(), 9999);
-      const repsNum = parsePositiveInt(d.reps.trim(), 9999);
-      if (weight == null || repsNum == null) return;
-      const sig = `${weight}|${repsNum}`;
-      if (savedSig.current[i] === sig) return;
-      savingRef.current[i] = true;
-      setDrafts((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "saving" } : r)));
-      try {
-        await onAddSet({
-          date,
-          exercise_name: name,
-          weight_kg: weight,
-          reps: repsNum,
-          plan_day_id: planDayId ?? null,
+    (key: string): Promise<void> => {
+      const existing = inFlightRef.current.get(key);
+      if (existing) return existing;
+      if (!onAddSet || !date) return Promise.resolve();
+
+      const draft = draftsRef.current.find((entry) => entry.key === key);
+      if (!draft) return Promise.resolve();
+      const weight = parsePositiveNumber(draft.weight.trim(), 9999);
+      const repsNum = parsePositiveInt(draft.reps.trim(), 9999);
+      if (weight == null || repsNum == null) return Promise.resolve();
+
+      const requestId = draft.requestId;
+      const requestScope = scopeKey;
+      applyDrafts((current) =>
+        current.map((entry) =>
+          entry.key === key ? { ...entry, status: "saving" } : entry,
+        ),
+      );
+
+      const request = onAddSet({
+        id: requestId,
+        date,
+        exercise_name: name,
+        weight_kg: weight,
+        reps: repsNum,
+        plan_day_id: planDayId ?? null,
+      })
+        .then(() => {
+          if (initializedScopeRef.current !== requestScope) return;
+          applyDrafts((current) => current.filter((entry) => entry.key !== key));
+          successTick();
+        })
+        .catch(() => {
+          if (initializedScopeRef.current !== requestScope) return;
+          applyDrafts((current) =>
+            current.map((entry) =>
+              entry.key === key && entry.requestId === requestId
+                ? { ...entry, status: "error" }
+                : entry,
+            ),
+          );
+        })
+        .finally(() => {
+          inFlightRef.current.delete(key);
         });
-        savedSig.current[i] = sig;
-        setDrafts((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "saved" } : r)));
-        successTick();
-        setTimeout(() => {
-          setDrafts((prev) => prev.map((r, idx) => (idx === i && r.status === "saved" ? { ...r, status: "idle" } : r)));
-        }, 800);
-      } catch {
-        setDrafts((prev) => prev.map((r, idx) => (idx === i ? { ...r, status: "error" } : r)));
-      } finally {
-        savingRef.current[i] = false;
-      }
+
+      inFlightRef.current.set(key, request);
+      return request;
     },
-    [date, name, onAddSet, planDayId, setDrafts],
+    [applyDrafts, date, name, onAddSet, planDayId, scopeKey],
   );
 
   const patchDraft = useCallback(
-    (i: number, patch: Partial<Pick<Draft, "weight" | "reps">>) => {
-      setDrafts((prev) => prev.map((d, idx) => (idx === i ? { ...d, ...patch, status: "editing" } : d)));
-      clearTimer(i);
-      timers.current[i] = setTimeout(() => {
-        delete timers.current[i];
-        commitSet(i);
+    (key: string, patch: Partial<Pick<Draft, "weight" | "reps">>) => {
+      applyDrafts((current) =>
+        current.map((entry) => {
+          if (entry.key !== key) return entry;
+          const requestId = entry.status === "error" ? Crypto.randomUUID() : entry.requestId;
+          return { ...entry, ...patch, requestId, status: "editing" };
+        }),
+      );
+      clearTimer(key);
+      timers.current[key] = setTimeout(() => {
+        delete timers.current[key];
+        commitSet(key);
       }, AUTOSAVE_DELAY_MS);
     },
-    [clearTimer, commitSet, setDrafts],
+    [applyDrafts, clearTimer, commitSet],
   );
 
-  const flushRow = useCallback(
-    (i: number) => {
-      clearTimer(i);
-      commitSet(i);
+  const handleFocus = useCallback((key: string) => {
+    focusedRowRef.current = key;
+  }, []);
+
+  const handleBlur = useCallback(
+    (key: string) => {
+      if (focusedRowRef.current === key) focusedRowRef.current = null;
+      setTimeout(() => {
+        if (focusedRowRef.current === key) return;
+        clearTimer(key);
+        commitSet(key);
+      }, 0);
     },
     [clearTimer, commitSet],
   );
 
+  const addDraft = useCallback(() => {
+    const highestOrdinal = draftsRef.current.reduce(
+      (highest, draft) => Math.max(highest, draft.ordinal),
+      doneCount,
+    );
+    applyDrafts((current) => [...current, makeDraft(highestOrdinal + 1)]);
+  }, [applyDrafts, doneCount]);
+
   const confirmDelete = useCallback(
     (id: string) => {
-      if (!onDeleteSet) return;
+      if (!onDeleteSet || pendingIds?.has(id)) return;
       Alert.alert("Delete set?", "This removes the logged set.", [
         { text: "Cancel", style: "cancel" },
         { text: "Delete", style: "destructive", onPress: () => onDeleteSet(id) },
       ]);
     },
-    [onDeleteSet],
+    [onDeleteSet, pendingIds],
   );
 
+  const activeRequestIds = useMemo(
+    () => new Set(drafts.map((draft) => draft.requestId)),
+    [drafts],
+  );
+  const visibleLogged = useMemo(
+    () => logged.filter((entry) => !activeRequestIds.has(entry.id)),
+    [activeRequestIds, logged],
+  );
   const canExpand = !!onToggle;
 
   return (
@@ -233,15 +281,20 @@ export function ExerciseRow({
 
       {expanded ? (
         <View style={styles.expanded}>
-          {logged.length > 0 ? (
+          {visibleLogged.length > 0 ? (
             <View style={styles.loggedList}>
-              {logged.map((l) => (
-                <View key={l.id} style={styles.loggedRow}>
+              {visibleLogged.map((entry) => (
+                <View key={entry.id} style={styles.loggedRow}>
                   <Ionicons name="checkmark-circle" size={16} color={colors.success} />
                   <Text style={typography.bodyStrong}>
-                    {l.weight_kg} kg × {l.reps}
+                    {entry.weight_kg} kg × {entry.reps}
                   </Text>
-                  <Pressable onPress={() => confirmDelete(l.id)} hitSlop={8} accessibilityLabel="Delete set">
+                  <Pressable
+                    onPress={() => confirmDelete(entry.id)}
+                    hitSlop={8}
+                    accessibilityLabel="Delete set"
+                    disabled={pendingIds?.has(entry.id)}
+                  >
                     <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
                   </Pressable>
                 </View>
@@ -249,41 +302,49 @@ export function ExerciseRow({
             </View>
           ) : null}
 
-          {drafts.map((d, i) => (
-            <View key={i} style={[styles.setRow, d.status === "error" && styles.setRowError]}>
-              <View style={styles.setBadge}>
-                <Text style={styles.setBadgeText}>{logged.length + i + 1}</Text>
+          {drafts.map((draft) => (
+            <View key={draft.key} style={styles.draftWrap}>
+              <View style={[styles.setRow, draft.status === "error" && styles.setRowError]}>
+                <View style={styles.setBadge}>
+                  <Text style={styles.setBadgeText}>{draft.ordinal}</Text>
+                </View>
+                <TextInput
+                  value={draft.weight}
+                  onChangeText={(text) => patchDraft(draft.key, { weight: text })}
+                  onFocus={() => handleFocus(draft.key)}
+                  onBlur={() => handleBlur(draft.key)}
+                  keyboardType="numeric"
+                  placeholder="kg"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  editable={draft.status !== "saving"}
+                />
+                <Text style={styles.x}>×</Text>
+                <TextInput
+                  value={draft.reps}
+                  onChangeText={(text) => patchDraft(draft.key, { reps: text })}
+                  onFocus={() => handleFocus(draft.key)}
+                  onBlur={() => handleBlur(draft.key)}
+                  keyboardType="numeric"
+                  placeholder="reps"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  editable={draft.status !== "saving"}
+                />
+                <RowStatusIcon status={draft.status} />
               </View>
-              <TextInput
-                value={d.weight}
-                onChangeText={(t) => patchDraft(i, { weight: t })}
-                onBlur={() => flushRow(i)}
-                keyboardType="numeric"
-                placeholder="kg"
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
-                editable={d.status !== "saving"}
-              />
-              <Text style={styles.x}>×</Text>
-              <TextInput
-                value={d.reps}
-                onChangeText={(t) => patchDraft(i, { reps: t })}
-                onBlur={() => flushRow(i)}
-                keyboardType="numeric"
-                placeholder="reps"
-                placeholderTextColor={colors.textMuted}
-                style={styles.input}
-                editable={d.status !== "saving"}
-              />
-              <RowStatusIcon status={d.status} />
+              {draft.status === "error" ? (
+                <View style={styles.retryRow}>
+                  <Text style={styles.errorText}>Couldn’t save. Your values are kept.</Text>
+                  <Pressable onPress={() => commitSet(draft.key)} hitSlop={8}>
+                    <Text style={styles.retryText}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           ))}
 
-          <Pressable
-            onPress={() => setDrafts((prev) => [...prev, blankDraft()])}
-            hitSlop={8}
-            style={styles.addSet}
-          >
+          <Pressable onPress={addDraft} hitSlop={8} style={styles.addSet}>
             <Ionicons name="add" size={16} color={colors.primary} />
             <Text style={styles.addSetText}>Add set</Text>
           </Pressable>
@@ -296,12 +357,8 @@ export function ExerciseRow({
 function RowStatusIcon({ status }: { status: RowStatus }) {
   const { colors } = useTheme();
   if (status === "saving") return null;
-  if (status === "saved")
-    return <Ionicons name="checkmark-circle" size={22} color={colors.success} />;
-  if (status === "error")
-    return <Ionicons name="alert-circle" size={22} color={colors.danger} />;
-  if (status === "editing")
-    return <Ionicons name="ellipse-outline" size={22} color={colors.textDim} />;
+  if (status === "error") return <Ionicons name="alert-circle" size={22} color={colors.danger} />;
+  if (status === "editing") return <Ionicons name="ellipse-outline" size={22} color={colors.textDim} />;
   return <View style={{ width: 22 }} />;
 }
 
@@ -336,10 +393,10 @@ const useStyles = makeUseStyles((t) =>
     prescription: { color: t.colors.textDim },
     last: { color: t.colors.textMuted },
     tags: { flexDirection: "row", gap: spacing.xs, marginTop: 2, flexWrap: "wrap" },
-
     expanded: { marginTop: spacing.md, gap: spacing.sm },
     loggedList: { gap: spacing.xs },
     loggedRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    draftWrap: { gap: spacing.xs },
     setRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     setRowError: { borderWidth: 1, borderColor: t.colors.danger, borderRadius: radii.sm, padding: 2 },
     setBadge: {
@@ -363,6 +420,9 @@ const useStyles = makeUseStyles((t) =>
       color: t.colors.text,
     },
     x: { fontSize: 15, fontWeight: "600", color: t.colors.textMuted },
+    retryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+    errorText: { ...t.typography.caption, color: t.colors.danger, flex: 1 },
+    retryText: { fontSize: 13, fontWeight: "700", color: t.colors.primary },
     addSet: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 4 },
     addSetText: { fontSize: 14, fontWeight: "600", color: t.colors.primary },
   }),

@@ -20,7 +20,7 @@ RUN npm run build \
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-# OpenSSL for `prisma migrate deploy`; wget for the HEALTHCHECK.
+# OpenSSL for `prisma migrate deploy`; wget for the liveness HEALTHCHECK.
 RUN apk add --no-cache openssl wget
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

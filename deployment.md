@@ -29,8 +29,10 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
 Push to `main` (or Run workflow manually) runs `.github/workflows/
 backend-deploy.yml`: backend CI (install, build, tests), then over SSH —
 `git pull` → `docker compose build` → `docker compose run --rm api npx
-prisma migrate deploy` → `docker compose up -d` → `curl
-localhost:$PORT/health` gate → `docker image prune`.
+prisma migrate deploy` → `docker compose up -d` → process liveness check at
+`localhost:$PORT/health` → Neon readiness gate at `localhost:$PORT/ready` →
+`docker image prune`. Docker health checks use `/health` so a temporary Neon
+outage does not create a container restart loop; deployments require `/ready`.
 
 The image never contains secrets: `.env` is excluded via `.dockerignore`
 and supplied at run time through compose `env_file`.

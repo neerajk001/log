@@ -72,7 +72,17 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     Sentry.getCurrentScope().setUser({ id: userId });
     next();
   } catch (err) {
-    console.error("[auth] Failed to resolve local user");
+    console.error("[auth] Failed to resolve local user", {
+      path: req.path,
+      name: err instanceof Error ? err.name : "UnknownError",
+      prismaCode:
+        err instanceof Prisma.PrismaClientKnownRequestError ? err.code : undefined,
+    });
+    Sentry.getCurrentScope().setTag("operation", "auth.resolve_local_user");
+    Sentry.getCurrentScope().setTag(
+      "database.error_code",
+      err instanceof Prisma.PrismaClientKnownRequestError ? err.code : "unknown",
+    );
     next(err);
   }
 }

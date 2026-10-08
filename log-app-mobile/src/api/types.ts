@@ -33,6 +33,7 @@ export interface LiftLog {
 }
 
 export interface LiftLogCreate {
+  id?: string;
   date: string;
   exercise_name: string;
   weight_kg: number;

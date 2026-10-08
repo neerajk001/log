@@ -19,6 +19,7 @@ export const dailyLogSchema = z.object({
 });
 
 export const liftLogSchema = z.object({
+  id: z.string().uuid().optional(),
   date: dateString,
   exercise_name: z.string().min(1).max(120),
   weight_kg: z.number().positive().max(9999),

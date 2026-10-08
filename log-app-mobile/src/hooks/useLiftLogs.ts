@@ -1,29 +1,55 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
+import * as Crypto from "expo-crypto";
 import { useLiftLogsApi } from "../api/liftLogs";
 import type { LiftLog, LiftLogCreate } from "../api/types";
 
-/** Today's (or a given date's) logged lift sets, with optimistic add/delete. */
 export function useLiftLogs(date: string) {
   const api = useLiftLogsApi();
   const [entries, setEntries] = useState<LiftLog[]>([]);
+  const entriesRef = useRef<LiftLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  const pendingIdsRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef<Map<string, Promise<LiftLog>>>(new Map());
+  const loadSequenceRef = useRef(0);
+
+  const applyEntries = useCallback((next: LiftLog[] | ((current: LiftLog[]) => LiftLog[])) => {
+    const value = typeof next === "function" ? next(entriesRef.current) : next;
+    entriesRef.current = value;
+    setEntries(value);
+  }, []);
+
+  const setPending = useCallback((id: string, pending: boolean) => {
+    const next = new Set(pendingIdsRef.current);
+    if (pending) next.add(id);
+    else next.delete(id);
+    pendingIdsRef.current = next;
+    setPendingIds(next);
+  }, []);
 
   const load = useCallback(async () => {
+    const sequence = ++loadSequenceRef.current;
     setLoading(true);
-    setError(null);
+    setLoadError(null);
     try {
-      setEntries(await api.getLiftLogsRange(date, date));
+      const fetched = await api.getLiftLogsRange(date, date);
+      if (sequence !== loadSequenceRef.current) return;
+      const fetchedIds = new Set(fetched.map((entry) => entry.id));
+      const pending = entriesRef.current.filter(
+        (entry) => pendingIdsRef.current.has(entry.id) && !fetchedIds.has(entry.id),
+      );
+      applyEntries([...pending, ...fetched]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load lifts");
+      if (sequence !== loadSequenceRef.current) return;
+      setLoadError(err instanceof Error ? err.message : "Failed to load lifts");
     } finally {
-      setLoading(false);
+      if (sequence === loadSequenceRef.current) setLoading(false);
     }
-  }, [api, date]);
+  }, [api, applyEntries, date]);
 
-  // useFocusEffect fires on mount too, so no separate useEffect — otherwise
-  // the screen would fetch the same range twice on first open.
   useFocusEffect(
     useCallback(() => {
       load();
@@ -32,49 +58,86 @@ export function useLiftLogs(date: string) {
 
   const addEntry = useCallback(
     async (data: LiftLogCreate): Promise<LiftLog> => {
-      setError(null);
-      const tempId = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const optimistic: LiftLog = {
-        id: tempId,
-        date: data.date,
-        exercise_name: data.exercise_name,
-        weight_kg: data.weight_kg,
-        reps: data.reps,
-        plan_day_id: data.plan_day_id ?? null,
-      };
-      setEntries((prev) => [optimistic, ...prev]);
-      try {
-        const saved = await api.createLiftLog(data);
-        setEntries((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
-        return saved;
-      } catch (err) {
-        setEntries((prev) => prev.filter((e) => e.id !== tempId));
-        const message = err instanceof Error ? err.message : "Failed to save lift";
-        setError(message);
-        throw err;
+      const id = data.id ?? Crypto.randomUUID();
+      const existingRequest = inFlightRef.current.get(id);
+      if (existingRequest) return existingRequest;
+
+      const requestData: LiftLogCreate = { ...data, id };
+      const alreadyPresent = entriesRef.current.some((entry) => entry.id === id);
+      setMutationError(null);
+      setPending(id, true);
+      if (!alreadyPresent) {
+        applyEntries((current) => [
+          {
+            id,
+            date: requestData.date,
+            exercise_name: requestData.exercise_name,
+            weight_kg: requestData.weight_kg,
+            reps: requestData.reps,
+            plan_day_id: requestData.plan_day_id ?? null,
+          },
+          ...current,
+        ]);
       }
+
+      const request = api
+        .createLiftLog(requestData)
+        .then((saved) => {
+          applyEntries((current) => {
+            const exists = current.some((entry) => entry.id === id);
+            return exists
+              ? current.map((entry) => (entry.id === id ? saved : entry))
+              : [saved, ...current];
+          });
+          return saved;
+        })
+        .catch((err) => {
+          if (!alreadyPresent) {
+            applyEntries((current) => current.filter((entry) => entry.id !== id));
+          }
+          setMutationError(err instanceof Error ? err.message : "Failed to save lift");
+          throw err;
+        })
+        .finally(() => {
+          inFlightRef.current.delete(id);
+          setPending(id, false);
+        });
+
+      inFlightRef.current.set(id, request);
+      return request;
     },
-    [api],
+    [api, applyEntries, setPending],
   );
 
   const deleteEntry = useCallback(
     async (id: string) => {
-      if (id.startsWith("pending-")) {
-        setEntries((prev) => prev.filter((e) => e.id !== id));
-        return;
-      }
-      const removed = entries.find((e) => e.id === id);
-      setEntries((prev) => prev.filter((e) => e.id !== id));
+      if (pendingIdsRef.current.has(id)) return;
+      const removed = entriesRef.current.find((entry) => entry.id === id);
+      applyEntries((current) => current.filter((entry) => entry.id !== id));
+      setMutationError(null);
       try {
         await api.deleteLiftLog(id);
       } catch (err) {
-        if (removed) setEntries((prev) => [removed, ...prev]);
-        setError(err instanceof Error ? err.message : "Failed to delete set");
+        if (removed) applyEntries((current) => [removed, ...current]);
+        setMutationError(err instanceof Error ? err.message : "Failed to delete set");
         throw err;
       }
     },
-    [api, entries],
+    [api, applyEntries],
   );
 
-  return { entries, loading, error, addEntry, deleteEntry, refetch: load };
+  const clearMutationError = useCallback(() => setMutationError(null), []);
+
+  return {
+    entries,
+    loading,
+    error: loadError ?? mutationError,
+    loadError,
+    mutationError,
+    pendingIds,
+    addEntry,
+    deleteEntry,
+    clearMutationError,
+    refetch: load,
+  };
 }

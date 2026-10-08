@@ -47,7 +47,7 @@ R3.4).
 
 | column        | type          | notes                              |
 |---------------|---------------|--------------------------------------|
-| id            | uuid, PK      | |
+| id            | uuid, PK      | may be client-supplied on authenticated lift creates for retry idempotency |
 | user_id       | uuid, FK → users.id, not null | |
 | date          | date, not null | |
 | exercise_name | text, not null | free text or from plan |
@@ -58,6 +58,10 @@ R3.4).
 
 **Index:** `(user_id, exercise_name, date)` — supports the trends query
 (this week vs last week per exercise).
+
+Authenticated clients may supply `id` when creating a set. Exact retries use
+the existing row; a conflicting owner or payload is rejected. This uses the
+existing primary key and does not add a schema constraint or migration.
 
 ### `workout_plans`
 

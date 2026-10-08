@@ -1,53 +1,23 @@
 import { Router, Response } from "express";
+import * as Sentry from "@sentry/node";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { AppError } from "../middleware/errorHandler";
 import { idParamSchema, liftLogSchema, liftLogsQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
-import { MAX_RANGE_DAYS, RANGE_TOO_LARGE, assertRangeSize } from "../utils/range";
+import { createLiftLogIdempotent, serializeLiftLog } from "../services/liftLogs";
+import { assertRangeSize } from "../utils/range";
 
 const router = Router();
 
 router.post("/lift", requireAuth, validate(liftLogSchema), async (req, res: Response) => {
-  const { date, exercise_name, weight_kg, reps, plan_day_id } = req.body;
+  const requestId = req.body.id as string | undefined;
+  Sentry.getCurrentScope().setTag("operation", "lift.create");
+  Sentry.getCurrentScope().setTag("lift.has_request_id", requestId ? "true" : "false");
+  if (requestId) Sentry.getCurrentScope().setTag("lift.request_id", requestId);
 
-  if (plan_day_id) {
-    const planDay = await prisma.planDay.findFirst({
-      where: { id: plan_day_id, plan: { userId: req.userId } },
-      select: { id: true },
-    });
-    if (!planDay) {
-      throw new AppError(404, "NOT_FOUND", "Plan day not found");
-    }
-  }
-
-  const log = await prisma.liftLog.create({
-    data: {
-      userId: req.userId,
-      date: new Date(date),
-      exerciseName: exercise_name,
-      weightKg: weight_kg,
-      reps,
-      planDayId: plan_day_id ?? null,
-    },
-    select: {
-      id: true,
-      date: true,
-      exerciseName: true,
-      weightKg: true,
-      reps: true,
-      planDayId: true,
-    },
-  });
-
-  res.status(201).json({
-    id: log.id,
-    date: log.date.toISOString().slice(0, 10),
-    exercise_name: log.exerciseName,
-    weight_kg: log.weightKg,
-    reps: log.reps,
-    plan_day_id: log.planDayId,
-  });
+  const { log, created } = await createLiftLogIdempotent(req.userId, req.body);
+  Sentry.getCurrentScope().setTag("lift.outcome", created ? "created" : "replayed");
+  res.status(created ? 201 : 200).json(serializeLiftLog(log));
 });
 
 router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (req, res: Response) => {
@@ -102,14 +72,7 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
   });
 
   res.json(
-    logs.map((l) => ({
-      id: l.id,
-      date: l.date.toISOString().slice(0, 10),
-      exercise_name: l.exerciseName,
-      weight_kg: l.weightKg,
-      reps: l.reps,
-      plan_day_id: l.planDayId,
-    })),
+    logs.map(serializeLiftLog),
   );
 });
 

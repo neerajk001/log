@@ -91,5 +91,7 @@ jobs:
             PORT_VALUE="${PORT_VALUE:-3000}"
             curl -fsS "http://localhost:${PORT_VALUE}/health"
             echo ""
+            curl -fsS "http://localhost:${PORT_VALUE}/ready"
+            echo ""
             docker image prune -f
             echo "DEPLOY OK"

@@ -1,8 +1,9 @@
 # API
 
 Base URL: `https://<domain>/api` (see `docs/deployment.md`). All routes
-except `/health` require a valid Clerk session token in the `Authorization:
-Bearer <token>` header. See `docs/auth.md` for verification details.
+except `/health` and `/ready` require a valid Clerk session token in the
+`Authorization: Bearer <token>` header. See `docs/auth.md` for verification
+details.
 
 ## Error format (all endpoints)
 
@@ -16,12 +17,19 @@ Bearer <token>` header. See `docs/auth.md` for verification details.
 ```
 
 Standard codes: `UNAUTHORIZED` (401), `VALIDATION_ERROR` (400), `NOT_FOUND`
-(404), `PARSE_FAILED` (422, plan parsing specific), `RATE_LIMITED` (429),
-`SERVER_ERROR` (500).
+(404), `IDEMPOTENCY_CONFLICT` (409, lift retry specific), `PARSE_FAILED`
+(422, plan parsing specific), `RATE_LIMITED` (429), `SERVER_ERROR` (500).
 
 ## `GET /health`
 
-No auth. Returns `{status: "ok"}`. Used for VPS/Nginx health checks.
+No auth. Returns `{status: "ok"}`. Process liveness only; it does not query
+Neon and is used by the Docker health check.
+
+## `GET /ready`
+
+No auth. Queries Neon with a short timeout. Returns `{status: "ready"}` on
+success or `503 {"status":"unavailable"}` without database details. Used as
+the post-deploy readiness gate.
 
 ## `GET /api/me`
 
@@ -57,6 +65,7 @@ Returns an array of daily logs in range, used by Trends.
 Body:
 ```json
 {
+  "id": "optional client-generated uuid",
   "date": "2026-08-08",
   "exercise_name": "Barbell Bench Press",
   "weight_kg": 62.5,
@@ -64,6 +73,13 @@ Body:
   "plan_day_id": "uuid | null"
 }
 ```
+
+Without `id`, each request appends a new set and returns `201`. With a new
+client UUID, the server creates that row and returns `201`; retrying the same
+UUID with the same authenticated user and identical payload returns the
+existing row with `200`. Reusing the UUID for another owner or changed payload
+returns `409 IDEMPOTENCY_CONFLICT`. Distinct UUIDs may intentionally carry
+identical weight and reps.
 
 ## `GET /api/logs/lift?exercise=<name>&weeks=4`
 

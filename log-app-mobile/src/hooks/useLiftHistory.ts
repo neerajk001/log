@@ -7,14 +7,17 @@ export function useLiftHistory(exercise: string | null, weeks = 8) {
   const api = useLiftLogsApi();
   const [logs, setLogs] = useState<LiftLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!exercise) {
       setLogs([]);
+      setLoaded(false);
       return;
     }
     setLoading(true);
+    setLoaded(false);
     setError(null);
     try {
       setLogs(await api.getLiftHistory(exercise, weeks));
@@ -22,6 +25,7 @@ export function useLiftHistory(exercise: string | null, weeks = 8) {
       setError(err instanceof Error ? err.message : "Failed to load history");
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, [api, exercise, weeks]);
 
@@ -29,5 +33,5 @@ export function useLiftHistory(exercise: string | null, weeks = 8) {
     load();
   }, [load]);
 
-  return { logs, loading, error, refetch: load };
+  return { logs, loading, loaded, error, refetch: load };
 }

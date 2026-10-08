@@ -17,6 +17,9 @@ loop is validated by real usage.
 - **Integration tests (recommended, not blocking MVP):** `supertest`
   against key routes (`/api/logs/daily/:date` upsert behavior, auth
   rejection on missing token) using a test Neon branch or local Postgres.
+- **Lift service tests:** client request-ID validation, exact retry replay,
+  distinct identical sets, ownership-safe conflicts, concurrent UUID
+  collisions, numeric serialization, and database readiness timeouts.
 - Test runner: Vitest.
 
 ## Frontend
@@ -24,6 +27,18 @@ loop is validated by real usage.
 - Manual QA against `docs/requirements.md` acceptance criteria per phase
   is sufficient for MVP. Automated component/E2E tests are explicitly
   post-MVP — do not spend Phase 1-3 budget on Detox/Maestro setup.
+
+## Lift logging regression checklist
+
+Verify on Expo web and at least one native target:
+
+- Editing/saving one planned set leaves every sibling row unchanged.
+- Multiple identical weight×reps sets each persist once.
+- Immediate blur saves the final typed value; debounce plus blur creates one set.
+- Concurrent set saves may resolve out of order without moving values/statuses.
+- A failed save retains values and exposes row-local Retry.
+- Retrying after a committed-but-lost response does not duplicate the set.
+- Collapse/reopen and refresh do not erase or duplicate active drafts.
 
 ## What must be tested before Phase 3 is considered done
 

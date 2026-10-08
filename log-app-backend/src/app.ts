@@ -6,6 +6,7 @@ import { clerkMiddleware } from "@clerk/express";
 import { isAllowedOrigin } from "./cors";
 import { errorHandler } from "./middleware/errorHandler";
 import { config } from "./config";
+import { checkDatabaseReadiness } from "./db/readiness";
 import usersRouter from "./routes/users";
 import dailyLogsRouter from "./routes/dailyLogs";
 import liftLogsRouter from "./routes/liftLogs";
@@ -15,6 +16,8 @@ import trendsRouter from "./routes/trends";
 import verdictRouter from "./routes/verdict";
 
 const app = express();
+const READINESS_REPORT_INTERVAL_MS = 5 * 60 * 1000;
+let lastReadinessReportAt = 0;
 app.set("trust proxy", 1);
 app.use(helmet());
 
@@ -36,6 +39,26 @@ app.use((req, res, next) => {
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/ready", async (_req, res) => {
+  try {
+    await checkDatabaseReadiness();
+    res.json({ status: "ready" });
+  } catch (err) {
+    console.error("[readiness] Database unavailable", {
+      name: err instanceof Error ? err.name : "UnknownError",
+    });
+    const now = Date.now();
+    if (now - lastReadinessReportAt >= READINESS_REPORT_INTERVAL_MS) {
+      lastReadinessReportAt = now;
+      Sentry.withScope((scope) => {
+        scope.setTag("operation", "database.readiness");
+        Sentry.captureException(err);
+      });
+    }
+    res.status(503).json({ status: "unavailable" });
+  }
 });
 
 app.use(clerkMiddleware({ secretKey: config.clerk.secretKey }));

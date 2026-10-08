@@ -18,7 +18,7 @@ import { spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DayBanner } from "../../src/components/DayBanner";
 import { ExerciseRow } from "../../src/components/ExerciseRow";
-import { Button, Card, EmptyState, LoadingState, ErrorState } from "../../src/components/ui/primitives";
+import { Banner, Button, Card, EmptyState, LoadingState, ErrorState } from "../../src/components/ui/primitives";
 import { Chip, ChipRow, IconButton, OverflowMenu, TextField } from "../../src/components/ui/controls";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
@@ -48,7 +48,17 @@ export default function LiftScreen() {
 
   const { planId, day: rotatedDay, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(today);
   const { days } = usePlans();
-  const { entries, addEntry, deleteEntry, loading: liftsLoading, refetch: refetchLifts } = useLiftLogs(today);
+  const {
+    entries,
+    addEntry,
+    deleteEntry,
+    loading: liftsLoading,
+    loadError: liftsLoadError,
+    mutationError: liftsMutationError,
+    pendingIds,
+    clearMutationError,
+    refetch: refetchLifts,
+  } = useLiftLogs(today);
   const { names: recent } = useRecentExercises();
 
   const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
@@ -168,6 +178,15 @@ export default function LiftScreen() {
         />
 
         {planError ? <ErrorState message={planError} onRetry={refetchPlan} /> : null}
+        {liftsLoadError ? <ErrorState message={liftsLoadError} onRetry={refetchLifts} /> : null}
+        {liftsMutationError ? (
+          <Banner
+            tone="warning"
+            message={liftsMutationError}
+            actionLabel="Dismiss"
+            onAction={clearMutationError}
+          />
+        ) : null}
 
         {days.length > 1 ? (
           <ChipRow style={styles.dayChips}>
@@ -197,7 +216,7 @@ export default function LiftScreen() {
                 const key = `${day.id}:${ex.name}`;
                 return (
                   <ExerciseRow
-                    key={ex.name}
+                    key={`${today}:${day.id}:${ex.name}`}
                     index={i + 1}
                     name={ex.name}
                     sets={ex.sets}
@@ -211,6 +230,8 @@ export default function LiftScreen() {
                     onToggle={() => setExpanded((cur) => (cur === key ? null : key))}
                     onAddSet={addEntry}
                     onDeleteSet={(id) => deleteEntry(id).catch(() => {})}
+                    logsLoading={liftsLoading}
+                    pendingIds={pendingIds}
                   />
                 );
               })}

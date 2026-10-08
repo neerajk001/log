@@ -51,6 +51,10 @@ One hook per screen's primary data need, e.g. `useTodayLog()`,
 - Implements optimistic updates for mutations (per R2.4): update local
   state immediately, call the API, roll back on failure with a visible
   retry affordance — never fail silently.
+- Planned lift rows have stable independent identities. Saving one set must
+  not reset, copy, or submit sibling rows; failed values remain in memory
+  with a row-local retry using the same request UUID. This is not offline
+  sync: drafts are not persisted or retried in the background.
 
 ## Error handling in UI
 
