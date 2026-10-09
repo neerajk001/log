@@ -337,7 +337,39 @@ describe("runCoachChatStream sessions", () => {
     mocks.findFirstSession.mockResolvedValue(null);
 
     await expect(
-      runCoachChatStream("user-1", "11111111-1111-4111-8111-111111111111", "hi", { onDelta: () => {} }),
+      runCoachChatStream("user-1", "11111111-1111-4111-8111-111111111111", "hi", "2026-10-09", {
+        onDelta: () => {},
+      }),
     ).rejects.toMatchObject({ statusCode: 404, code: "NOT_FOUND" });
+  });
+});
+
+describe("local date handling", () => {
+  it("uses the caller's local date in the context, not the server's", async () => {
+    // The DB/server is on UTC; the athlete is a day ahead.
+    mocks.findUniqueProfile.mockResolvedValue({
+      goal: "lose fat",
+      weightKg: null,
+      targetWeightKg: null,
+      heightCm: null,
+      experience: null,
+      daysPerWeek: null,
+      equipment: null,
+      dietNotes: null,
+      injuries: null,
+      notes: null,
+    });
+
+    const context = await buildAthleteContext("user-1", "2026-10-10");
+
+    expect(context).toContain("TODAY: 2026-10-10");
+  });
+
+  it("defaults the plan-vs-actual date to the caller's local date", async () => {
+    mocks.findFirstPlan.mockResolvedValue(null);
+    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}", "2026-10-10")).toEqual({
+      date: "2026-10-10",
+      day: null,
+    });
   });
 });

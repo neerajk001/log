@@ -132,6 +132,8 @@ export const coachProfileSchema = z.object({
 export const coachChatSchema = z.object({
   message: z.string().min(1).max(2000),
   sessionId: z.string().uuid().optional(),
+  /** The athlete's local date (server may be on UTC). */
+  localDate: dateString.optional(),
 });
 
 export const coachPlanSchema = z.object({

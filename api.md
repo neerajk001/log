@@ -270,9 +270,11 @@ verdict, active plan), asks the coach model, persists both turns and returns
 
 ## `POST /api/coach/chat/stream`
 
-Body `{ message, sessionId? }`. With no `sessionId` the server creates a chat and
-emits `data: {"sessionId":"…"}` as the first event; with one, it must belong to the
-caller. Streams the reply as Server-Sent Events: `data: {"delta":"…"}` per token,
+Body `{ message, sessionId?, localDate? }`. With no `sessionId` the server creates a
+chat and emits `data: {"sessionId":"…"}` as the first event; with one, it must
+belong to the caller. `localDate` (YYYY-MM-DD) is the athlete's local date — the
+server runs on UTC, so it is used for "today" and the tool date windows. Streams the
+reply as Server-Sent Events: `data: {"delta":"…"}` per token,
 `data: {"status":"…"}` while the coach looks something up, then
 `data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
 

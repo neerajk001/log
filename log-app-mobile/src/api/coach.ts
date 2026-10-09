@@ -44,6 +44,7 @@ export async function streamCoachChat({
   token,
   message,
   sessionId,
+  localDate,
   onDelta,
   onStatus,
   onSessionId,
@@ -52,6 +53,7 @@ export async function streamCoachChat({
   token: string | null;
   message: string;
   sessionId?: string | null;
+  localDate?: string;
   onDelta: (delta: string) => void;
   onStatus?: (status: string) => void;
   onSessionId?: (sessionId: string) => void;
@@ -66,7 +68,7 @@ export async function streamCoachChat({
       Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ message, sessionId: sessionId ?? undefined }),
+    body: JSON.stringify({ message, sessionId: sessionId ?? undefined, localDate }),
     signal,
   });
 

@@ -218,7 +218,8 @@ router.post(
   chatRateLimit,
   validate(coachChatSchema),
   async (req: Request, res: Response) => {
-    const { message, sessionId } = req.body as z.infer<typeof coachChatSchema>;
+    const { message, sessionId, localDate } = req.body as z.infer<typeof coachChatSchema>;
+    const today = localDate ?? new Date().toISOString().slice(0, 10);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -243,6 +244,7 @@ router.post(
         req.userId,
         sessionId ?? null,
         message,
+        today,
         {
           onSession: (id) => send({ sessionId: id }),
           onDelta: (delta) => send({ delta }),

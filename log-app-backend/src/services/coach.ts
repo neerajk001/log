@@ -94,9 +94,15 @@ function topSetByWindow(
  * of data: weight/nutrition averages plus recent daily weights, per-exercise
  * top sets and volume, this-vs-last-week lift trend, activity minutes, recent
  * verdicts and the active plan. Aggregates only — no raw log dumps.
+ *
+ * `today` is the athlete's LOCAL date (YYYY-MM-DD) — the server may be on UTC,
+ * which can be a day behind/ahead of them.
  */
-export async function buildAthleteContext(userId: string): Promise<string> {
-  const now = new Date();
+export async function buildAthleteContext(
+  userId: string,
+  today: string = fmtDate(new Date()),
+): Promise<string> {
+  const now = new Date(`${today}T00:00:00Z`);
   const since = new Date(now);
   since.setUTCDate(since.getUTCDate() - CONTEXT_WINDOW_DAYS);
 
@@ -250,7 +256,7 @@ export async function buildAthleteContext(userId: string): Promise<string> {
   }
 
   if (lines.length === 0) return "No logged data yet.";
-  return [`TODAY: ${fmtDate(now)} (units: kg, kcal, g, hours)`, ...lines].join("\n");
+  return [`TODAY: ${today} (the athlete's local date; units: kg, kcal, g, hours)`, ...lines].join("\n");
 }
 
 /**
@@ -509,8 +515,8 @@ function clampDays(value: unknown, fallback: number): number {
   return Math.max(1, Math.min(MAX_TOOL_DAYS, Math.floor(n)));
 }
 
-function daysAgo(days: number): Date {
-  const d = new Date();
+function daysAgo(days: number, today: string): Date {
+  const d = new Date(`${today}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - (days - 1));
   return d;
 }
@@ -523,6 +529,7 @@ export async function executeCoachTool(
   userId: string,
   name: string,
   rawArgs: string,
+  today: string = fmtDate(new Date()),
 ): Promise<unknown> {
   let args: Record<string, unknown> = {};
   try {
@@ -534,7 +541,7 @@ export async function executeCoachTool(
   try {
     switch (name) {
       case "get_lift_history": {
-        const where: Record<string, unknown> = { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } };
+        const where: Record<string, unknown> = { userId, date: { gte: daysAgo(clampDays(args.days, 28), today) } };
         if (typeof args.exercise === "string" && args.exercise.trim()) {
           where.exerciseName = args.exercise.trim();
         }
@@ -554,7 +561,7 @@ export async function executeCoachTool(
 
       case "get_daily_logs": {
         const rows = await prisma.dailyLog.findMany({
-          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } },
+          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28), today) } },
           orderBy: { date: "desc" },
           take: 90,
           select: { date: true, weightKg: true, calories: true, proteinG: true, sleepHours: true },
@@ -587,7 +594,7 @@ export async function executeCoachTool(
       }
 
       case "get_plan_vs_actual": {
-        const dateStr = typeof args.date === "string" ? args.date : fmtDate(new Date());
+        const dateStr = typeof args.date === "string" ? args.date : today;
         const plan = await prisma.workoutPlan.findFirst({
           where: { userId, isActive: true },
           include: { planDays: { orderBy: { dayOrder: "asc" } } },
@@ -622,7 +629,7 @@ export async function executeCoachTool(
 
       case "get_activity_logs": {
         const rows = await prisma.activityLog.findMany({
-          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } },
+          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28), today) } },
           orderBy: { date: "desc" },
           take: 90,
           select: {
@@ -799,6 +806,7 @@ export async function runCoachChatStream(
   userId: string,
   sessionId: string | null,
   message: string,
+  today: string,
   handlers: {
     onDelta: (delta: string) => void;
     onStatus?: (status: string) => void;
@@ -820,7 +828,7 @@ export async function runCoachChatStream(
   handlers.onSession?.(session.id);
 
   const [context, recent] = await Promise.all([
-    buildAthleteContext(userId),
+    buildAthleteContext(userId, today),
     prisma.coachMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: "desc" },
@@ -918,7 +926,7 @@ export async function runCoachChatStream(
     for (const call of result.calls) {
       handlers.onStatus?.(TOOL_LABELS[call.name] ?? "Looking that up…");
       usedTools.push(call.name);
-      const output = await executeCoachTool(userId, call.name, call.args);
+      const output = await executeCoachTool(userId, call.name, call.args, today);
       input.push({
         type: "function_call_output",
         call_id: call.callId,

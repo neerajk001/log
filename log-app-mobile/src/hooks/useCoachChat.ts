@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { streamCoachChat, useCoachApi } from "../api/coach";
+import { todayLocal } from "../utils/date";
 
 export interface ChatMessage {
   id: string;
@@ -72,6 +73,7 @@ export function useCoachChat(initialSessionId?: string) {
           token,
           message,
           sessionId,
+          localDate: todayLocal(),
           signal: controller.signal,
           onSessionId: (id) => setSessionId(id),
           onDelta: (delta) => {
