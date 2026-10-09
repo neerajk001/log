@@ -6,7 +6,7 @@ import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
-import { analyzePhysique, generateCoachPlan, runCoachChat } from "../services/coach";
+import { analyzePhysique, generateCoachPlan, runCoachChat, runCoachChatStream } from "../services/coach";
 import { coachChatSchema, coachPlanSchema, coachProfileSchema } from "../validation/schemas";
 
 const router = Router();
@@ -129,6 +129,44 @@ router.post(
       res.json({ reply });
     } catch (err) {
       next(err);
+    }
+  },
+);
+
+router.post(
+  "/chat/stream",
+  requireAuth,
+  chatRateLimit,
+  validate(coachChatSchema),
+  async (req: Request, res: Response) => {
+    const { message } = req.body as z.infer<typeof coachChatSchema>;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    let closed = false;
+    const send = (payload: unknown) => {
+      if (!closed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    // A client Stop (or a dropped connection) aborts the upstream model call.
+    const controller = new AbortController();
+    req.on("close", () => {
+      closed = true;
+      controller.abort();
+    });
+
+    try {
+      await runCoachChatStream(req.userId, message, (delta) => send({ delta }), controller.signal);
+      send({ done: true });
+    } catch (err) {
+      // Headers are already sent, so we can't hand this to the error middleware.
+      send({ error: err instanceof Error ? err.message : "The coach failed to reply" });
+    } finally {
+      if (!closed) res.end();
     }
   },
 );

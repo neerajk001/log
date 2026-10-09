@@ -15,7 +15,9 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
 3. Clone the repo, copy `log-app-backend/.env.example` →
    `log-app-backend/.env`, fill in secrets (`DATABASE_URL` from Neon,
    `CLERK_SECRET_KEY`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`,
-   plus `PORT` and `SENTRY_DSN` for error monitoring).
+   plus `PORT` and `SENTRY_DSN` for error monitoring). Model routing can be
+   tuned with `OPENAI_PARSE_MODEL`, `COACH_FAST_MODEL`, `COACH_MODEL`
+   (reasoning) and `COACH_VISION_MODEL` — see `docs/backend.md`.
 4. `cd log-app-backend && docker compose up -d --build`
 5. Run migrations: `docker compose run --rm api npx prisma migrate deploy`
 6. If a previous PM2-based install exists: `pm2 delete log-api` /
@@ -23,6 +25,10 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
 7. Configure Nginx as a reverse proxy from `https://api.<domain>` to
    `localhost:$PORT` (same value as in `.env`); issue a certificate with
    `certbot --nginx`.
+   **Streaming:** the AI coach's `POST /api/coach/chat/stream` requires
+   `proxy_buffering off;` (with a generous `proxy_read_timeout`) on the API
+   location, or Nginx buffers the whole reply and streaming is lost. The
+   route also sends `X-Accel-Buffering: no`.
 
 ### Deploy flow (automated — GitHub Actions, no manual steps)
 

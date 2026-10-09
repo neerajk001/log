@@ -143,11 +143,26 @@ export async function buildAthleteContext(userId: string): Promise<string> {
   return lines.length > 0 ? lines.join("\n") : "No logged data yet.";
 }
 
+/**
+ * Picks a chat model by how much reasoning the turn probably needs: short,
+ * factual questions go to the cheap/fast model; anything long or reasoning-heavy
+ * (why, change, adjust, analyze, plateau, check-in, …) goes to the strong one.
+ */
+export function routeChatModel(message: string): string {
+  const text = message.trim();
+  const looksDeep =
+    text.length > 120 ||
+    /\b(why|explain|analys|analyz|review|compare|should i|change|adjust|program|routine|split|periodi|deload|progress|stall|plateau|injur|pain|macro|calorie|deficit|surplus|check[- ]?in)/i.test(
+      text,
+    );
+  return looksDeep ? config.models.chatSmart : config.models.chatFast;
+}
+
 async function callModel(
   instructions: string,
   input: InputMessage[],
   maxOutputTokens: number,
-  json = false,
+  options: { json?: boolean; model: string },
 ): Promise<string> {
   if (!config.openai.apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
@@ -162,10 +177,10 @@ async function callModel(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: config.coach.model,
+        model: options.model,
         instructions,
         input,
-        ...(json ? { text: { format: { type: "json_object" } } } : {}),
+        ...(options.json ? { text: { format: { type: "json_object" } } } : {}),
         max_output_tokens: maxOutputTokens,
       }),
     });
@@ -219,6 +234,7 @@ export async function runCoachChat(userId: string, message: string): Promise<str
     `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`,
     [...history, { role: "user", content: [{ type: "input_text", text: message }] }],
     700,
+    { model: routeChatModel(message) },
   );
 
   await prisma.$transaction([
@@ -227,6 +243,124 @@ export async function runCoachChat(userId: string, message: string): Promise<str
   ]);
 
   return reply;
+}
+
+/**
+ * Pulls the text delta out of one OpenAI Responses SSE `data:` payload.
+ * Returns null for events we don't care about (start, completed, [DONE], …).
+ */
+export function parseOpenAIDelta(payload: string): string | null {
+  if (!payload || payload === "[DONE]") return null;
+  let event: { type?: string; delta?: unknown };
+  try {
+    event = JSON.parse(payload) as { type?: string; delta?: unknown };
+  } catch {
+    return null;
+  }
+  if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
+    return event.delta;
+  }
+  return null;
+}
+
+/**
+ * Streaming variant of {@link runCoachChat}. Persists the user message up
+ * front, forwards each text delta through `onDelta`, and stores whatever text
+ * was produced (so a Stop mid-reply keeps the partial answer).
+ */
+export async function runCoachChatStream(
+  userId: string,
+  message: string,
+  onDelta: (delta: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
+  const [context, recent] = await Promise.all([
+    buildAthleteContext(userId),
+    prisma.coachMessage.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: HISTORY_TURNS,
+      select: { role: true, content: true },
+    }),
+  ]);
+
+  await prisma.coachMessage.create({ data: { userId, role: "user", content: message } });
+
+  if (!config.openai.apiKey) {
+    throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
+  }
+
+  const history: InputMessage[] = recent
+    .reverse()
+    .map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: [
+        {
+          type: m.role === "assistant" ? "output_text" : "input_text",
+          text: m.content,
+        },
+      ] as InputPart[],
+    }));
+
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.openai.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: routeChatModel(message),
+        instructions: `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`,
+        input: [...history, { role: "user", content: [{ type: "input_text", text: message }] }],
+        stream: true,
+        max_output_tokens: 700,
+      }),
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") return "";
+    throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
+  }
+
+  if (!res.ok || !res.body) {
+    console.error("[coach] OpenAI stream error:", res.status);
+    throw new AppError(502, "COACH_ERROR", `The AI service returned ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const delta = parseOpenAIDelta(trimmed.slice(5).trim());
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      }
+    }
+  } catch (err) {
+    // Client disconnected (Stop) — keep whatever we streamed so far.
+    if (!(err instanceof Error && err.name === "AbortError")) throw err;
+  }
+
+  const text = full.trim();
+  if (text.length > 0) {
+    await prisma.coachMessage.create({ data: { userId, role: "assistant", content: text } });
+  }
+  return text;
 }
 
 /** Generates a structured program from the athlete's profile + recent data. */
@@ -249,7 +383,7 @@ export async function generateCoachPlan(
     instructions,
     [{ role: "user", content: [{ type: "input_text", text: "Create the program as JSON." }] }],
     2500,
-    true,
+    { json: true, model: config.models.chatSmart },
   );
 
   try {
@@ -290,5 +424,6 @@ export async function analyzePhysique(
       },
     ],
     400,
+    { model: config.models.vision },
   );
 }

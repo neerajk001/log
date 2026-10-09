@@ -252,6 +252,18 @@ user's profile and last 4 weeks of data (weight, nutrition, top lifts, latest
 verdict, active plan), asks the coach model, persists both turns and returns
 `{ "reply": "..." }`. Rate-limited to 30 requests/hour per user.
 
+## `POST /api/coach/chat/stream`
+
+Same body and limits as `/chat`, but streams the reply as Server-Sent Events:
+`data: {"delta":"…"}` per token, then `data: {"done":true}`; on failure mid-stream
+`data: {"error":"…"}`. The user message is stored up front, and the assistant
+message is stored with whatever text was produced — so a client Stop (which aborts
+the request and the upstream model call) keeps the partial answer.
+
+Deployment note: this route needs nginx `proxy_buffering off;` (the route already
+sets `X-Accel-Buffering: no`), or the VPS proxy buffers the whole response and
+defeats streaming.
+
 ## `POST /api/coach/plan`
 
 Body (both optional) `{ "goal": "...", "notes": "..." }`. Generates a program from

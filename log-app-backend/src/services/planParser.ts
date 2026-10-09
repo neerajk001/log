@@ -76,7 +76,7 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: config.openai.model,
+        model: config.models.parsing,
         instructions: SYSTEM_PROMPT,
         input: [
           {

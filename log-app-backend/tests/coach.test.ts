@@ -19,7 +19,8 @@ vi.mock("../src/db/client", () => ({
   },
 }));
 
-import { buildAthleteContext } from "../src/services/coach";
+import { buildAthleteContext, parseOpenAIDelta, routeChatModel } from "../src/services/coach";
+import { config } from "../src/config";
 
 beforeEach(() => {
   mocks.findUniqueProfile.mockReset().mockResolvedValue(null);
@@ -126,5 +127,42 @@ describe("coachChatSchema", () => {
   it("requires a non-empty message", () => {
     expect(coachChatSchema.safeParse({ message: "" }).success).toBe(false);
     expect(coachChatSchema.safeParse({ message: "hi" }).success).toBe(true);
+  });
+});
+
+describe("parseOpenAIDelta", () => {
+  it("extracts the text delta from an output_text.delta event", () => {
+    const payload = JSON.stringify({ type: "response.output_text.delta", delta: "Hello" });
+    expect(parseOpenAIDelta(payload)).toBe("Hello");
+  });
+
+  it("ignores non-delta, [DONE] and empty payloads", () => {
+    expect(parseOpenAIDelta(JSON.stringify({ type: "response.completed" }))).toBeNull();
+    expect(parseOpenAIDelta("[DONE]")).toBeNull();
+    expect(parseOpenAIDelta("")).toBeNull();
+  });
+
+  it("ignores invalid JSON and non-string deltas", () => {
+    expect(parseOpenAIDelta("{not json")).toBeNull();
+    expect(
+      parseOpenAIDelta(JSON.stringify({ type: "response.output_text.delta", delta: 5 })),
+    ).toBeNull();
+  });
+});
+
+describe("routeChatModel", () => {
+  it("sends short, simple questions to the fast model", () => {
+    expect(routeChatModel("how much protein did I eat?")).toBe(config.models.chatFast);
+    expect(routeChatModel("thanks")).toBe(config.models.chatFast);
+  });
+
+  it("sends reasoning-heavy questions to the smart model", () => {
+    expect(routeChatModel("should I change my calories this week?")).toBe(config.models.chatSmart);
+    expect(routeChatModel("why has my bench stalled?")).toBe(config.models.chatSmart);
+    expect(routeChatModel("give me this week's check-in")).toBe(config.models.chatSmart);
+  });
+
+  it("sends long messages to the smart model", () => {
+    expect(routeChatModel("x".repeat(200))).toBe(config.models.chatSmart);
   });
 });
