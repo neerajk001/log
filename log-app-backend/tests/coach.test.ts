@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   findManyVerdicts: vi.fn(),
   findFirstPlan: vi.fn(),
   findManyActivity: vi.fn(),
+  findFirstDaily: vi.fn(),
   findManyCoachMessages: vi.fn(),
   findFirstSession: vi.fn(),
   createSession: vi.fn(),
@@ -18,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/db/client", () => ({
   prisma: {
     coachProfile: { findUnique: mocks.findUniqueProfile },
-    dailyLog: { findMany: mocks.findManyDaily },
+    dailyLog: { findMany: mocks.findManyDaily, findFirst: mocks.findFirstDaily },
     liftLog: { findMany: mocks.findManyLift },
     weeklyVerdict: { findMany: mocks.findManyVerdicts },
     workoutPlan: { findFirst: mocks.findFirstPlan },
@@ -54,6 +55,7 @@ beforeEach(() => {
   mocks.findManyVerdicts.mockReset().mockResolvedValue([]);
   mocks.findFirstPlan.mockReset().mockResolvedValue(null);
   mocks.findManyActivity.mockReset().mockResolvedValue([]);
+  mocks.findFirstDaily.mockReset().mockResolvedValue(null);
   mocks.findManyCoachMessages.mockReset().mockResolvedValue([]);
   mocks.findFirstSession.mockReset().mockResolvedValue(null);
   mocks.createSession.mockReset().mockResolvedValue({ id: "sess-1" });
@@ -288,10 +290,67 @@ describe("executeCoachTool", () => {
 
   it("returns a null day when there is no active plan", async () => {
     mocks.findFirstPlan.mockResolvedValue(null);
-    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}")).toEqual({
+    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}")).toMatchObject({
       date: expect.any(String),
       day: null,
     });
+  });
+
+  it("surfaces the day's actual logs for 'what did I log'", async () => {
+    mocks.findManyLift.mockResolvedValue([
+      { exerciseName: "Romanian Deadlift", weightKg: 10, reps: 10 },
+      { exerciseName: "Romanian Deadlift", weightKg: 15, reps: 8 },
+      { exerciseName: "Cable Crunch", weightKg: 12, reps: 10 },
+    ]);
+    mocks.findFirstDaily.mockResolvedValue({ weightKg: 64.5, calories: 1700, proteinG: 57, sleepHours: 7 });
+    mocks.findManyActivity.mockResolvedValue([]);
+
+    const result = (await executeCoachTool("user-1", "get_day_logs", "{}", "2026-10-09")) as {
+      date: string;
+      lifts: unknown[];
+      daily: unknown;
+    };
+
+    expect(result.date).toBe("2026-10-09");
+    expect(result.lifts).toEqual([
+      { exercise: "Romanian Deadlift", sets: 2, top_set: { weight_kg: 15, reps: 8 } },
+      { exercise: "Cable Crunch", sets: 1, top_set: { weight_kg: 12, reps: 10 } },
+    ]);
+    expect(result.daily).toEqual({
+      weight_kg: 64.5,
+      calories: 1700,
+      protein_g: 57,
+      sleep_hours: 7,
+    });
+    expect((mocks.findManyLift.mock.calls[0][0] as { where: { userId: string } }).where.userId).toBe(
+      "user-1",
+    );
+  });
+
+  it("does not hide off-plan work from the plan comparison", async () => {
+    mocks.findFirstPlan.mockResolvedValue({
+      createdAt: new Date("2026-09-01"),
+      planDays: [
+        {
+          id: "d1",
+          dayName: "LEGS (STRENGTH)",
+          dayOrder: 1,
+          exercises: [{ name: "Cable Crunch", sets: 3, reps: "15" }],
+        },
+      ],
+    });
+    mocks.findManyLift.mockResolvedValue([
+      { exerciseName: "Cable Crunch", weightKg: 12, reps: 10 },
+      { exerciseName: "Romanian Deadlift", weightKg: 15, reps: 8 },
+    ]);
+
+    const result = (await executeCoachTool("user-1", "get_plan_vs_actual", "{}", "2026-10-09")) as {
+      prescribed: { name: string; logged_sets: number }[];
+      also_logged_off_plan: string[];
+    };
+
+    expect(result.prescribed[0]).toMatchObject({ name: "Cable Crunch", logged_sets: 1 });
+    expect(result.also_logged_off_plan).toContain("Romanian Deadlift");
   });
 
   it("never throws — unknown tools and bad args resolve", async () => {
@@ -367,7 +426,7 @@ describe("local date handling", () => {
 
   it("defaults the plan-vs-actual date to the caller's local date", async () => {
     mocks.findFirstPlan.mockResolvedValue(null);
-    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}", "2026-10-10")).toEqual({
+    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}", "2026-10-10")).toMatchObject({
       date: "2026-10-10",
       day: null,
     });

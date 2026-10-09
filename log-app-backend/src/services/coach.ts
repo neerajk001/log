@@ -22,9 +22,13 @@ Facts and honesty:
   recent weekly verdicts, and the active plan's days.
 - What you CANNOT see: individual sets beyond the top set, individual meals, or anything older than
   ~4 weeks. If asked about those, say so.
-- You also have tools to look up the user's data on demand (get_lift_history, get_daily_logs,
-  get_weekly_verdicts, get_plan_vs_actual, get_activity_logs). Prefer calling a tool over guessing,
-  and don't call one for facts already in the context above.
+- You also have tools to look up the user's data on demand (get_day_logs, get_lift_history,
+  get_daily_logs, get_weekly_verdicts, get_plan_vs_actual, get_activity_logs). Prefer calling a tool
+  over guessing, and don't call one for facts already in the context above.
+- "What did I log" questions: call get_day_logs and report exactly what it returns — including
+  off-plan exercises. Use get_plan_vs_actual ONLY for plan-adherence questions (it compares against
+  the prescription and exercise names may differ), never to state what was logged, and never say a
+  planned exercise "wasn't logged" unless that day's logs actually show it missing.
 - You are not a doctor: never diagnose or give medical advice. For injuries or medical concerns, tell
   the user to consult a professional.
 
@@ -462,6 +466,16 @@ const COACH_TOOLS = [
   },
   {
     type: "function",
+    name: "get_day_logs",
+    description:
+      "Everything the athlete ACTUALLY logged on one day (defaults to today): lifts grouped by exercise with set counts and top set, plus daily values and activities. Use this to answer 'what did I log' questions.",
+    parameters: {
+      type: "object",
+      properties: { date: { type: "string", description: "YYYY-MM-DD; defaults to today." } },
+    },
+  },
+  {
+    type: "function",
     name: "get_daily_logs",
     description: "Look up daily body-weight, calories, protein and sleep over the last N days.",
     parameters: {
@@ -503,6 +517,7 @@ const COACH_TOOLS = [
 
 const TOOL_LABELS: Record<string, string> = {
   get_lift_history: "Checking your lift history…",
+  get_day_logs: "Pulling up that day's log…",
   get_daily_logs: "Reading your daily logs…",
   get_weekly_verdicts: "Reviewing your weekly verdicts…",
   get_plan_vs_actual: "Comparing your plan with what you logged…",
@@ -559,6 +574,58 @@ export async function executeCoachTool(
         }));
       }
 
+      case "get_day_logs": {
+        const dateStr = typeof args.date === "string" ? args.date : today;
+        const day = new Date(`${dateStr}T00:00:00Z`);
+        const [lifts, daily, activities] = await Promise.all([
+          prisma.liftLog.findMany({
+            where: { userId, date: day },
+            orderBy: { createdAt: "asc" },
+            select: { exerciseName: true, weightKg: true, reps: true },
+          }),
+          prisma.dailyLog.findFirst({
+            where: { userId, date: day },
+            select: { weightKg: true, calories: true, proteinG: true, sleepHours: true },
+          }),
+          prisma.activityLog.findMany({
+            where: { userId, date: day },
+            select: { activityType: true, name: true, durationMin: true, distanceKm: true },
+          }),
+        ]);
+
+        const byExercise = new Map<string, { sets: number; top: { weight_kg: number; reps: number } }>();
+        for (const l of lifts) {
+          const w = Number(l.weightKg);
+          const entry = byExercise.get(l.exerciseName) ?? { sets: 0, top: { weight_kg: 0, reps: 0 } };
+          entry.sets += 1;
+          if (w > entry.top.weight_kg) entry.top = { weight_kg: w, reps: l.reps };
+          byExercise.set(l.exerciseName, entry);
+        }
+
+        return {
+          date: dateStr,
+          lifts: Array.from(byExercise.entries()).map(([exercise, e]) => ({
+            exercise,
+            sets: e.sets,
+            top_set: e.top,
+          })),
+          daily: daily
+            ? {
+                weight_kg: daily.weightKg == null ? null : Number(daily.weightKg),
+                calories: daily.calories,
+                protein_g: daily.proteinG,
+                sleep_hours: daily.sleepHours == null ? null : Number(daily.sleepHours),
+              }
+            : null,
+          activities: activities.map((a) => ({
+            activity_type: a.activityType,
+            name: a.name,
+            duration_min: a.durationMin,
+            distance_km: a.distanceKm,
+          })),
+        };
+      }
+
       case "get_daily_logs": {
         const rows = await prisma.dailyLog.findMany({
           where: { userId, date: { gte: daysAgo(clampDays(args.days, 28), today) } },
@@ -599,18 +666,26 @@ export async function executeCoachTool(
           where: { userId, isActive: true },
           include: { planDays: { orderBy: { dayOrder: "asc" } } },
         });
-        if (!plan) return { date: dateStr, day: null };
+        if (!plan) return { date: dateStr, day: null, note: "No active plan." };
         const day = resolvePlanDayForDate(plan.createdAt, plan.planDays, new Date(`${dateStr}T00:00:00Z`));
         if (!day) return { date: dateStr, day: null };
+
         const prescribed = day.exercises as unknown as { name: string; sets: number; reps: string }[];
+        // Fetch EVERY logged set that day (not just prescribed names) so off-plan
+        // work is visible instead of looking like "not logged".
         const logs = await prisma.liftLog.findMany({
-          where: { userId, date: new Date(`${dateStr}T00:00:00Z`), exerciseName: { in: prescribed.map((e) => e.name) } },
+          where: { userId, date: new Date(`${dateStr}T00:00:00Z`) },
           select: { exerciseName: true, weightKg: true, reps: true },
         });
+        const prescribedNames = new Set(prescribed.map((e) => e.name));
+        const offPlan = Array.from(
+          new Set(logs.map((l) => l.exerciseName).filter((n) => !prescribedNames.has(n))),
+        );
+
         return {
           date: dateStr,
           day: day.dayName,
-          exercises: prescribed.map((e) => {
+          prescribed: prescribed.map((e) => {
             const mine = logs.filter((l) => l.exerciseName === e.name);
             const top = mine.reduce<{ weight_kg: number; reps: number } | null>((best, l) => {
               const kg = Number(l.weightKg);
@@ -624,6 +699,7 @@ export async function executeCoachTool(
               top_set: top,
             };
           }),
+          also_logged_off_plan: offPlan,
         };
       }
 

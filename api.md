@@ -278,7 +278,7 @@ reply as Server-Sent Events: `data: {"delta":"…"}` per token,
 `data: {"status":"…"}` while the coach looks something up, then
 `data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
 
-The coach can call read-only tools (`get_lift_history`, `get_daily_logs`,
+The coach can call read-only tools (`get_day_logs`, `get_lift_history`, `get_daily_logs`,
 `get_weekly_verdicts`, `get_plan_vs_actual`, `get_activity_logs`) — all scoped to
 the authenticated user, in a bounded loop (max 4 rounds). The user message is
 stored up front, and the assistant message is stored with whatever text was
