@@ -115,3 +115,25 @@ export const trendsQuerySchema = z.object({
 
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;
 export type CreatePlanInput = z.infer<typeof createPlanSchema>;
+
+export const coachProfileSchema = z.object({
+  goal: z.string().max(200).optional().nullable(),
+  weight_kg: z.number().positive().max(999).optional().nullable(),
+  target_weight_kg: z.number().positive().max(999).optional().nullable(),
+  height_cm: z.number().int().positive().max(300).optional().nullable(),
+  experience: z.enum(["beginner", "intermediate", "advanced"]).optional().nullable(),
+  days_per_week: z.number().int().min(1).max(7).optional().nullable(),
+  equipment: z.string().max(200).optional().nullable(),
+  diet_notes: z.string().max(1000).optional().nullable(),
+  injuries: z.string().max(1000).optional().nullable(),
+  notes: z.string().max(2000).optional().nullable(),
+});
+
+export const coachChatSchema = z.object({
+  message: z.string().min(1).max(2000),
+});
+
+export const coachPlanSchema = z.object({
+  goal: z.string().max(500).optional(),
+  notes: z.string().max(2000).optional(),
+});

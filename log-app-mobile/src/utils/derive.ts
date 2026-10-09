@@ -222,6 +222,42 @@ export function strengthChangePct(logs: LiftLog[], from: string = todayLocal()):
   return Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length);
 }
 
+/**
+ * Average % change in top-set weight over the trailing `days`, compared with
+ * the immediately preceding `days` window (rolling, not ISO-week aligned).
+ * Used for the range-based Strength tile and the month-over-month card.
+ */
+export function strengthChangePctWindow(
+  logs: LiftLog[],
+  days: number,
+  from: string = todayLocal(),
+): number | null {
+  const currentStart = addDays(from, -(days - 1));
+  const previousEnd = addDays(from, -days);
+  const previousStart = addDays(previousEnd, -(days - 1));
+
+  const topSets = (start: string, end: string) => {
+    const map = new Map<string, number>();
+    for (const l of logs) {
+      if (l.date < start || l.date > end) continue;
+      const w = Number(l.weight_kg);
+      map.set(l.exercise_name, Math.max(map.get(l.exercise_name) ?? 0, w));
+    }
+    return map;
+  };
+
+  const current = topSets(currentStart, from);
+  const previous = topSets(previousStart, previousEnd);
+
+  const deltas: number[] = [];
+  for (const [exercise, w] of current) {
+    const prev = previous.get(exercise);
+    if (prev && prev > 0) deltas.push(((w - prev) / prev) * 100);
+  }
+  if (deltas.length === 0) return null;
+  return Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length);
+}
+
 export interface DayGroup {
   date: string;
   logs: LiftLog[];

@@ -1,16 +1,23 @@
 import { useMemo, useState } from "react";
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
-import { radii, spacing } from "../../src/theme/spacing";
+import { radii, shadows, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { VerdictStamp } from "../../src/components/VerdictStamp";
 import { BarChart, DonutChart, Sparkline } from "../../src/components/ui/charts";
-import { Card, IconBadge, LoadingState, ErrorState, Divider } from "../../src/components/ui/primitives";
+import {
+  Card,
+  ErrorState,
+  IconBadge,
+  LoadingState,
+  type IoniconName,
+} from "../../src/components/ui/primitives";
 import { SegmentedControl } from "../../src/components/ui/controls";
 import { useInsights } from "../../src/hooks/useInsights";
-import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { useTrends } from "../../src/hooks/useTrends";
 import { formatNumber } from "../../src/utils/derive";
+import { weekDayLabels } from "../../src/utils/date";
 
 const RANGES = [
   { value: "7", label: "7D" },
@@ -18,11 +25,15 @@ const RANGES = [
   { value: "90", label: "90D" },
 ];
 
+function signedPct(n: number | null): string {
+  if (n == null) return "—";
+  return `${n > 0 ? "+" : ""}${n}%`;
+}
+
 /**
- * Insights — verdict first, then the signals behind it. No streaks, no
- * cheerleading: the weekly verdict is the product, everything else is the
- * evidence for it. The range selector drives the training sections only;
- * verdict and weight use fixed windows (noted under the header).
+ * Insights — a plain-language progress summary: how consistent you've been,
+ * the headline numbers, your volume trend, where that volume went, your best
+ * lifts, and a streak. The weekly verdict lives on its own screen (`/verdict`).
  */
 export default function InsightsScreen() {
   const [range, setRange] = useState("7");
@@ -30,27 +41,32 @@ export default function InsightsScreen() {
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
-  const sliceColors = [colors.chart1, colors.chart2, colors.chart3, colors.chart4, colors.chart5, colors.teal, colors.amber];
-  const volumeLabel = rangeDays >= 90 ? "Last 13 weeks" : `Last ${rangeDays} days`;
+  const sliceColors = [
+    colors.chart1,
+    colors.chart2,
+    colors.chart3,
+    colors.chart4,
+    colors.chart5,
+    colors.teal,
+    colors.amber,
+  ];
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays);
-  const { data: verdict, loading: verdictLoading, refetch: refetchVerdict } = useWeeklyVerdict();
-  const { data: trends, refetch: refetchTrends } = useTrends();
-
-  const hasData = metrics.workouts > 0;
+  const { data: trends, loading: trendsLoading, refetch: refetchTrends } = useTrends();
 
   const weightValues = useMemo(
     () => (trends?.weight ?? []).map((w) => w.avg_kg).filter((v): v is number => v != null),
     [trends],
   );
   const currentAvg = weightValues.length > 0 ? weightValues[weightValues.length - 1] : null;
+  const adherence = trends?.adherence_pct ?? null;
 
-  const insufficient =
-    verdict != null && verdict.weight_trend_kg_per_week == null;
+  const totalSets = metrics.muscles.reduce((s, m) => s + m.sets, 0);
+  const hasVolume = metrics.totalVolume > 0;
+  const monthUp = metrics.monthStrengthPct != null && metrics.monthStrengthPct > 0;
 
   const refresh = () => {
     refetch();
-    refetchVerdict();
     refetchTrends();
   };
 
@@ -58,7 +74,13 @@ export default function InsightsScreen() {
     <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={loading || verdictLoading} onRefresh={refresh} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={loading || trendsLoading}
+            onRefresh={refresh}
+            tintColor={colors.primary}
+          />
+        }
       >
         <ScreenHeader
           variant="page"
@@ -69,46 +91,62 @@ export default function InsightsScreen() {
             </View>
           }
         />
-        <Text style={[typography.caption, styles.scopeNote]}>
-          Training sections follow the range above. Verdict and weight use fixed windows.
-        </Text>
 
         {error ? <ErrorState message={error} onRetry={refetch} /> : null}
 
-        {/* Weekly verdict — the product */}
-        <Card style={styles.section}>
-          <Text style={typography.bodyStrong}>Weekly Verdict</Text>
-          {insufficient ? (
-            <Text style={[typography.small, styles.verdictNote]}>
-              {verdict?.reasoning[0] ?? "Keep logging to unlock your weekly verdict."}
-            </Text>
-          ) : verdict ? (
-            <View style={styles.verdictBody}>
-              <VerdictStamp verdict={verdict.verdict} />
-              <View style={styles.signals}>
-                <SignalRow
-                  label="Weight trend"
-                  value={verdict.weight_trend_kg_per_week != null ? `${verdict.weight_trend_kg_per_week.toFixed(2)} kg/wk` : "—"}
-                />
-                <SignalRow label="Strength trend" value={verdict.strength_trend ?? "—"} />
-                <SignalRow label="Protein adherence" value={verdict.adherence_pct != null ? `${verdict.adherence_pct}%` : "—"} />
-              </View>
-              <Divider />
-              <Text style={[typography.caption, styles.whyTitle]}>Why</Text>
-              {verdict.reasoning.map((line, i) => (
-                <Text key={i} style={[typography.small, styles.whyLine]}>
-                  • {line}
-                </Text>
-              ))}
-            </View>
-          ) : (
-            <Text style={typography.small}>Loading verdict…</Text>
-          )}
-        </Card>
+        {/* Consistency summary */}
+        <MotivationCard
+          icon="pulse"
+          iconBg={colors.primarySoft}
+          iconColor={colors.primary}
+          title={metrics.workoutsThisWeek > 0 ? "You're consistent!" : "Let's get started"}
+          subtitle={
+            metrics.workoutsThisWeek > 0
+              ? `${metrics.workoutsThisWeek} workout${metrics.workoutsThisWeek === 1 ? "" : "s"} this week`
+              : "No workouts logged this week yet"
+          }
+          onPress={() => router.navigate("/(tabs)/history" as never)}
+        />
 
-        {/* Weight signal */}
+        {/* Key metrics */}
+        <View style={styles.tiles}>
+          <MetricTile
+            icon="barbell"
+            iconBg={colors.purpleSoft}
+            iconColor={colors.purple}
+            value={String(metrics.workouts)}
+            label="Workouts"
+          />
+          <MetricTile
+            icon="layers"
+            iconBg={colors.blueSoft}
+            iconColor={colors.blue}
+            value={formatNumber(metrics.totalVolume)}
+            unit="kg"
+            label="Total Volume"
+          />
+          <MetricTile
+            icon="trending-up"
+            iconBg={colors.greenSoft}
+            iconColor={colors.green}
+            value={signedPct(metrics.strengthPct)}
+            label="Strength"
+          />
+          <MetricTile
+            icon="checkmark-circle"
+            iconBg={colors.orangeSoft}
+            iconColor={colors.orange}
+            value={adherence != null ? `${adherence}%` : "—"}
+            label="Adherence"
+          />
+        </View>
+
+        {/* Weight (R5) */}
         <Card style={styles.section}>
-          <Text style={typography.bodyStrong}>Weight · 4-week average</Text>
+          <View style={styles.cardHeaderLeft}>
+            <IconBadge name="scale-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
+            <Text style={typography.bodyStrong}>Weight · 4-week average</Text>
+          </View>
           {weightValues.length > 0 ? (
             <View style={styles.weightBody}>
               <Text style={typography.metric}>
@@ -118,64 +156,65 @@ export default function InsightsScreen() {
               <Sparkline values={weightValues} width={300} height={110} />
             </View>
           ) : (
-            <Text style={[typography.small, styles.verdictNote]}>
+            <Text style={[typography.small, styles.note]}>
               Log weight on the Today screen to see your trend.
             </Text>
           )}
         </Card>
 
-        {/* Training: volume + muscle balance */}
+        {/* Volume trend */}
         <Card style={styles.section}>
           <View style={styles.cardHeader}>
             <View style={styles.cardHeaderLeft}>
               <IconBadge name="bar-chart-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
-              <Text style={typography.bodyStrong}>Training Volume</Text>
+              <Text style={typography.bodyStrong}>Volume Trend</Text>
             </View>
             <View style={styles.pill}>
-              <Text style={styles.pillText}>{volumeLabel}</Text>
+              <Text style={styles.pillText}>Total Volume</Text>
             </View>
           </View>
-          {loading && !hasData ? (
+          {loading && !hasVolume ? (
             <LoadingState label="Crunching your numbers…" />
-          ) : hasData ? (
-            <BarChart data={metrics.volumeSeries} />
+          ) : hasVolume ? (
+            <BarChart data={metrics.volumeSeries} axis />
           ) : (
             <Text style={typography.small}>No workouts in this range yet.</Text>
           )}
-          {metrics.muscles.length > 0 ? (
-            <>
-              <Divider />
-              <Text style={typography.bodyStrong}>Muscle Balance</Text>
-              <View style={styles.donutWrap}>
-                <DonutChart
-                  slices={metrics.muscles.slice(0, 6).map((m, i) => ({
-                    label: m.muscle,
-                    value: m.sets,
-                    color: sliceColors[i % sliceColors.length],
-                  }))}
-                  centerTop={String(metrics.muscles.reduce((s, m) => s + m.sets, 0))}
-                  centerBottom="sets"
-                />
-              </View>
-              <View style={styles.legend}>
-                {metrics.muscles.slice(0, 6).map((m, i) => (
-                  <View key={m.muscle} style={styles.legendRow}>
-                    <View style={[styles.legendDot, { backgroundColor: sliceColors[i % sliceColors.length] }]} />
-                    <Text style={[typography.small, styles.legendLabel]} numberOfLines={1}>
-                      {m.muscle}
-                    </Text>
-                    <Text style={typography.small}>{m.pct}%</Text>
-                  </View>
-                ))}
-              </View>
-            </>
-          ) : null}
         </Card>
 
-        {/* Lifts: top exercises + personal records */}
-        <Card style={styles.section}>
-          <Text style={typography.bodyStrong}>Top Exercises</Text>
-          {metrics.top.length > 0 ? (
+        {/* Muscle breakdown */}
+        {metrics.muscles.length > 0 ? (
+          <Card style={styles.section}>
+            <Text style={typography.bodyStrong}>Muscle Breakdown</Text>
+            <View style={styles.donutWrap}>
+              <DonutChart
+                slices={metrics.muscles.slice(0, 6).map((m, i) => ({
+                  label: m.muscle,
+                  value: m.sets,
+                  color: sliceColors[i % sliceColors.length],
+                }))}
+                centerTop={String(totalSets)}
+                centerBottom="sets"
+              />
+            </View>
+            <View style={styles.legend}>
+              {metrics.muscles.slice(0, 6).map((m, i) => (
+                <View key={m.muscle} style={styles.legendRow}>
+                  <View style={[styles.legendDot, { backgroundColor: sliceColors[i % sliceColors.length] }]} />
+                  <Text style={[typography.small, styles.legendLabel]} numberOfLines={1}>
+                    {m.muscle}
+                  </Text>
+                  <Text style={typography.small}>{m.pct}%</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
+
+        {/* Top exercises */}
+        {metrics.top.length > 0 ? (
+          <Card style={styles.section}>
+            <Text style={typography.bodyStrong}>Top Exercises</Text>
             <View style={styles.rankList}>
               {metrics.top.map((t, i) => (
                 <View key={t.exercise} style={styles.rankRow}>
@@ -187,52 +226,137 @@ export default function InsightsScreen() {
                 </View>
               ))}
             </View>
-          ) : (
-            <Text style={typography.small}>No lifts yet.</Text>
-          )}
-          {metrics.records.length > 0 ? (
-            <>
-              <Divider />
-              <Text style={typography.bodyStrong}>Personal Records</Text>
-              <View style={styles.rankList}>
-                {metrics.records.slice(0, 4).map((r) => (
-                  <View key={r.exercise} style={styles.recordRow}>
-                    <View style={styles.recordText}>
-                      <Text style={[typography.small, styles.recordName]} numberOfLines={1}>
-                        {r.exercise}
-                      </Text>
-                      <Text style={typography.caption}>
-                        {r.weight_kg} kg × {r.reps} reps
-                      </Text>
-                    </View>
-                    {r.delta != null ? (
-                      <View style={styles.prBadge}>
-                        <Text style={styles.prBadgeText}>+{r.delta} kg</Text>
-                      </View>
-                    ) : r.isNew ? (
-                      <View style={[styles.prBadge, styles.prBadgeNew]}>
-                        <Text style={[styles.prBadgeText, { color: colors.blue }]}>New PR</Text>
-                      </View>
-                    ) : null}
+          </Card>
+        ) : null}
+
+        {/* Personal records */}
+        {metrics.records.length > 0 ? (
+          <Card style={styles.section}>
+            <Text style={typography.bodyStrong}>Personal Records</Text>
+            <View style={styles.rankList}>
+              {metrics.records.slice(0, 4).map((r) => (
+                <View key={r.exercise} style={styles.recordRow}>
+                  <View style={styles.recordText}>
+                    <Text style={[typography.small, styles.recordName]} numberOfLines={1}>
+                      {r.exercise}
+                    </Text>
+                    <Text style={typography.caption}>
+                      {r.weight_kg} kg × {r.reps} reps
+                    </Text>
                   </View>
-                ))}
+                  {r.delta != null ? (
+                    <View style={styles.prBadge}>
+                      <Text style={styles.prBadgeText}>+{r.delta} kg</Text>
+                    </View>
+                  ) : r.isNew ? (
+                    <View style={[styles.prBadge, styles.prBadgeNew]}>
+                      <Text style={[styles.prBadgeText, { color: colors.blue }]}>New PR</Text>
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
+
+        {/* Workout streak */}
+        <Card style={styles.section}>
+          <View style={styles.cardHeaderLeft}>
+            <IconBadge name="flame" bg={colors.orangeSoft} color={colors.orange} size={30} rounded={false} />
+            <Text style={typography.bodyStrong}>Workout Streak</Text>
+          </View>
+          <View style={styles.streakBody}>
+            <Text style={styles.streakValue}>{metrics.streak}</Text>
+            <Text style={typography.small}>{metrics.streak === 1 ? "day" : "days"}</Text>
+          </View>
+          <View style={styles.dots}>
+            {weekDayLabels().map((d, i) => (
+              <View key={`${d}-${i}`} style={styles.dotCol}>
+                <View style={[styles.dot, metrics.weekDots[i] && styles.dotActive]} />
+                <Text style={styles.dotLabel}>{d}</Text>
               </View>
-            </>
-          ) : null}
+            ))}
+          </View>
         </Card>
+
+        {/* Closing progress note */}
+        <MotivationCard
+          icon="flame"
+          iconBg={colors.orangeSoft}
+          iconColor={colors.orange}
+          title={monthUp ? "Keep going!" : "Keep logging"}
+          subtitle={
+            monthUp
+              ? `You're ${metrics.monthStrengthPct}% stronger than last month.`
+              : "Log more lifts to see your monthly progress."
+          }
+        />
       </ScrollView>
     </View>
   );
 }
 
-function SignalRow({ label, value }: { label: string; value: string }) {
-  const { typography } = useTheme();
+function MetricTile({
+  icon,
+  iconBg,
+  iconColor,
+  value,
+  unit,
+  label,
+}: {
+  icon: IoniconName;
+  iconBg: string;
+  iconColor: string;
+  value: string;
+  unit?: string;
+  label: string;
+}) {
   const styles = useStyles();
   return (
-    <View style={styles.signalRow}>
-      <Text style={typography.small}>{label}</Text>
-      <Text style={typography.bodyStrong}>{value}</Text>
+    <View style={styles.tile}>
+      <IconBadge name={icon} bg={iconBg} color={iconColor} size={34} rounded={false} />
+      <Text style={styles.tileValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+        {unit ? <Text style={styles.tileUnit}> {unit}</Text> : null}
+      </Text>
+      <Text style={styles.tileLabel} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
+  );
+}
+
+function MotivationCard({
+  icon,
+  iconBg,
+  iconColor,
+  title,
+  subtitle,
+  onPress,
+}: {
+  icon: IoniconName;
+  iconBg: string;
+  iconColor: string;
+  title: string;
+  subtitle: string;
+  onPress?: () => void;
+}) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      accessibilityRole={onPress ? "button" : undefined}
+      onPress={onPress}
+      disabled={!onPress}
+      style={({ pressed }) => [styles.motivCard, pressed && onPress ? styles.pressed : null]}
+    >
+      <IconBadge name={icon} bg={iconBg} color={iconColor} size={40} rounded={false} />
+      <View style={styles.motivText}>
+        <Text style={typography.bodyStrong}>{title}</Text>
+        <Text style={[typography.small, styles.motivSub]}>{subtitle}</Text>
+      </View>
+      {onPress ? <Ionicons name="chevron-forward" size={18} color={colors.textMuted} /> : null}
+    </Pressable>
   );
 }
 
@@ -241,13 +365,52 @@ const useStyles = makeUseStyles((t) =>
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
     rangeWrap: { minWidth: 132, maxWidth: 168, flexShrink: 1 },
-    scopeNote: { color: t.colors.textDim, marginTop: -spacing.sm },
 
     section: { gap: spacing.md },
     cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     cardHeaderLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    pill: { backgroundColor: t.colors.surfaceAlt, borderRadius: radii.pill, paddingHorizontal: spacing.md, paddingVertical: 5 },
+    pill: {
+      backgroundColor: t.colors.surfaceAlt,
+      borderRadius: radii.pill,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 5,
+    },
     pillText: { fontSize: 11, fontWeight: "600", color: t.colors.textDim },
+    note: { color: t.colors.textDim },
+
+    motivCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      padding: spacing.lg,
+      ...shadows.card,
+    },
+    motivText: { flex: 1, gap: 2 },
+    motivSub: { color: t.colors.textDim },
+    pressed: { opacity: 0.85 },
+
+    tiles: { flexDirection: "row", gap: spacing.sm },
+    tile: {
+      flex: 1,
+      alignItems: "center",
+      gap: 6,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      paddingVertical: spacing.md,
+      paddingHorizontal: 4,
+      minWidth: 0,
+    },
+    tileValue: { ...t.typography.h2, fontSize: 18 },
+    tileUnit: { fontSize: 11, fontWeight: "500", color: t.colors.textDim },
+    tileLabel: { ...t.typography.caption, color: t.colors.textDim },
+
+    weightBody: { gap: spacing.sm, alignItems: "center" },
 
     donutWrap: { alignItems: "center", paddingVertical: spacing.sm },
     legend: { gap: spacing.sm },
@@ -259,20 +422,31 @@ const useStyles = makeUseStyles((t) =>
     rankRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     rank: { width: 16, fontSize: 12, fontWeight: "700", color: t.colors.textDim },
     rankName: { flex: 1, color: t.colors.text },
-
     recordRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     recordText: { flex: 1, gap: 2 },
     recordName: { color: t.colors.text },
-    prBadge: { backgroundColor: t.colors.successSoft, borderRadius: radii.sm, paddingHorizontal: spacing.sm, paddingVertical: 3 },
+    prBadge: {
+      backgroundColor: t.colors.successSoft,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 3,
+    },
     prBadgeNew: { backgroundColor: t.colors.blueSoft },
     prBadgeText: { fontSize: 11, fontWeight: "700", color: t.colors.success },
 
-    verdictBody: { gap: spacing.md, marginTop: spacing.xs },
-    verdictNote: { color: t.colors.textDim, marginTop: spacing.xs },
-    signals: { gap: spacing.sm },
-    signalRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    whyTitle: { color: t.colors.textDim, marginTop: spacing.xs },
-    whyLine: { color: t.colors.text, lineHeight: 19 },
-    weightBody: { gap: spacing.sm, alignItems: "center" },
+    streakBody: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
+    streakValue: { ...t.typography.h1, fontSize: 30, fontWeight: "800" },
+    dots: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xs },
+    dotCol: { alignItems: "center", gap: 6 },
+    dot: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      backgroundColor: t.colors.surfaceAlt,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+    },
+    dotActive: { backgroundColor: t.colors.primary, borderColor: t.colors.primary },
+    dotLabel: { fontSize: 10, fontWeight: "600", color: t.colors.textMuted },
   }),
 );

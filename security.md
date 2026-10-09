@@ -52,3 +52,17 @@
   strict schema (see `docs/backend.md`) before it ever reaches the
   database, and require explicit user confirmation before persisting
   (R4.3) — the AI output is never auto-saved.
+
+## AI coach specific (`/api/coach/*`)
+
+- Onboarding answers live in `coach_profiles`, scoped to `req.userId`, and are
+  never returned for another user.
+- **Body photos are transient.** The uploaded image is held in memory only for
+  the duration of the model call and is never written to disk, the database, or
+  logs.
+- Every coach endpoint is rate-limited per user (`chat` 30/hr, `plan` 10/hr,
+  `analyze` 10/hr) — each call costs real money.
+- The athlete context sent to the model is a bounded aggregate summary, not a raw
+  log dump.
+- Chat history (`coach_messages`) is only ever read/written for the authenticated
+  user.

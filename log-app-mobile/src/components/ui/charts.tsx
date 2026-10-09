@@ -7,35 +7,97 @@ import { formatNumber } from "../../utils/derive";
 
 /* --------------------------------------------------------------- BarChart */
 
-export function BarChart({ data, height = 160 }: { data: VolumeBar[]; height?: number }) {
+function formatAxisValue(n: number): string {
+  if (n >= 1000) {
+    const k = n / 1000;
+    return `${Number.isInteger(k) ? k : k.toFixed(1)}K`;
+  }
+  return String(Math.round(n));
+}
+
+/** Rounds a raw step up to 1/2/5 × 10^k so axis ticks read cleanly. */
+function niceStep(raw: number): number {
+  if (raw <= 0) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const mult = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return mult * mag;
+}
+
+export function BarChart({
+  data,
+  height = 160,
+  axis = false,
+}: {
+  data: VolumeBar[];
+  height?: number;
+  axis?: boolean;
+}) {
   const { colors } = useTheme();
   const styles = useStyles();
   const max = Math.max(1, ...data.map((d) => d.value));
   const maxIndex = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0);
   const barArea = height - 44;
+  const tipZone = axis ? 20 : 0;
+
+  const step = axis ? niceStep(max / 4) : 0;
+  const top = axis ? Math.ceil(max / step) * step : max;
+  const scale = axis ? top : max;
+
+  const bars = data.map((d, i) => {
+    const isMax = i === maxIndex && d.value > 0;
+    const h = d.value > 0 ? Math.max(6, (d.value / scale) * barArea) : 4;
+    return (
+      <View key={d.iso} style={styles.barCol}>
+        {isMax ? (
+          <View style={styles.barTooltip}>
+            <Text style={styles.barTooltipText}>{formatNumber(d.value)} kg</Text>
+          </View>
+        ) : null}
+        <View
+          style={[
+            styles.bar,
+            { height: h, backgroundColor: isMax ? colors.chartBarActive : colors.chartBar },
+          ]}
+        />
+        {axis ? null : <Text style={styles.barLabel}>{d.label}</Text>}
+      </View>
+    );
+  });
+
+  if (!axis) {
+    return <View style={[styles.barWrap, { height: height + 12 }]}>{bars}</View>;
+  }
+
+  const tickValues: number[] = [];
+  for (let v = 0; v <= top + step / 2; v += step) tickValues.push(v);
+  tickValues.reverse();
+  const tickCount = Math.max(1, tickValues.length - 1);
 
   return (
-    <View style={[styles.barWrap, { height: height + 12 }]}>
-      {data.map((d, i) => {
-        const isMax = i === maxIndex && d.value > 0;
-        const h = d.value > 0 ? Math.max(6, (d.value / max) * barArea) : 4;
-        return (
-          <View key={d.iso} style={styles.barCol}>
-            {isMax ? (
-              <View style={styles.barTooltip}>
-                <Text style={styles.barTooltipText}>{formatNumber(d.value)} kg</Text>
-              </View>
-            ) : null}
-            <View
-              style={[
-                styles.bar,
-                { height: h, backgroundColor: isMax ? colors.chartBarActive : colors.chartBar },
-              ]}
-            />
-            <Text style={styles.barLabel}>{d.label}</Text>
-          </View>
-        );
-      })}
+    <View style={styles.axisRow}>
+      <View style={[styles.axisLabels, { height: barArea, marginTop: tipZone }]}>
+        {tickValues.map((t) => (
+          <Text key={t} style={styles.axisTick} numberOfLines={1}>
+            {formatAxisValue(t)}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.axisPlot}>
+        <View style={[styles.plot, { height: barArea + tipZone }]}>
+          {tickValues.map((t, i) => (
+            <View key={t} style={[styles.gridline, { top: tipZone + (i / tickCount) * barArea }]} />
+          ))}
+          <View style={[styles.barsLayer, { height: barArea }]}>{bars}</View>
+        </View>
+        <View style={styles.labelRow}>
+          {data.map((d) => (
+            <Text key={d.iso} style={[styles.barLabel, styles.labelCell]}>
+              {d.label}
+            </Text>
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
@@ -177,6 +239,30 @@ const useStyles = makeUseStyles((t) =>
       marginBottom: 2,
     },
     barTooltipText: { color: t.colors.onPrimary, fontSize: 10, fontWeight: "700" },
+
+    axisRow: { flexDirection: "row", gap: spacing.sm },
+    axisLabels: { width: 30, justifyContent: "space-between", alignItems: "flex-end" },
+    axisTick: { ...t.typography.caption, color: t.colors.textMuted, fontSize: 10, lineHeight: 12 },
+    axisPlot: { flex: 1 },
+    plot: { position: "relative" },
+    gridline: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: t.colors.border,
+    },
+    barsLayer: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: spacing.sm,
+    },
+    labelRow: { flexDirection: "row", gap: spacing.sm, marginTop: 6 },
+    labelCell: { flex: 1, textAlign: "center" },
 
     donutCenter: { alignItems: "center", justifyContent: "center" },
     donutTop: { ...t.typography.h2, fontSize: 22 },

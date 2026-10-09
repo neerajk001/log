@@ -50,8 +50,12 @@ their own weight trend and strength trend, not a generic calculator.
 - Food database / barcode scanning / recipe builder (nutrition is manual
   totals entry only — the user's existing calorie-tracking app is the
   source of those numbers)
-- In-app coaching chat or LLM-generated commentary (verdict text is
-  rule-based, not generative, for MVP)
+- In-app coaching chat or LLM-generated commentary
+  - **Updated:** the AI Coach (`/api/coach/*`) is now in scope as an *additive*
+    feature — optional onboarding, AI plan generation, and a chat that knows the
+    user's logs. The weekly verdict itself stays deterministic and rule-based;
+    the coach sits beside it, and body photos are analyzed transiently (never
+    stored).
 
 ## Success criteria for MVP
 

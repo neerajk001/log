@@ -8,6 +8,16 @@ import type { ActivityLog, DailyLog, LiftLog } from "../api/types";
 import { addDays } from "../utils/date";
 import { groupByDate, strengthChangePct, totalVolume, uniqueWorkoutDates } from "../utils/derive";
 
+/** One calendar day of history, combining lifts, daily values and activities. */
+export interface HistoryDay {
+  date: string;
+  lifts: LiftLog[];
+  daily: DailyLog | null;
+  activities: ActivityLog[];
+  exercises: string[];
+  volume: number;
+}
+
 /** History data (daily + lift + activity) for a range, with deletes. */
 export function useHistory(rangeDays: number) {
   const dailyApi = useDailyLogsApi();
@@ -109,11 +119,38 @@ export function useHistory(rangeDays: number) {
 
   const groups = useMemo(() => groupByDate(liftLogs), [liftLogs]);
 
+  // Combined per-day view: every date that has a lift, a daily log, or an
+  // activity, newest first. This is what the History screen renders so the
+  // three sources sit together instead of being stacked end-to-end.
+  const days = useMemo<HistoryDay[]>(() => {
+    const byDate = new Map<string, HistoryDay>();
+    const ensure = (date: string): HistoryDay => {
+      let day = byDate.get(date);
+      if (!day) {
+        day = { date, lifts: [], daily: null, activities: [], exercises: [], volume: 0 };
+        byDate.set(date, day);
+      }
+      return day;
+    };
+
+    for (const group of groupByDate(liftLogs)) {
+      const day = ensure(group.date);
+      day.lifts = group.logs;
+      day.exercises = Array.from(new Set(group.logs.map((l) => l.exercise_name)));
+      day.volume = group.logs.reduce((sum, l) => sum + Number(l.weight_kg) * l.reps, 0);
+    }
+    for (const dl of dailyLogs) ensure(dl.date).daily = dl;
+    for (const a of activityLogs) ensure(a.date).activities.push(a);
+
+    return Array.from(byDate.values()).sort((a, b) => (a.date < b.date ? 1 : -1));
+  }, [liftLogs, dailyLogs, activityLogs]);
+
   return {
     dailyLogs,
     liftLogs,
     activityLogs,
     groups,
+    days,
     stats,
     loading,
     error,

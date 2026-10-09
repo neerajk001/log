@@ -158,7 +158,8 @@ Accepts either a JSON body `{ "text": "<raw plan text>" }` or a multipart
 form upload with a `file` field containing a text-based PDF (the server
 extracts its text). Rate-limited to 10 requests/hour per user.
 
-Calls Google Gemini Flash server-side (see `backend.md` for the prompt).
+Calls the OpenAI Responses API server-side (`OPENAI_MODEL`, default
+`gpt-4.1-mini`; see `backend.md` for the prompt).
 **Does not persist anything.** Returns:
 ```json
 {
@@ -222,3 +223,44 @@ current week's verdict, persisting a row to `weekly_verdicts`.
   ]
 }
 ```
+
+## `GET /api/coach/profile`
+
+Returns the optional coaching profile captured during onboarding, or `null`.
+
+```json
+{
+  "goal": "Lose fat", "weight_kg": 82, "target_weight_kg": 75, "height_cm": 180,
+  "experience": "intermediate", "days_per_week": 4, "equipment": "Full gym",
+  "diet_notes": "2200 kcal, 160 g protein", "injuries": null, "notes": null
+}
+```
+
+## `PUT /api/coach/profile`
+
+Upsert the same fields. Every field is optional (`coach_profiles`, scoped to the
+authenticated user).
+
+## `GET /api/coach/messages`
+
+Returns the last 50 chat turns: `[{ id, role: "user" | "assistant", content, created_at }]`.
+
+## `POST /api/coach/chat`
+
+Body `{ "message": "..." }`. The server injects a compact, bounded summary of the
+user's profile and last 4 weeks of data (weight, nutrition, top lifts, latest
+verdict, active plan), asks the coach model, persists both turns and returns
+`{ "reply": "..." }`. Rate-limited to 30 requests/hour per user.
+
+## `POST /api/coach/plan`
+
+Body (both optional) `{ "goal": "...", "notes": "..." }`. Generates a program from
+the profile + recent data. **Does not persist** — returns the same plan shape as
+`/api/plans/parse`; confirm via `POST /api/plans`. Rate-limited to 10/hour per user.
+
+## `POST /api/coach/analyze`
+
+`multipart/form-data` with a `file` image (JPEG/PNG/WebP, ≤5 MB) and an optional
+`description`. Returns `{ "analysis": "..." }`. The image is sent to the vision
+model **transiently and never stored** (see `docs/security.md`). Rate-limited to
+10/hour per user.

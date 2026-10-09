@@ -191,6 +191,7 @@ export default function TodayScreen() {
                   {activeDate === today ? "Today" : formatMediumDate(activeDate)}
                 </Text>
               </Pressable>
+              <IconButton name="sparkles-outline" accessibilityLabel="AI Coach" onPress={() => router.navigate("/coach" as never)} />
               <IconButton name="ellipsis-horizontal" accessibilityLabel="More options" onPress={() => setMenuOpen(true)} />
             </>
           }
@@ -284,7 +285,7 @@ export default function TodayScreen() {
         {segment === "log" ? (
           <>
             {verdictLabel ? (
-              <Pressable style={styles.verdictCard} onPress={() => router.navigate("/(tabs)/insights" as never)}>
+              <Pressable style={styles.verdictCard} onPress={() => router.navigate("/verdict" as never)}>
                 <IconBadge name="ribbon-outline" bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
                 <View style={styles.verdictText}>
                   <Text style={typography.caption}>Weekly Verdict</Text>

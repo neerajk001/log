@@ -150,3 +150,36 @@ export interface TrendsResponse {
   lifts: LiftDelta[];
   adherence_pct: number | null;
 }
+
+export interface CoachProfile {
+  goal: string | null;
+  weight_kg: number | null;
+  target_weight_kg: number | null;
+  height_cm: number | null;
+  experience: string | null;
+  days_per_week: number | null;
+  equipment: string | null;
+  diet_notes: string | null;
+  injuries: string | null;
+  notes: string | null;
+}
+
+export type CoachProfileInput = Partial<{
+  goal: string | null;
+  weight_kg: number | null;
+  target_weight_kg: number | null;
+  height_cm: number | null;
+  experience: string | null;
+  days_per_week: number | null;
+  equipment: string | null;
+  diet_notes: string | null;
+  injuries: string | null;
+  notes: string | null;
+}>;
+
+export interface CoachMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}

@@ -7,7 +7,7 @@ import {
   dailyVolumeSeries,
   muscleBreakdown,
   personalRecords,
-  strengthChangePct,
+  strengthChangePctWindow,
   topExercises,
   totalVolume,
   uniqueWorkoutDates,
@@ -18,7 +18,8 @@ import {
 
 /**
  * Everything the Insights screen needs, derived in-app from the lift-log
- * range endpoint (no backend changes).
+ * range endpoint (no backend changes). Fetches a wider window than the tab
+ * range so strength deltas can be compared against the preceding period.
  */
 export function useInsights(rangeDays: number) {
   const api = useLiftLogsApi();
@@ -26,42 +27,49 @@ export function useInsights(rangeDays: number) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchDays = Math.max(rangeDays * 2, 60);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const to = todayLocal();
-      const from = addDays(to, -(rangeDays - 1));
+      const from = addDays(to, -(fetchDays - 1));
       setLogs(await api.getLiftLogsRange(from, to));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load lifts");
     } finally {
       setLoading(false);
     }
-  }, [api, rangeDays]);
+  }, [api, fetchDays]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const metrics = useMemo(() => {
-    const workoutDays = uniqueWorkoutDates(logs);
-    const volume = totalVolume(logs);
+    const today = todayLocal();
+    const rangeStart = addDays(today, -(rangeDays - 1));
+    const rangeLogs = logs.filter((l) => l.date >= rangeStart);
+
+    const workoutDays = uniqueWorkoutDates(rangeLogs);
+
     return {
       workouts: workoutDays.length,
-      workoutsThisWeek: workoutsThisWeek(logs),
-      totalVolume: volume,
-      avgVolume: workoutDays.length ? volume / workoutDays.length : 0,
-      strengthPct: strengthChangePct(logs),
-      top: topExercises(logs, 5),
+      workoutsThisWeek: workoutsThisWeek(logs, today),
+      totalVolume: totalVolume(rangeLogs),
+      strengthPct: strengthChangePctWindow(logs, rangeDays, today),
+      monthStrengthPct: strengthChangePctWindow(logs, 28, today),
+      top: topExercises(rangeLogs, 5),
       records: personalRecords(logs),
-      muscles: muscleBreakdown(logs),
-      streak: workoutStreak(logs),
-      weekDots: currentWeekDots(logs),
-      // Long ranges aggregate weekly so the chart stays readable; the
-      // screen labels the pill to match.
+      muscles: muscleBreakdown(rangeLogs),
+      streak: workoutStreak(logs, today),
+      weekDots: currentWeekDots(logs, today),
+      // Long ranges aggregate weekly so the chart stays readable.
       volumeSeries:
-        rangeDays >= 90 ? weeklyVolumeSeries(logs, 13) : dailyVolumeSeries(logs, rangeDays),
+        rangeDays >= 90
+          ? weeklyVolumeSeries(rangeLogs, 13, today)
+          : dailyVolumeSeries(rangeLogs, rangeDays, today),
     };
   }, [logs, rangeDays]);
 

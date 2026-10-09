@@ -6,13 +6,24 @@ import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { StatTile } from "../../src/components/StatTile";
 import { CalendarMonth } from "../../src/components/CalendarMonth";
-import { Card, IconBadge, EmptyState, LoadingState, ErrorState, Tag, Divider } from "../../src/components/ui/primitives";
+import {
+  Card,
+  Divider,
+  EmptyState,
+  ErrorState,
+  IconBadge,
+  LoadingState,
+  Tag,
+  type IoniconName,
+} from "../../src/components/ui/primitives";
 import { Chip, ChipRow, OverflowMenu } from "../../src/components/ui/controls";
-import { useHistory } from "../../src/hooks/useHistory";
+import { useHistory, type HistoryDay } from "../../src/hooks/useHistory";
+import { usePlans } from "../../src/hooks/usePlans";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { formatLongDate } from "../../src/utils/date";
 import { formatNumber, muscleGroupFor } from "../../src/utils/derive";
 import { muscleTagStyle } from "../../src/utils/tags";
+import type { DailyLog } from "../../src/api/types";
 
 const RANGE_OPTIONS = [
   { days: 7, label: "Last 7 days" },
@@ -20,6 +31,35 @@ const RANGE_OPTIONS = [
   { days: 90, label: "Last 90 days" },
   { days: 3650, label: "All time" },
 ];
+
+function formatDaily(d: DailyLog): string {
+  return [
+    d.weight_kg != null ? `${d.weight_kg} kg` : null,
+    d.calories != null ? `${d.calories} kcal` : null,
+    d.protein_g != null ? `${d.protein_g} g` : null,
+    d.sleep_hours != null ? `${d.sleep_hours} h` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** "PUSH (STRENGTH)" -> "Push"; "LOWER HYPERTROPHY" -> "Lower hypertrophy". */
+function prettifyDayName(name: string): string {
+  const base = name.split("(")[0].trim().toLowerCase();
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+function workoutTitle(day: HistoryDay, planDayName: Map<string, string>): string {
+  if (day.lifts.length > 0) {
+    const planDayId = day.lifts.find((l) => l.plan_day_id)?.plan_day_id ?? null;
+    const name = planDayId ? planDayName.get(planDayId) : null;
+    if (name) return prettifyDayName(name);
+    if (day.exercises.length === 1) return day.exercises[0];
+    return `${day.exercises.length}-exercise session`;
+  }
+  if (day.activities.length > 0) return day.activities[0].name;
+  return "Daily log";
+}
 
 export default function HistoryScreen() {
   const [rangeDays, setRangeDays] = useState(90);
@@ -36,9 +76,7 @@ export default function HistoryScreen() {
   const today = useCurrentDate();
 
   const {
-    dailyLogs,
-    activityLogs,
-    groups,
+    days,
     stats,
     loading,
     error,
@@ -47,15 +85,23 @@ export default function HistoryScreen() {
     deleteLiftLog,
     deleteActivity,
   } = useHistory(rangeDays);
+  const { days: planDays } = usePlans();
+
+  const planDayName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const d of planDays) map.set(d.id, d.day_name);
+    return map;
+  }, [planDays]);
 
   const rangeLabel = RANGE_OPTIONS.find((o) => o.days === rangeDays)?.label ?? "All time";
 
-  const visibleGroups = useMemo(
-    () => (selectedDate ? groups.filter((g) => g.date === selectedDate) : groups),
-    [groups, selectedDate],
+  const visibleDays = useMemo(
+    () => (selectedDate ? days.filter((d) => d.date === selectedDate) : days),
+    [days, selectedDate],
   );
 
-  const strengthLabel = stats.strengthPct == null ? "—" : `${stats.strengthPct > 0 ? "+" : ""}${stats.strengthPct}%`;
+  const strengthLabel =
+    stats.strengthPct == null ? "—" : `${stats.strengthPct > 0 ? "+" : ""}${stats.strengthPct}%`;
 
   const confirm = (title: string, message: string, onConfirm: () => void) => {
     Alert.alert(title, message, [
@@ -66,11 +112,12 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      {/* FlatList (not ScrollView): "All time" can hold hundreds of day
-          groups, so only the visible window is rendered. */}
+      {/* FlatList (not ScrollView): "All time" can hold hundreds of days, so
+          only the visible window is rendered. */}
       <FlatList
-        data={visibleGroups}
-        keyExtractor={(group) => group.date}
+        data={visibleDays}
+        keyExtractor={(day) => day.date}
+        extraData={openDates}
         contentContainerStyle={styles.scroll}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} tintColor={colors.primary} />}
         initialNumToRender={6}
@@ -95,7 +142,7 @@ export default function HistoryScreen() {
             {/* Overall stats */}
             <View style={styles.statRow}>
               <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={String(stats.workouts)} label="Workouts" />
-              <StatTile icon="time-outline" iconBg={colors.greenSoft} iconColor={colors.green} value="—" label="Total Time" />
+              <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={String(stats.daysLogged)} label="Days logged" />
               <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
               <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={strengthLabel} label="Strength" />
             </View>
@@ -119,60 +166,79 @@ export default function HistoryScreen() {
           </>
         }
         ListEmptyComponent={
-          loading && groups.length === 0 ? (
+          loading && days.length === 0 ? (
             <LoadingState label="Loading history…" />
           ) : (
             <EmptyState
               icon="time-outline"
-              title="No workouts logged"
-              subtitle="Once you log lifts they'll show up here, grouped by day."
+              title="Nothing logged yet"
+              subtitle="Your lifts, daily values and activities show up here, grouped by day."
             />
           )
         }
-        renderItem={({ item: group }) => {
-          const exercises = Array.from(new Set(group.logs.map((l) => l.exercise_name)));
-          const volume = group.logs.reduce((s, l) => s + Number(l.weight_kg) * l.reps, 0);
-          const isOpen = !!openDates[group.date];
+        renderItem={({ item: day }) => {
+          const isOpen = !!openDates[day.date];
+          const muscles = Array.from(new Set(day.exercises.map(muscleGroupFor)));
+          const tint = muscles[0] ? muscleTagStyle(muscles[0], tagTheme).bg : colors.surface;
+          const title = workoutTitle(day, planDayName);
+          const dailySummary = day.daily ? formatDaily(day.daily) : "";
+
           return (
             <View style={styles.group}>
               <View style={styles.groupHeader}>
-                <Text style={typography.bodyStrong}>{formatLongDate(group.date)}</Text>
-                <Text style={typography.caption}>
-                  {"—"} • {exercises.length} exercise{exercises.length === 1 ? "" : "s"} • {formatNumber(volume)} kg
-                </Text>
+                <Text style={typography.bodyStrong}>{formatLongDate(day.date)}</Text>
+                {day.lifts.length > 0 ? (
+                  <Text style={typography.caption}>
+                    {day.exercises.length} exercise{day.exercises.length === 1 ? "" : "s"} · {formatNumber(day.volume)} kg
+                  </Text>
+                ) : null}
               </View>
 
               <Pressable
-                style={styles.workoutCard}
-                onPress={() => setOpenDates((prev) => ({ ...prev, [group.date]: !prev[group.date] }))}
+                style={[styles.workoutCard, { backgroundColor: tint }]}
+                onPress={() => setOpenDates((prev) => ({ ...prev, [day.date]: !prev[day.date] }))}
               >
-                <IconBadge name="barbell-outline" bg={colors.surfaceAlt} color={colors.textDim} size={44} rounded={false} />
+                <IconBadge name="barbell-outline" bg={colors.surface} color={colors.textDim} size={44} rounded={false} />
                 <View style={styles.workoutText}>
-                  <Text style={typography.bodyStrong}>
-                    {exercises.length === 1 ? exercises[0] : `${exercises.length}-exercise session`}
+                  <Text style={typography.bodyStrong} numberOfLines={1}>
+                    {title}
                   </Text>
-                  <View style={styles.muscleTags}>
-                    {Array.from(new Set(exercises.map(muscleGroupFor)))
-                      .slice(0, 3)
-                      .map((m) => (
+
+                  {muscles.length > 0 ? (
+                    <View style={styles.muscleTags}>
+                      {muscles.slice(0, 3).map((m) => (
                         <Tag key={m} label={m} bg={muscleTagStyle(m, tagTheme).bg} text={muscleTagStyle(m, tagTheme).text} />
                       ))}
-                  </View>
+                    </View>
+                  ) : null}
+
                   <View style={styles.metaRow}>
-                    <Meta icon="time-outline" value="—" />
-                    <Meta icon="barbell-outline" value={`${exercises.length}`} />
-                    <Meta icon="layers-outline" value={formatNumber(volume)} />
+                    {day.lifts.length > 0 ? (
+                      <>
+                        <Meta icon="barbell-outline" value={`${day.exercises.length}`} />
+                        <Meta icon="layers-outline" value={`${formatNumber(day.volume)} kg`} />
+                      </>
+                    ) : null}
+                    {day.activities.length > 0 ? (
+                      <Meta icon="walk-outline" value={`${day.activities.length}`} />
+                    ) : null}
                   </View>
+
+                  {day.daily ? (
+                    <Text style={[typography.caption, styles.dailyLine]} numberOfLines={1}>
+                      {dailySummary}
+                    </Text>
+                  ) : null}
                 </View>
                 <Ionicons name={isOpen ? "chevron-up" : "chevron-forward"} size={18} color={colors.textMuted} />
               </Pressable>
 
               {isOpen ? (
                 <Card style={styles.setsCard}>
-                  {exercises.map((ex) => (
+                  {day.exercises.map((ex) => (
                     <View key={ex} style={styles.exerciseBlock}>
                       <Text style={typography.bodyStrong}>{ex}</Text>
-                      {group.logs
+                      {day.lifts
                         .filter((l) => l.exercise_name === ex)
                         .map((l) => (
                           <View key={l.id} style={styles.setRow}>
@@ -191,83 +257,57 @@ export default function HistoryScreen() {
                         ))}
                     </View>
                   ))}
-                </Card>
-              ) : null}
-            </View>
-          );
-        }}
-        ListFooterComponent={
-          <>
-            {/* Daily logs (Next.js parity) */}
-            <Card style={styles.section}>
-              <Text style={typography.bodyStrong}>Daily logs</Text>
-              {dailyLogs.length === 0 ? (
-                <Text style={typography.small}>No daily logs in this range.</Text>
-              ) : (
-                dailyLogs
-                  .slice()
-                  .reverse()
-                  .slice(0, 20)
-                  .map((d) => (
-                    <View key={d.date}>
-                      <Divider />
-                      <View style={styles.dailyRow}>
+
+                  {day.daily ? (
+                    <>
+                      {day.exercises.length > 0 ? <Divider /> : null}
+                      <View style={styles.setRow}>
                         <View style={styles.dailyText}>
-                          <Text style={typography.bodyStrong}>{formatLongDate(d.date)}</Text>
-                          <Text style={typography.small}>
-                            {[
-                              d.weight_kg != null ? `${d.weight_kg} kg` : null,
-                              d.calories != null ? `${d.calories} kcal` : null,
-                              d.protein_g != null ? `${d.protein_g} g` : null,
-                              d.sleep_hours != null ? `${d.sleep_hours} h` : null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ") || "No values"}
-                          </Text>
+                          <Text style={typography.bodyStrong}>Daily log</Text>
+                          <Text style={typography.small}>{dailySummary || "No values"}</Text>
                         </View>
                         <Pressable
-                          onPress={() => confirm("Delete daily log?", "This removes all values for this day.", () => deleteDailyLog(d.date).catch(() => {}))}
+                          onPress={() =>
+                            confirm("Delete daily log?", "This removes all values for this day.", () => deleteDailyLog(day.date).catch(() => {}))
+                          }
                           hitSlop={8}
                         >
                           <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
                         </Pressable>
                       </View>
-                    </View>
-                  ))
-              )}
-            </Card>
+                    </>
+                  ) : null}
 
-            {/* Activity (Next.js parity) */}
-            <Card style={styles.section}>
-              <Text style={typography.bodyStrong}>Activity</Text>
-              {activityLogs.length === 0 ? (
-                <Text style={typography.small}>No activity in this range.</Text>
-              ) : (
-                activityLogs.slice(0, 20).map((a) => (
-                  <View key={a.id}>
-                    <Divider />
-                    <View style={styles.dailyRow}>
-                      <View style={styles.dailyText}>
-                        <Text style={typography.bodyStrong}>{a.name}</Text>
-                        <Text style={typography.small}>
-                          {formatLongDate(a.date)} · {a.duration_min} min
-                          {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
-                          {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
-                        </Text>
-                      </View>
-                      <Pressable
-                        onPress={() => confirm("Delete activity?", "This removes the logged activity.", () => deleteActivity(a.id).catch(() => {}))}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                      </Pressable>
-                    </View>
-                  </View>
-                ))
-              )}
-            </Card>
-          </>
-        }
+                  {day.activities.length > 0 ? (
+                    <>
+                      {day.exercises.length > 0 || day.daily ? <Divider /> : null}
+                      {day.activities.map((a) => (
+                        <View key={a.id} style={styles.setRow}>
+                          <View style={styles.dailyText}>
+                            <Text style={typography.bodyStrong}>{a.name}</Text>
+                            <Text style={typography.small}>
+                              {a.duration_min} min
+                              {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
+                              {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
+                            </Text>
+                          </View>
+                          <Pressable
+                            onPress={() =>
+                              confirm("Delete activity?", "This removes the logged activity.", () => deleteActivity(a.id).catch(() => {}))
+                            }
+                            hitSlop={8}
+                          >
+                            <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                          </Pressable>
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
+                </Card>
+              ) : null}
+            </View>
+          );
+        }}
       />
 
       <OverflowMenu
@@ -284,7 +324,7 @@ export default function HistoryScreen() {
   );
 }
 
-function Meta({ icon, value }: { icon: React.ComponentProps<typeof Ionicons>["name"]; value: string }) {
+function Meta({ icon, value }: { icon: IoniconName; value: string }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
   return (
@@ -323,7 +363,6 @@ const useStyles = makeUseStyles((t) =>
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.md,
-      backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.colors.border,
@@ -333,13 +372,11 @@ const useStyles = makeUseStyles((t) =>
     muscleTags: { flexDirection: "row", gap: spacing.xs, flexWrap: "wrap" },
     metaRow: { flexDirection: "row", gap: spacing.md, marginTop: 2 },
     meta: { flexDirection: "row", alignItems: "center", gap: 3 },
+    dailyLine: { color: t.colors.textDim },
 
     setsCard: { gap: spacing.md },
     exerciseBlock: { gap: spacing.sm },
-    setRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-
-    section: { gap: spacing.sm },
-    dailyRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.sm },
+    setRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
     dailyText: { flex: 1, gap: 2 },
   }),
 );

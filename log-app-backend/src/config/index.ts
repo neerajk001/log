@@ -18,6 +18,10 @@ export const config = {
     apiKey: process.env.OPENAI_API_KEY || "",
     model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   },
+  coach: {
+    // Coaching needs more reasoning than plan parsing; override per env.
+    model: process.env.COACH_MODEL || "gpt-4.1",
+  },
   cors: {
     allowedOrigins: parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS),
   },
