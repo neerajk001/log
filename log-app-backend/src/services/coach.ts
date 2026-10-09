@@ -9,10 +9,20 @@ const HISTORY_TURNS = 12;
 
 const COACH_SYSTEM = `You are an evidence-based strength and fat-loss coach inside a tracking app.
 
+You are given TODAY's date, the units in use, and a bounded summary of the athlete's real data under
+"ATHLETE CONTEXT". Use only that data — never invent numbers or history.
+
 Rules:
-- Be honest and specific, not motivational fluff. Reference the athlete's actual logged data.
-- Ground advice in the data you are given; say when there is not enough data instead of guessing.
-- Keep replies short and actionable (a few sentences or a short list). Plain language, no jargon dumps.
+- Be honest and specific, not motivational fluff. Reference the athlete's actual logged numbers.
+- Ground every claim in the given data and quote the values you cite. Say plainly when there is not
+  enough data instead of guessing.
+- What you CAN see: profile/goal, ~4 weeks of weight and nutrition (averages plus recent daily
+  weights), top sets and weekly volume per exercise, this-vs-last-week lift trend, activity minutes,
+  recent weekly verdicts, and the active plan's days.
+- What you CANNOT see: individual sets beyond the top set, individual meals, or anything older than
+  ~4 weeks. If asked about those, say so.
+- Keep replies short: a few sentences or a short list, plain language, no jargon dumps.
+- End with 2-4 concrete, specific actions when advice is requested.
 - You are not a doctor: never diagnose or give medical advice. For injuries or medical concerns, tell
   the user to consult a professional.
 - If a key detail is missing (goal, training days, equipment, diet), ask one clarifying question.`;
@@ -42,16 +52,42 @@ function fmtDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Monday 00:00 UTC of the ISO week containing `d`. */
+function startOfIsoWeekUtc(d: Date): Date {
+  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  const day = utc.getUTCDay();
+  utc.setUTCDate(utc.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return utc;
+}
+
+/** Top set per exercise within `[start, end)`. */
+function topSetByWindow(
+  lifts: { date: Date; exerciseName: string; weightKg: unknown }[],
+  start: Date,
+  end: Date,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const l of lifts) {
+    if (l.date < start || l.date >= end) continue;
+    const w = Number(l.weightKg);
+    const prev = map.get(l.exerciseName);
+    if (prev == null || w > prev) map.set(l.exerciseName, w);
+  }
+  return map;
+}
+
 /**
  * A compact, token-bounded summary of the athlete's profile and last ~4 weeks
- * of data. Deliberately aggregates rather than dumping raw logs so the coach
- * call stays cheap and fast.
+ * of data: weight/nutrition averages plus recent daily weights, per-exercise
+ * top sets and volume, this-vs-last-week lift trend, activity minutes, recent
+ * verdicts and the active plan. Aggregates only — no raw log dumps.
  */
 export async function buildAthleteContext(userId: string): Promise<string> {
-  const since = new Date();
+  const now = new Date();
+  const since = new Date(now);
   since.setUTCDate(since.getUTCDate() - CONTEXT_WINDOW_DAYS);
 
-  const [profile, daily, lifts, verdict, plan] = await Promise.all([
+  const [profile, daily, lifts, verdicts, plan, activities] = await Promise.all([
     prisma.coachProfile.findUnique({ where: { userId } }),
     prisma.dailyLog.findMany({
       where: { userId, date: { gte: since } },
@@ -60,12 +96,20 @@ export async function buildAthleteContext(userId: string): Promise<string> {
     }),
     prisma.liftLog.findMany({
       where: { userId, date: { gte: since } },
-      select: { exerciseName: true, weightKg: true, reps: true },
+      select: { date: true, exerciseName: true, weightKg: true, reps: true },
     }),
-    prisma.weeklyVerdict.findFirst({ where: { userId }, orderBy: { weekStartDate: "desc" } }),
+    prisma.weeklyVerdict.findMany({
+      where: { userId },
+      orderBy: { weekStartDate: "desc" },
+      take: 6,
+    }),
     prisma.workoutPlan.findFirst({
       where: { userId, isActive: true },
       include: { planDays: { orderBy: { dayOrder: "asc" } } },
+    }),
+    prisma.activityLog.findMany({
+      where: { userId, date: { gte: since } },
+      select: { durationMin: true, activityType: true },
     }),
   ]);
 
@@ -92,6 +136,15 @@ export async function buildAthleteContext(userId: string): Promise<string> {
     const avg = weights.reduce((a, b) => a + b, 0) / weights.length;
     lines.push(
       `WEIGHT (last ${CONTEXT_WINDOW_DAYS}d): ${weights.length} entries, first ${weights[0]}kg, latest ${weights[weights.length - 1]}kg, avg ${avg.toFixed(1)}kg`,
+    );
+  }
+
+  const recentWeights = daily.filter((d) => d.weightKg != null).slice(-7);
+  if (recentWeights.length > 0) {
+    lines.push(
+      `WEIGHT (recent days): ${recentWeights
+        .map((d) => `${fmtDate(d.date)}=${Number(d.weightKg)}`)
+        .join(", ")}`,
     );
   }
 
@@ -125,22 +178,61 @@ export async function buildAthleteContext(userId: string): Promise<string> {
     lines.push(`LIFTS (last ${CONTEXT_WINDOW_DAYS}d): ${ranked.join("; ")}`);
   }
 
-  if (verdict) {
-    const trend =
-      verdict.weightTrendKgPerWeek == null ? "n/a" : Number(verdict.weightTrendKgPerWeek).toFixed(2);
-    const reasoning = (verdict.reasoning as unknown as string[] | null) ?? [];
+  // This week's top set vs last week's, per exercise (ISO weeks).
+  const thisWeekStart = startOfIsoWeekUtc(now);
+  const nextWeekStart = new Date(thisWeekStart);
+  nextWeekStart.setUTCDate(nextWeekStart.getUTCDate() + 7);
+  const lastWeekStart = new Date(thisWeekStart);
+  lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 7);
+  const thisWeekTop = topSetByWindow(lifts, thisWeekStart, nextWeekStart);
+  const lastWeekTop = topSetByWindow(lifts, lastWeekStart, thisWeekStart);
+  if (thisWeekTop.size > 0) {
+    const trend = Array.from(thisWeekTop.entries())
+      .slice(0, 10)
+      .map(([name, kg]) => {
+        const prev = lastWeekTop.get(name);
+        return prev != null ? `${name}: ${prev}->${kg}kg` : `${name}: ${kg}kg (no last wk)`;
+      });
+    lines.push(`LIFT TREND (this wk vs last wk, top set): ${trend.join("; ")}`);
+  }
+
+  if (activities.length > 0) {
+    const totalMin = activities.reduce((s, a) => s + a.durationMin, 0);
+    const counts = new Map<string, number>();
+    for (const a of activities) counts.set(a.activityType, (counts.get(a.activityType) ?? 0) + 1);
+    const byType = Array.from(counts.entries())
+      .map(([t, n]) => `${t} ${n}`)
+      .join(", ");
     lines.push(
-      `WEEKLY VERDICT (week of ${fmtDate(verdict.weekStartDate)}): ${verdict.verdict}, weight trend ${trend} kg/wk, strength ${verdict.strengthTrend ?? "n/a"}, adherence ${verdict.adherencePct ?? "n/a"}%. Reasoning: ${reasoning.join(" | ")}`,
+      `ACTIVITY (last ${CONTEXT_WINDOW_DAYS}d): ${activities.length} sessions, ${totalMin} min total (${byType})`,
+    );
+  }
+
+  const latestVerdict = verdicts[0] ?? null;
+  if (latestVerdict) {
+    const trend =
+      latestVerdict.weightTrendKgPerWeek == null
+        ? "n/a"
+        : Number(latestVerdict.weightTrendKgPerWeek).toFixed(2);
+    const reasoning = (latestVerdict.reasoning as unknown as string[] | null) ?? [];
+    lines.push(
+      `WEEKLY VERDICT (week of ${fmtDate(latestVerdict.weekStartDate)}): ${latestVerdict.verdict}, weight trend ${trend} kg/wk, strength ${latestVerdict.strengthTrend ?? "n/a"}, adherence ${latestVerdict.adherencePct ?? "n/a"}%. Reasoning: ${reasoning.join(" | ")}`,
+    );
+  }
+  if (verdicts.length > 1) {
+    lines.push(
+      `VERDICT HISTORY (newest first): ${verdicts
+        .map((v) => `${fmtDate(v.weekStartDate)}=${v.verdict}`)
+        .join(", ")}`,
     );
   }
 
   if (plan) {
-    lines.push(
-      `ACTIVE PLAN "${plan.name}": ${plan.planDays.map((d) => d.dayName).join(", ")}`,
-    );
+    lines.push(`ACTIVE PLAN "${plan.name}": ${plan.planDays.map((d) => d.dayName).join(", ")}`);
   }
 
-  return lines.length > 0 ? lines.join("\n") : "No logged data yet.";
+  if (lines.length === 0) return "No logged data yet.";
+  return [`TODAY: ${fmtDate(now)} (units: kg, kcal, g, hours)`, ...lines].join("\n");
 }
 
 /**

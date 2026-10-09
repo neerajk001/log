@@ -1,12 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { coachChatSchema, coachProfileSchema } from "../src/validation/schemas";
 
 const mocks = vi.hoisted(() => ({
   findUniqueProfile: vi.fn(),
   findManyDaily: vi.fn(),
   findManyLift: vi.fn(),
-  findFirstVerdict: vi.fn(),
+  findManyVerdicts: vi.fn(),
   findFirstPlan: vi.fn(),
+  findManyActivity: vi.fn(),
 }));
 
 vi.mock("../src/db/client", () => ({
@@ -14,8 +15,9 @@ vi.mock("../src/db/client", () => ({
     coachProfile: { findUnique: mocks.findUniqueProfile },
     dailyLog: { findMany: mocks.findManyDaily },
     liftLog: { findMany: mocks.findManyLift },
-    weeklyVerdict: { findFirst: mocks.findFirstVerdict },
+    weeklyVerdict: { findMany: mocks.findManyVerdicts },
     workoutPlan: { findFirst: mocks.findFirstPlan },
+    activityLog: { findMany: mocks.findManyActivity },
   },
 }));
 
@@ -23,11 +25,19 @@ import { buildAthleteContext, parseOpenAIDelta, routeChatModel } from "../src/se
 import { config } from "../src/config";
 
 beforeEach(() => {
+  // Freeze "today" so the ISO-week lift trend is deterministic.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
   mocks.findUniqueProfile.mockReset().mockResolvedValue(null);
   mocks.findManyDaily.mockReset().mockResolvedValue([]);
   mocks.findManyLift.mockReset().mockResolvedValue([]);
-  mocks.findFirstVerdict.mockReset().mockResolvedValue(null);
+  mocks.findManyVerdicts.mockReset().mockResolvedValue([]);
   mocks.findFirstPlan.mockReset().mockResolvedValue(null);
+  mocks.findManyActivity.mockReset().mockResolvedValue([]);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("buildAthleteContext", () => {
@@ -53,18 +63,26 @@ describe("buildAthleteContext", () => {
       { date: new Date("2026-10-02"), weightKg: 81.5, calories: 2300, proteinG: 150, sleepHours: 7 },
     ]);
     mocks.findManyLift.mockResolvedValue([
-      { exerciseName: "Barbell Bench Press", weightKg: 60, reps: 8 },
-      { exerciseName: "Barbell Bench Press", weightKg: 65, reps: 6 },
-      { exerciseName: "Deadlift", weightKg: 120, reps: 5 },
+      { date: new Date("2026-10-08"), exerciseName: "Barbell Bench Press", weightKg: 60, reps: 8 },
+      { date: new Date("2026-10-08"), exerciseName: "Barbell Bench Press", weightKg: 65, reps: 6 },
+      { date: new Date("2026-10-08"), exerciseName: "Deadlift", weightKg: 120, reps: 5 },
+      { date: new Date("2026-10-01"), exerciseName: "Deadlift", weightKg: 115, reps: 5 },
     ]);
-    mocks.findFirstVerdict.mockResolvedValue({
-      verdict: "hold",
-      weekStartDate: new Date("2026-10-06"),
-      weightTrendKgPerWeek: -0.4,
-      strengthTrend: "up",
-      adherencePct: 85,
-      reasoning: ["Weight in target range", "Strength up"],
-    });
+    mocks.findManyVerdicts.mockResolvedValue([
+      {
+        verdict: "hold",
+        weekStartDate: new Date("2026-10-06"),
+        weightTrendKgPerWeek: -0.4,
+        strengthTrend: "up",
+        adherencePct: 85,
+        reasoning: ["Weight in target range", "Strength up"],
+      },
+      { verdict: "adjust_calories", weekStartDate: new Date("2026-09-29") },
+    ]);
+    mocks.findManyActivity.mockResolvedValue([
+      { durationMin: 45, activityType: "run" },
+      { durationMin: 30, activityType: "walk" },
+    ]);
     mocks.findFirstPlan.mockResolvedValue({
       name: "My Plan",
       planDays: [{ dayName: "Push" }, { dayName: "Pull" }, { dayName: "Legs" }],
@@ -72,15 +90,21 @@ describe("buildAthleteContext", () => {
 
     const context = await buildAthleteContext("user-1");
 
+    expect(context).toContain("TODAY: 2026-10-09");
     expect(context).toContain("PROFILE:");
     expect(context).toContain("goal=lose fat");
     expect(context).toContain("WEIGHT (last 28d): 2 entries");
+    expect(context).toContain("WEIGHT (recent days):");
     expect(context).toContain("NUTRITION (avg/day, last 28d):");
     expect(context).toContain("calories=2350");
     expect(context).toContain("LIFTS (last 28d):");
     expect(context).toContain("Barbell Bench Press: 65kg top");
+    expect(context).toContain("LIFT TREND (this wk vs last wk");
+    expect(context).toContain("Deadlift: 115->120kg");
+    expect(context).toContain("ACTIVITY (last 28d): 2 sessions, 75 min total");
     expect(context).toContain("WEEKLY VERDICT");
     expect(context).toContain("hold");
+    expect(context).toContain("VERDICT HISTORY (newest first):");
     expect(context).toContain("ACTIVE PLAN \"My Plan\": Push, Pull, Legs");
   });
 
