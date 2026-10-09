@@ -183,3 +183,15 @@ export interface CoachMessage {
   content: string;
   created_at: string;
 }
+
+export interface CoachSession {
+  id: string;
+  title: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface CoachMemory {
+  summary: string;
+  updated_at: string;
+}

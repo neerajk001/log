@@ -22,6 +22,8 @@ model User {
   weeklyVerdicts   WeeklyVerdict[]
   coachProfile     CoachProfile?
   coachMessages    CoachMessage[]
+  coachSessions    CoachSession[]
+  coachMemory      CoachMemory?
 
   @@map("users")
 }
@@ -137,14 +139,39 @@ model CoachProfile {
 }
 
 model CoachMessage {
-  id         String   @id @default(uuid()) @db.Uuid
-  userId     String   @map("user_id") @db.Uuid
-  role       String   @db.Text
-  content    String   @db.Text
-  responseId String?  @map("response_id") @db.Text
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  user       User     @relation(fields: [userId], references: [id])
+  id         String        @id @default(uuid()) @db.Uuid
+  userId     String        @map("user_id") @db.Uuid
+  sessionId  String?       @map("session_id") @db.Uuid
+  role       String        @db.Text
+  content    String        @db.Text
+  responseId String?       @map("response_id") @db.Text
+  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  user       User          @relation(fields: [userId], references: [id])
+  session    CoachSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([sessionId, createdAt])
   @@map("coach_messages")
+}
+
+model CoachSession {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @map("user_id") @db.Uuid
+  title     String         @db.Text
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user      User           @relation(fields: [userId], references: [id])
+  messages  CoachMessage[]
+
+  @@index([userId, updatedAt])
+  @@map("coach_sessions")
+}
+
+model CoachMemory {
+  userId    String   @id @map("user_id") @db.Uuid
+  summary   String   @db.Text
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("coach_memories")
 }

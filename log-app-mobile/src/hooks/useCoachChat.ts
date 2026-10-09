@@ -12,29 +12,35 @@ export interface ChatMessage {
   failed?: boolean;
 }
 
-/** Coach chat with token streaming, a stop control and retry. */
-export function useCoachChat() {
+/** Coach chat for one session (or a fresh one when `initialSessionId` is absent). */
+export function useCoachChat(initialSessionId?: string) {
   const api = useCoachApi();
   const { getToken } = useAuth();
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(initialSessionId));
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    if (!initialSessionId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const history = await api.getMessages();
+      const history = await api.getSessionMessages(initialSessionId);
       setMessages(history.map((m) => ({ id: m.id, role: m.role, content: m.content })));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load messages");
+      setError(err instanceof Error ? err.message : "Failed to load this chat");
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, initialSessionId]);
 
   useEffect(() => {
     load();
@@ -65,7 +71,9 @@ export function useCoachChat() {
         await streamCoachChat({
           token,
           message,
+          sessionId,
           signal: controller.signal,
+          onSessionId: (id) => setSessionId(id),
           onDelta: (delta) => {
             setStatus(null);
             setMessages((prev) =>
@@ -97,7 +105,7 @@ export function useCoachChat() {
         setStatus(null);
       }
     },
-    [getToken],
+    [getToken, sessionId],
   );
 
   const send = useCallback(
@@ -122,5 +130,5 @@ export function useCoachChat() {
     void runStream(lastUser.content, false);
   }, [messages, runStream, streaming]);
 
-  return { messages, loading, streaming, status, error, send, stop, retry, refetch: load };
+  return { sessionId, messages, loading, streaming, status, error, send, stop, retry, refetch: load };
 }

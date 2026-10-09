@@ -1,7 +1,14 @@
 import { useMemo } from "react";
 import { fetch as expoFetch } from "expo/fetch";
 import { API_BASE_URL, useApiClient } from "./client";
-import type { CoachMessage, CoachProfile, CoachProfileInput, ParsedPlanPreview } from "./types";
+import type {
+  CoachMemory,
+  CoachMessage,
+  CoachProfile,
+  CoachProfileInput,
+  CoachSession,
+  ParsedPlanPreview,
+} from "./types";
 
 export function useCoachApi() {
   const client = useApiClient();
@@ -11,7 +18,12 @@ export function useCoachApi() {
       getProfile: () => client.get<CoachProfile | null>("/api/coach/profile"),
       saveProfile: (data: CoachProfileInput) =>
         client.put<CoachProfile>("/api/coach/profile", data),
-      getMessages: () => client.get<CoachMessage[]>("/api/coach/messages"),
+      getSessions: () => client.get<CoachSession[]>("/api/coach/sessions"),
+      getSessionMessages: (id: string) =>
+        client.get<CoachMessage[]>(`/api/coach/sessions/${id}/messages`),
+      deleteSession: (id: string) => client.del<{ ok: true }>(`/api/coach/sessions/${id}`),
+      getMemory: () => client.get<CoachMemory | null>("/api/coach/memory"),
+      clearMemory: () => client.del<{ ok: true }>("/api/coach/memory"),
       chat: (message: string) => client.post<{ reply: string }>("/api/coach/chat", { message }),
       generatePlan: (body: { goal?: string; notes?: string }) =>
         client.post<ParsedPlanPreview>("/api/coach/plan", body),
@@ -23,21 +35,26 @@ export function useCoachApi() {
 }
 
 /**
- * Streams a coach reply. Uses `expo/fetch` (the global fetch here) because it
- * exposes a real `ReadableStream` body with `abort()` — React Native's plain
- * fetch does not. Calls `onDelta` for each token and resolves with the full text.
+ * Streams a coach reply within a chat session. Uses `expo/fetch` (the global fetch
+ * here) because it exposes a real `ReadableStream` body with `abort()` — React
+ * Native's plain fetch does not. Calls `onDelta` per token, `onStatus` while a tool
+ * runs, and `onSessionId` when the server creates the chat.
  */
 export async function streamCoachChat({
   token,
   message,
+  sessionId,
   onDelta,
   onStatus,
+  onSessionId,
   signal,
 }: {
   token: string | null;
   message: string;
+  sessionId?: string | null;
   onDelta: (delta: string) => void;
   onStatus?: (status: string) => void;
+  onSessionId?: (sessionId: string) => void;
   signal?: AbortSignal;
 }): Promise<string> {
   if (!token) throw new Error("Signed out. Please sign in again.");
@@ -49,7 +66,7 @@ export async function streamCoachChat({
       Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, sessionId: sessionId ?? undefined }),
     signal,
   });
 
@@ -81,13 +98,20 @@ export async function streamCoachChat({
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
       if (!payload) continue;
-      let event: { delta?: string; done?: boolean; error?: string; status?: string };
+      let event: {
+        delta?: string;
+        done?: boolean;
+        error?: string;
+        status?: string;
+        sessionId?: string;
+      };
       try {
         event = JSON.parse(payload) as typeof event;
       } catch {
         continue;
       }
       if (event.error) serverError = event.error;
+      if (event.sessionId) onSessionId?.(event.sessionId);
       if (typeof event.status === "string" && event.status.length > 0) onStatus?.(event.status);
       if (typeof event.delta === "string" && event.delta.length > 0) {
         full += event.delta;

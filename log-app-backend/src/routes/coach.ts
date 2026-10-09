@@ -7,7 +7,7 @@ import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
 import { analyzePhysique, generateCoachPlan, runCoachChat, runCoachChatStream } from "../services/coach";
-import { coachChatSchema, coachPlanSchema, coachProfileSchema } from "../validation/schemas";
+import { coachChatSchema, coachPlanSchema, coachProfileSchema, idParamSchema } from "../validation/schemas";
 
 const router = Router();
 
@@ -96,22 +96,101 @@ router.put(
   },
 );
 
-router.get("/messages", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/sessions", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const messages = await prisma.coachMessage.findMany({
+    const sessions = await prisma.coachSession.findMany({
       where: { userId: req.userId },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      select: { id: true, role: true, content: true, createdAt: true },
+      orderBy: { updatedAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        title: true,
+        updatedAt: true,
+        _count: { select: { messages: true } },
+      },
     });
     res.json(
-      messages.reverse().map((m) => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        created_at: m.createdAt.toISOString(),
+      sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        updated_at: s.updatedAt.toISOString(),
+        message_count: s._count.messages,
       })),
     );
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get(
+  "/sessions/:id/messages",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const session = await prisma.coachSession.findFirst({
+        where: { id: req.params.id as string, userId: req.userId },
+        select: { id: true },
+      });
+      if (!session) {
+        next(new AppError(404, "NOT_FOUND", "Chat not found"));
+        return;
+      }
+      const messages = await prisma.coachMessage.findMany({
+        where: { sessionId: session.id, userId: req.userId },
+        orderBy: { createdAt: "asc" },
+        take: 200,
+        select: { id: true, role: true, content: true, createdAt: true },
+      });
+      res.json(
+        messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          created_at: m.createdAt.toISOString(),
+        })),
+      );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.delete(
+  "/sessions/:id",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const result = await prisma.coachSession.deleteMany({
+        where: { id: req.params.id as string, userId: req.userId },
+      });
+      if (result.count === 0) {
+        next(new AppError(404, "NOT_FOUND", "Chat not found"));
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.get("/memory", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const memory = await prisma.coachMemory.findUnique({ where: { userId: req.userId } });
+    res.json(
+      memory ? { summary: memory.summary, updated_at: memory.updatedAt.toISOString() } : null,
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/memory", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await prisma.coachMemory.deleteMany({ where: { userId: req.userId } });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
@@ -139,7 +218,7 @@ router.post(
   chatRateLimit,
   validate(coachChatSchema),
   async (req: Request, res: Response) => {
-    const { message } = req.body as z.infer<typeof coachChatSchema>;
+    const { message, sessionId } = req.body as z.infer<typeof coachChatSchema>;
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
@@ -162,8 +241,13 @@ router.post(
     try {
       await runCoachChatStream(
         req.userId,
+        sessionId ?? null,
         message,
-        { onDelta: (delta) => send({ delta }), onStatus: (status) => send({ status }) },
+        {
+          onSession: (id) => send({ sessionId: id }),
+          onDelta: (delta) => send({ delta }),
+          onStatus: (status) => send({ status }),
+        },
         controller.signal,
       );
       send({ done: true });

@@ -92,7 +92,7 @@ export async function buildAthleteContext(userId: string): Promise<string> {
   const since = new Date(now);
   since.setUTCDate(since.getUTCDate() - CONTEXT_WINDOW_DAYS);
 
-  const [profile, daily, lifts, verdicts, plan, activities] = await Promise.all([
+  const [profile, daily, lifts, verdicts, plan, activities, memory] = await Promise.all([
     prisma.coachProfile.findUnique({ where: { userId } }),
     prisma.dailyLog.findMany({
       where: { userId, date: { gte: since } },
@@ -116,6 +116,7 @@ export async function buildAthleteContext(userId: string): Promise<string> {
       where: { userId, date: { gte: since } },
       select: { durationMin: true, activityType: true },
     }),
+    prisma.coachMemory.findUnique({ where: { userId } }),
   ]);
 
   const lines: string[] = [];
@@ -134,6 +135,10 @@ export async function buildAthleteContext(userId: string): Promise<string> {
       profile.notes && `notes=${profile.notes}`,
     ].filter(Boolean);
     if (bits.length > 0) lines.push(`PROFILE: ${bits.join("; ")}`);
+  }
+
+  if (memory?.summary) {
+    lines.push(`LONG-TERM MEMORY (what you remember about this athlete): ${memory.summary}`);
   }
 
   const weights = daily.filter((d) => d.weightKg != null).map((d) => Number(d.weightKg));
@@ -639,6 +644,62 @@ export async function executeCoachTool(
   }
 }
 
+/* -------------------------------------------------------- long-term memory */
+
+const MEMORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // refresh when older than ~7 days
+
+const MEMORY_SYSTEM = `You maintain a concise long-term memory of an athlete for a coaching app.
+
+Given the previous memory and the recent conversation, write an UPDATED memory of at most 180 words.
+Capture only durable facts worth remembering across future chats: their goal, training setup,
+dietary approach, injuries or limitations, stated preferences, and what has or hasn't worked.
+Exclude transient numbers, greetings, and anything already obvious from their logs. Plain prose only —
+no headings, no bullet lists, no preamble.`;
+
+/**
+ * Refreshes the rolling memory summary when it is missing or stale. Cheap model,
+ * bounded output, and never throws — memory failing must not affect the chat.
+ */
+export async function maybeUpdateMemory(userId: string): Promise<void> {
+  try {
+    const existing = await prisma.coachMemory.findUnique({ where: { userId } });
+    if (existing && Date.now() - existing.updatedAt.getTime() < MEMORY_MAX_AGE_MS) return;
+
+    const recent = await prisma.coachMessage.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      select: { role: true, content: true },
+    });
+    if (recent.length === 0) return;
+
+    const transcript = recent
+      .reverse()
+      .map((m) => `${m.role === "assistant" ? "Coach" : "Athlete"}: ${m.content}`)
+      .join("\n")
+      .slice(0, 8000);
+
+    const summary = await callModel(
+      [
+        MEMORY_SYSTEM,
+        existing ? `Current memory:\n${existing.summary}` : "There is no memory yet.",
+        `Recent conversation (oldest first):\n${transcript}`,
+      ].join("\n\n"),
+      [{ role: "user", content: [{ type: "input_text", text: "Write the updated memory." }] }],
+      400,
+      { model: config.models.chatFast },
+    );
+
+    await prisma.coachMemory.upsert({
+      where: { userId },
+      create: { userId, summary },
+      update: { summary },
+    });
+  } catch {
+    // Best-effort: keep the previous memory.
+  }
+}
+
 type ToolCall = { callId: string; name: string; args: string };
 
 interface StreamRound {
@@ -716,31 +777,57 @@ async function streamRound(
 }
 
 /**
- * Streaming variant of {@link runCoachChat} with tool calling. Persists the user
- * message up front, runs a bounded tool loop, forwards each text delta and tool
- * status, and stores whatever text was produced (so a Stop keeps the partial answer).
+ * Streaming coach turn within a chat session. Creates the session on the first
+ * message (emitting its id via `handlers.onSession`), runs a bounded tool loop,
+ * forwards deltas and tool status, and stores whatever text was produced (a Stop
+ * keeps the partial answer).
  *
- * Cost control: when the previous turn's response id is stored we continue that
- * thread with `previous_response_id` and send only the new message (instead of
- * replaying the whole history), and each tool round chains from the previous one.
+ * Cost control: the turn continues the session's stored thread with
+ * `previous_response_id` (sending only the new message) and each tool round
+ * chains from the previous response. Falls back to replaying the session's
+ * recent messages when the stored response is gone.
  */
 export async function runCoachChatStream(
   userId: string,
+  sessionId: string | null,
   message: string,
-  handlers: { onDelta: (delta: string) => void; onStatus?: (status: string) => void },
+  handlers: {
+    onDelta: (delta: string) => void;
+    onStatus?: (status: string) => void;
+    onSession?: (sessionId: string) => void;
+  },
   signal?: AbortSignal,
 ): Promise<string> {
+  let session = sessionId
+    ? await prisma.coachSession.findFirst({ where: { id: sessionId, userId } })
+    : null;
+  if (sessionId && !session) {
+    throw new AppError(404, "NOT_FOUND", "Chat not found");
+  }
+  if (!session) {
+    session = await prisma.coachSession.create({
+      data: { userId, title: message.trim().slice(0, 60) || "New chat" },
+    });
+  }
+  handlers.onSession?.(session.id);
+
   const [context, recent] = await Promise.all([
     buildAthleteContext(userId),
     prisma.coachMessage.findMany({
-      where: { userId },
+      where: { sessionId: session.id },
       orderBy: { createdAt: "desc" },
       take: HISTORY_TURNS,
       select: { role: true, content: true, responseId: true },
     }),
   ]);
 
-  await prisma.coachMessage.create({ data: { userId, role: "user", content: message } });
+  await prisma.coachMessage.create({
+    data: { userId, sessionId: session.id, role: "user", content: message },
+  });
+  await prisma.coachSession.update({
+    where: { id: session.id },
+    data: { updatedAt: new Date() },
+  });
 
   if (!config.openai.apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
@@ -847,9 +934,19 @@ export async function runCoachChatStream(
   const answer = full.trim();
   if (answer.length > 0) {
     await prisma.coachMessage.create({
-      data: { userId, role: "assistant", content: answer, responseId: lastResponseId },
+      data: {
+        userId,
+        sessionId: session.id,
+        role: "assistant",
+        content: answer,
+        responseId: lastResponseId,
+      },
     });
   }
+
+  // Refresh long-term memory in the background (at most every ~7 days).
+  void maybeUpdateMemory(userId);
+
   return answer;
 }
 

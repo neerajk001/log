@@ -241,9 +241,25 @@ Returns the optional coaching profile captured during onboarding, or `null`.
 Upsert the same fields. Every field is optional (`coach_profiles`, scoped to the
 authenticated user).
 
-## `GET /api/coach/messages`
+## `GET /api/coach/sessions`
 
-Returns the last 50 chat turns: `[{ id, role: "user" | "assistant", content, created_at }]`.
+Returns the user's chats, newest first: `[{ id, title, updated_at, message_count }]`.
+
+## `GET /api/coach/sessions/:id/messages`
+
+Returns that chat's turns (oldest first): `[{ id, role, content, created_at }]`.
+
+## `DELETE /api/coach/sessions/:id`
+
+Deletes a chat and its messages (`{ ok: true }`).
+
+## `GET /api/coach/memory`
+
+Returns the rolling long-term memory (`{ summary, updated_at }`) or `null`.
+
+## `DELETE /api/coach/memory`
+
+Clears the memory.
 
 ## `POST /api/coach/chat`
 
@@ -254,9 +270,11 @@ verdict, active plan), asks the coach model, persists both turns and returns
 
 ## `POST /api/coach/chat/stream`
 
-Same body and limits as `/chat`, but streams the reply as Server-Sent Events:
-`data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
-something up, then `data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
+Body `{ message, sessionId? }`. With no `sessionId` the server creates a chat and
+emits `data: {"sessionId":"…"}` as the first event; with one, it must belong to the
+caller. Streams the reply as Server-Sent Events: `data: {"delta":"…"}` per token,
+`data: {"status":"…"}` while the coach looks something up, then
+`data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
 
 The coach can call read-only tools (`get_lift_history`, `get_daily_logs`,
 `get_weekly_verdicts`, `get_plan_vs_actual`, `get_activity_logs`) — all scoped to

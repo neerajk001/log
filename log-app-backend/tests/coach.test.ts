@@ -8,6 +8,11 @@ const mocks = vi.hoisted(() => ({
   findManyVerdicts: vi.fn(),
   findFirstPlan: vi.fn(),
   findManyActivity: vi.fn(),
+  findManyCoachMessages: vi.fn(),
+  findFirstSession: vi.fn(),
+  createSession: vi.fn(),
+  findUniqueMemory: vi.fn(),
+  upsertMemory: vi.fn(),
 }));
 
 vi.mock("../src/db/client", () => ({
@@ -18,15 +23,24 @@ vi.mock("../src/db/client", () => ({
     weeklyVerdict: { findMany: mocks.findManyVerdicts },
     workoutPlan: { findFirst: mocks.findFirstPlan },
     activityLog: { findMany: mocks.findManyActivity },
+    coachMessage: { findMany: mocks.findManyCoachMessages, create: vi.fn().mockResolvedValue({}) },
+    coachSession: {
+      findFirst: mocks.findFirstSession,
+      create: mocks.createSession,
+      update: vi.fn().mockResolvedValue({}),
+    },
+    coachMemory: { findUnique: mocks.findUniqueMemory, upsert: mocks.upsertMemory },
   },
 }));
 
 import {
   buildAthleteContext,
   executeCoachTool,
+  maybeUpdateMemory,
   parseOpenAIDelta,
   parseOpenAIEvent,
   routeChatModel,
+  runCoachChatStream,
 } from "../src/services/coach";
 import { config } from "../src/config";
 
@@ -40,6 +54,11 @@ beforeEach(() => {
   mocks.findManyVerdicts.mockReset().mockResolvedValue([]);
   mocks.findFirstPlan.mockReset().mockResolvedValue(null);
   mocks.findManyActivity.mockReset().mockResolvedValue([]);
+  mocks.findManyCoachMessages.mockReset().mockResolvedValue([]);
+  mocks.findFirstSession.mockReset().mockResolvedValue(null);
+  mocks.createSession.mockReset().mockResolvedValue({ id: "sess-1" });
+  mocks.findUniqueMemory.mockReset().mockResolvedValue(null);
+  mocks.upsertMemory.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -279,5 +298,46 @@ describe("executeCoachTool", () => {
     expect(await executeCoachTool("user-1", "nope", "{}")).toEqual({ error: "Unknown tool: nope" });
     mocks.findManyDaily.mockResolvedValue([]);
     expect(await executeCoachTool("user-1", "get_daily_logs", "{not json")).toEqual([]);
+  });
+});
+
+describe("long-term memory", () => {
+  it("includes the memory summary in the context when present", async () => {
+    mocks.findUniqueMemory.mockResolvedValue({
+      summary: "Prefers 4-day upper/lower; cranky right shoulder.",
+    });
+
+    const context = await buildAthleteContext("user-1");
+
+    expect(context).toContain("LONG-TERM MEMORY");
+    expect(context).toContain("cranky right shoulder");
+  });
+
+  it("skips refresh while the stored memory is fresh", async () => {
+    mocks.findUniqueMemory.mockResolvedValue({ summary: "x", updatedAt: new Date() });
+
+    await maybeUpdateMemory("user-1");
+
+    expect(mocks.findManyCoachMessages).not.toHaveBeenCalled();
+    expect(mocks.upsertMemory).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when there are no messages", async () => {
+    mocks.findUniqueMemory.mockResolvedValue(null);
+    mocks.findManyCoachMessages.mockResolvedValue([]);
+
+    await maybeUpdateMemory("user-1");
+
+    expect(mocks.upsertMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe("runCoachChatStream sessions", () => {
+  it("rejects a session id that does not belong to the caller", async () => {
+    mocks.findFirstSession.mockResolvedValue(null);
+
+    await expect(
+      runCoachChatStream("user-1", "11111111-1111-4111-8111-111111111111", "hi", { onDelta: () => {} }),
+    ).rejects.toMatchObject({ statusCode: 404, code: "NOT_FOUND" });
   });
 });
