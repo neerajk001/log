@@ -31,11 +31,13 @@ export async function streamCoachChat({
   token,
   message,
   onDelta,
+  onStatus,
   signal,
 }: {
   token: string | null;
   message: string;
   onDelta: (delta: string) => void;
+  onStatus?: (status: string) => void;
   signal?: AbortSignal;
 }): Promise<string> {
   if (!token) throw new Error("Signed out. Please sign in again.");
@@ -79,13 +81,14 @@ export async function streamCoachChat({
       if (!trimmed.startsWith("data:")) continue;
       const payload = trimmed.slice(5).trim();
       if (!payload) continue;
-      let event: { delta?: string; done?: boolean; error?: string };
+      let event: { delta?: string; done?: boolean; error?: string; status?: string };
       try {
         event = JSON.parse(payload) as typeof event;
       } catch {
         continue;
       }
       if (event.error) serverError = event.error;
+      if (typeof event.status === "string" && event.status.length > 0) onStatus?.(event.status);
       if (typeof event.delta === "string" && event.delta.length > 0) {
         full += event.delta;
         onDelta(event.delta);

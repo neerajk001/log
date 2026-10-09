@@ -21,7 +21,13 @@ vi.mock("../src/db/client", () => ({
   },
 }));
 
-import { buildAthleteContext, parseOpenAIDelta, routeChatModel } from "../src/services/coach";
+import {
+  buildAthleteContext,
+  executeCoachTool,
+  parseOpenAIDelta,
+  parseOpenAIEvent,
+  routeChatModel,
+} from "../src/services/coach";
 import { config } from "../src/config";
 
 beforeEach(() => {
@@ -188,5 +194,72 @@ describe("routeChatModel", () => {
 
   it("sends long messages to the smart model", () => {
     expect(routeChatModel("x".repeat(200))).toBe(config.models.chatSmart);
+  });
+});
+
+describe("parseOpenAIEvent", () => {
+  it("returns streamed text deltas", () => {
+    expect(
+      parseOpenAIEvent(JSON.stringify({ type: "response.output_text.delta", delta: "Hi" })),
+    ).toEqual({ kind: "text", delta: "Hi" });
+  });
+
+  it("returns completed function calls", () => {
+    expect(
+      parseOpenAIEvent(
+        JSON.stringify({
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            call_id: "call_1",
+            name: "get_lift_history",
+            arguments: '{"days":7}',
+          },
+        }),
+      ),
+    ).toEqual({
+      kind: "function-call",
+      callId: "call_1",
+      name: "get_lift_history",
+      args: '{"days":7}',
+    });
+  });
+
+  it("ignores everything else", () => {
+    expect(parseOpenAIEvent("[DONE]")).toEqual({ kind: "other" });
+    expect(parseOpenAIEvent(JSON.stringify({ type: "response.completed" }))).toEqual({ kind: "other" });
+  });
+});
+
+describe("executeCoachTool", () => {
+  it("scopes lift history to the user and maps rows", async () => {
+    mocks.findManyLift.mockResolvedValue([
+      { date: new Date("2026-10-08"), exerciseName: "Bench", weightKg: 60, reps: 8 },
+    ]);
+
+    const result = await executeCoachTool(
+      "user-1",
+      "get_lift_history",
+      JSON.stringify({ days: 7, exercise: "Bench" }),
+    );
+
+    expect(result).toEqual([{ date: "2026-10-08", exercise: "Bench", weight_kg: 60, reps: 8 }]);
+    const where = mocks.findManyLift.mock.calls[0][0].where as Record<string, unknown>;
+    expect(where.userId).toBe("user-1");
+    expect(where.exerciseName).toBe("Bench");
+  });
+
+  it("returns a null day when there is no active plan", async () => {
+    mocks.findFirstPlan.mockResolvedValue(null);
+    expect(await executeCoachTool("user-1", "get_plan_vs_actual", "{}")).toEqual({
+      date: expect.any(String),
+      day: null,
+    });
+  });
+
+  it("never throws — unknown tools and bad args resolve", async () => {
+    expect(await executeCoachTool("user-1", "nope", "{}")).toEqual({ error: "Unknown tool: nope" });
+    mocks.findManyDaily.mockResolvedValue([]);
+    expect(await executeCoachTool("user-1", "get_daily_logs", "{not json")).toEqual([]);
   });
 });

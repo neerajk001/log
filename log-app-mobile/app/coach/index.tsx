@@ -30,7 +30,7 @@ const STARTERS = [
 export default function CoachScreen() {
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const { messages, loading, streaming, error, send, stop, retry } = useCoachChat();
+  const { messages, loading, streaming, status, error, send, stop, retry } = useCoachChat();
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState("");
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -93,7 +93,7 @@ export default function CoachScreen() {
                 {thinking ? (
                   <View style={styles.typing}>
                     <ActivityIndicator size="small" color={colors.textDim} />
-                    <Text style={typography.small}>Coach is thinking…</Text>
+                    <Text style={typography.small}>{status ?? "Coach is thinking…"}</Text>
                   </View>
                 ) : (
                   <Text style={[typography.body, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>

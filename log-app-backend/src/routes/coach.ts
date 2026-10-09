@@ -160,7 +160,12 @@ router.post(
     });
 
     try {
-      await runCoachChatStream(req.userId, message, (delta) => send({ delta }), controller.signal);
+      await runCoachChatStream(
+        req.userId,
+        message,
+        { onDelta: (delta) => send({ delta }), onStatus: (status) => send({ status }) },
+        controller.signal,
+      );
       send({ done: true });
     } catch (err) {
       // Headers are already sent, so we can't hand this to the error middleware.

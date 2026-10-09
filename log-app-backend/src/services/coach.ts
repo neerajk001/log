@@ -2,6 +2,7 @@ import { config } from "../config";
 import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
 import { parsePlanOutput, PlanParseError } from "./planParser";
+import { resolvePlanDayForDate } from "./planRotation";
 import type { ParsedPlan } from "../validation/schemas";
 
 const CONTEXT_WINDOW_DAYS = 28;
@@ -21,6 +22,9 @@ Rules:
   recent weekly verdicts, and the active plan's days.
 - What you CANNOT see: individual sets beyond the top set, individual meals, or anything older than
   ~4 weeks. If asked about those, say so.
+- You also have tools to look up the user's data on demand (get_lift_history, get_daily_logs,
+  get_weekly_verdicts, get_plan_vs_actual, get_activity_logs). Prefer calling a tool over guessing,
+  and don't call one for facts already in the context above.
 - Keep replies short: a few sentences or a short list, plain language, no jargon dumps.
 - End with 2-4 concrete, specific actions when advice is requested.
 - You are not a doctor: never diagnose or give medical advice. For injuries or medical concerns, tell
@@ -337,33 +341,341 @@ export async function runCoachChat(userId: string, message: string): Promise<str
   return reply;
 }
 
+export type OpenAIEvent =
+  | { kind: "text"; delta: string }
+  | { kind: "function-call"; callId: string; name: string; args: string }
+  | { kind: "other" };
+
 /**
- * Pulls the text delta out of one OpenAI Responses SSE `data:` payload.
- * Returns null for events we don't care about (start, completed, [DONE], …).
+ * Parses one OpenAI Responses SSE `data:` payload into the events we act on:
+ * streamed text deltas and completed function calls.
  */
-export function parseOpenAIDelta(payload: string): string | null {
-  if (!payload || payload === "[DONE]") return null;
-  let event: { type?: string; delta?: unknown };
+export function parseOpenAIEvent(payload: string): OpenAIEvent {
+  if (!payload || payload === "[DONE]") return { kind: "other" };
+  let event: {
+    type?: string;
+    delta?: unknown;
+    item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+  };
   try {
-    event = JSON.parse(payload) as { type?: string; delta?: unknown };
+    event = JSON.parse(payload) as typeof event;
   } catch {
-    return null;
+    return { kind: "other" };
   }
   if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
-    return event.delta;
+    return { kind: "text", delta: event.delta };
   }
-  return null;
+  if (event.type === "response.output_item.done" && event.item?.type === "function_call") {
+    return {
+      kind: "function-call",
+      callId: event.item.call_id ?? "",
+      name: event.item.name ?? "",
+      args: event.item.arguments ?? "{}",
+    };
+  }
+  return { kind: "other" };
+}
+
+/** Convenience wrapper: the text delta from a payload, or null. */
+export function parseOpenAIDelta(payload: string): string | null {
+  const event = parseOpenAIEvent(payload);
+  return event.kind === "text" ? event.delta : null;
+}
+
+/* ----------------------------------------------------------- coach tools */
+
+const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_DAYS = 90;
+
+/** Responses-API tool definitions (flat name/parameters, not nested). */
+const COACH_TOOLS = [
+  {
+    type: "function",
+    name: "get_lift_history",
+    description:
+      "Look up the athlete's logged sets for an exercise (or all exercises) over the last N days.",
+    parameters: {
+      type: "object",
+      properties: {
+        exercise: { type: "string", description: "Exercise name to filter by (optional)." },
+        days: { type: "number", description: "How many days back, 1-90 (default 28)." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "get_daily_logs",
+    description: "Look up daily body-weight, calories, protein and sleep over the last N days.",
+    parameters: {
+      type: "object",
+      properties: { days: { type: "number", description: "How many days back, 1-90 (default 28)." } },
+    },
+  },
+  {
+    type: "function",
+    name: "get_weekly_verdicts",
+    description: "Look up the athlete's recent weekly verdicts and their reasoning.",
+    parameters: {
+      type: "object",
+      properties: { count: { type: "number", description: "How many recent weeks, 1-12 (default 6)." } },
+    },
+  },
+  {
+    type: "function",
+    name: "get_plan_vs_actual",
+    description:
+      "Compare the active plan's prescribed exercises for a date with what was actually logged.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD; defaults to today." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "get_activity_logs",
+    description: "Look up cardio/other activity sessions (type, duration, distance) over the last N days.",
+    parameters: {
+      type: "object",
+      properties: { days: { type: "number", description: "How many days back, 1-90 (default 28)." } },
+    },
+  },
+];
+
+const TOOL_LABELS: Record<string, string> = {
+  get_lift_history: "Checking your lift history…",
+  get_daily_logs: "Reading your daily logs…",
+  get_weekly_verdicts: "Reviewing your weekly verdicts…",
+  get_plan_vs_actual: "Comparing your plan with what you logged…",
+  get_activity_logs: "Checking your activities…",
+};
+
+function clampDays(value: unknown, fallback: number): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(MAX_TOOL_DAYS, Math.floor(n)));
+}
+
+function daysAgo(days: number): Date {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - (days - 1));
+  return d;
 }
 
 /**
- * Streaming variant of {@link runCoachChat}. Persists the user message up
- * front, forwards each text delta through `onDelta`, and stores whatever text
- * was produced (so a Stop mid-reply keeps the partial answer).
+ * Runs one coach tool, scoped to `userId`. Always resolves — a failure becomes
+ * an `{ error }` payload so the model can recover instead of the stream dying.
+ */
+export async function executeCoachTool(
+  userId: string,
+  name: string,
+  rawArgs: string,
+): Promise<unknown> {
+  let args: Record<string, unknown> = {};
+  try {
+    args = rawArgs ? (JSON.parse(rawArgs) as Record<string, unknown>) : {};
+  } catch {
+    args = {};
+  }
+
+  try {
+    switch (name) {
+      case "get_lift_history": {
+        const where: Record<string, unknown> = { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } };
+        if (typeof args.exercise === "string" && args.exercise.trim()) {
+          where.exerciseName = args.exercise.trim();
+        }
+        const rows = await prisma.liftLog.findMany({
+          where,
+          orderBy: { date: "desc" },
+          take: 100,
+          select: { date: true, exerciseName: true, weightKg: true, reps: true },
+        });
+        return rows.map((r) => ({
+          date: fmtDate(r.date),
+          exercise: r.exerciseName,
+          weight_kg: Number(r.weightKg),
+          reps: r.reps,
+        }));
+      }
+
+      case "get_daily_logs": {
+        const rows = await prisma.dailyLog.findMany({
+          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } },
+          orderBy: { date: "desc" },
+          take: 90,
+          select: { date: true, weightKg: true, calories: true, proteinG: true, sleepHours: true },
+        });
+        return rows.map((r) => ({
+          date: fmtDate(r.date),
+          weight_kg: r.weightKg == null ? null : Number(r.weightKg),
+          calories: r.calories,
+          protein_g: r.proteinG,
+          sleep_hours: r.sleepHours == null ? null : Number(r.sleepHours),
+        }));
+      }
+
+      case "get_weekly_verdicts": {
+        const count = Math.max(1, Math.min(12, Math.floor(Number(args.count) || 6)));
+        const rows = await prisma.weeklyVerdict.findMany({
+          where: { userId },
+          orderBy: { weekStartDate: "desc" },
+          take: count,
+        });
+        return rows.map((v) => ({
+          week_start: fmtDate(v.weekStartDate),
+          verdict: v.verdict,
+          weight_trend_kg_per_week:
+            v.weightTrendKgPerWeek == null ? null : Number(v.weightTrendKgPerWeek),
+          strength_trend: v.strengthTrend,
+          adherence_pct: v.adherencePct,
+          reasoning: (v.reasoning as unknown as string[] | null) ?? [],
+        }));
+      }
+
+      case "get_plan_vs_actual": {
+        const dateStr = typeof args.date === "string" ? args.date : fmtDate(new Date());
+        const plan = await prisma.workoutPlan.findFirst({
+          where: { userId, isActive: true },
+          include: { planDays: { orderBy: { dayOrder: "asc" } } },
+        });
+        if (!plan) return { date: dateStr, day: null };
+        const day = resolvePlanDayForDate(plan.createdAt, plan.planDays, new Date(`${dateStr}T00:00:00Z`));
+        if (!day) return { date: dateStr, day: null };
+        const prescribed = day.exercises as unknown as { name: string; sets: number; reps: string }[];
+        const logs = await prisma.liftLog.findMany({
+          where: { userId, date: new Date(`${dateStr}T00:00:00Z`), exerciseName: { in: prescribed.map((e) => e.name) } },
+          select: { exerciseName: true, weightKg: true, reps: true },
+        });
+        return {
+          date: dateStr,
+          day: day.dayName,
+          exercises: prescribed.map((e) => {
+            const mine = logs.filter((l) => l.exerciseName === e.name);
+            const top = mine.reduce<{ weight_kg: number; reps: number } | null>((best, l) => {
+              const kg = Number(l.weightKg);
+              return !best || kg > best.weight_kg ? { weight_kg: kg, reps: l.reps } : best;
+            }, null);
+            return {
+              name: e.name,
+              target_sets: e.sets,
+              target_reps: e.reps,
+              logged_sets: mine.length,
+              top_set: top,
+            };
+          }),
+        };
+      }
+
+      case "get_activity_logs": {
+        const rows = await prisma.activityLog.findMany({
+          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28)) } },
+          orderBy: { date: "desc" },
+          take: 90,
+          select: {
+            date: true,
+            activityType: true,
+            name: true,
+            durationMin: true,
+            distanceKm: true,
+            caloriesBurned: true,
+          },
+        });
+        return rows.map((a) => ({
+          date: fmtDate(a.date),
+          activity_type: a.activityType,
+          name: a.name,
+          duration_min: a.durationMin,
+          distance_km: a.distanceKm,
+          calories_burned: a.caloriesBurned,
+        }));
+      }
+
+      default:
+        return { error: `Unknown tool: ${name}` };
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Tool failed" };
+  }
+}
+
+type ToolCall = { callId: string; name: string; args: string };
+
+interface StreamRound {
+  text: string;
+  calls: ToolCall[];
+}
+
+/** One streaming Responses call; forwards text deltas and collects function calls. */
+async function streamRound(
+  body: Record<string, unknown>,
+  signal: AbortSignal | undefined,
+  onDelta: (delta: string) => void,
+): Promise<StreamRound> {
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.openai.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") return { text: "", calls: [] };
+    throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
+  }
+
+  if (!res.ok || !res.body) {
+    console.error("[coach] OpenAI stream error:", res.status);
+    throw new AppError(502, "COACH_ERROR", `The AI service returned ${res.status}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  const calls: ToolCall[] = [];
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const event = parseOpenAIEvent(trimmed.slice(5).trim());
+        if (event.kind === "text") {
+          text += event.delta;
+          onDelta(event.delta);
+        } else if (event.kind === "function-call") {
+          calls.push({ callId: event.callId, name: event.name, args: event.args });
+        }
+      }
+    }
+  } catch (err) {
+    // Client disconnected (Stop) — keep whatever we streamed so far.
+    if (!(err instanceof Error && err.name === "AbortError")) throw err;
+  }
+
+  return { text, calls };
+}
+
+/**
+ * Streaming variant of {@link runCoachChat} with tool calling. Persists the user
+ * message up front, runs a bounded tool loop, forwards each text delta and tool
+ * status, and stores whatever text was produced (so a Stop keeps the partial answer).
  */
 export async function runCoachChatStream(
   userId: string,
   message: string,
-  onDelta: (delta: string) => void,
+  handlers: { onDelta: (delta: string) => void; onStatus?: (status: string) => void },
   signal?: AbortSignal,
 ): Promise<string> {
   const [context, recent] = await Promise.all([
@@ -394,65 +706,57 @@ export async function runCoachChatStream(
       ] as InputPart[],
     }));
 
-  let res: Response;
-  try {
-    res = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: routeChatModel(message),
-        instructions: `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`,
-        input: [...history, { role: "user", content: [{ type: "input_text", text: message }] }],
-        stream: true,
-        max_output_tokens: 700,
-      }),
-      signal,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") return "";
-    throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
-  }
+  const instructions = `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
+  const model = routeChatModel(message);
+  const input: unknown[] = [
+    ...history,
+    { role: "user", content: [{ type: "input_text", text: message }] },
+  ];
 
-  if (!res.ok || !res.body) {
-    console.error("[coach] OpenAI stream error:", res.status);
-    throw new AppError(502, "COACH_ERROR", `The AI service returned ${res.status}`);
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
   let full = "";
 
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const delta = parseOpenAIDelta(trimmed.slice(5).trim());
-        if (delta) {
-          full += delta;
-          onDelta(delta);
-        }
-      }
+  for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+    if (signal?.aborted) break;
+    const allowTools = round < MAX_TOOL_ROUNDS;
+
+    const { text, calls } = await streamRound(
+      {
+        model,
+        instructions,
+        input,
+        ...(allowTools ? { tools: COACH_TOOLS, tool_choice: "auto" } : {}),
+        stream: true,
+        max_output_tokens: 700,
+      },
+      signal,
+      handlers.onDelta,
+    );
+    full += text;
+
+    if (!allowTools || calls.length === 0) break;
+
+    for (const call of calls) {
+      handlers.onStatus?.(TOOL_LABELS[call.name] ?? "Looking that up…");
+      const output = await executeCoachTool(userId, call.name, call.args);
+      input.push({
+        type: "function_call",
+        call_id: call.callId,
+        name: call.name,
+        arguments: call.args,
+      });
+      input.push({
+        type: "function_call_output",
+        call_id: call.callId,
+        output: JSON.stringify(output),
+      });
     }
-  } catch (err) {
-    // Client disconnected (Stop) — keep whatever we streamed so far.
-    if (!(err instanceof Error && err.name === "AbortError")) throw err;
   }
 
-  const text = full.trim();
-  if (text.length > 0) {
-    await prisma.coachMessage.create({ data: { userId, role: "assistant", content: text } });
+  const answer = full.trim();
+  if (answer.length > 0) {
+    await prisma.coachMessage.create({ data: { userId, role: "assistant", content: answer } });
   }
-  return text;
+  return answer;
 }
 
 /** Generates a structured program from the athlete's profile + recent data. */

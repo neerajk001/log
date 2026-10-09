@@ -19,6 +19,7 @@ export function useCoachChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [streaming, setStreaming] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -46,6 +47,7 @@ export function useCoachChat() {
     async (message: string, appendUser: boolean) => {
       const assistantId = `coach-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setError(null);
+      setStatus(null);
       setStreaming(true);
       setMessages((prev) => [
         ...prev,
@@ -64,10 +66,13 @@ export function useCoachChat() {
           token,
           message,
           signal: controller.signal,
-          onDelta: (delta) =>
+          onDelta: (delta) => {
+            setStatus(null);
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)),
-            ),
+            );
+          },
+          onStatus: (next) => setStatus(next),
         });
         setMessages((prev) =>
           prev.map((m) =>
@@ -89,6 +94,7 @@ export function useCoachChat() {
       } finally {
         abortRef.current = null;
         setStreaming(false);
+        setStatus(null);
       }
     },
     [getToken],
@@ -116,5 +122,5 @@ export function useCoachChat() {
     void runStream(lastUser.content, false);
   }, [messages, runStream, streaming]);
 
-  return { messages, loading, streaming, error, send, stop, retry, refetch: load };
+  return { messages, loading, streaming, status, error, send, stop, retry, refetch: load };
 }

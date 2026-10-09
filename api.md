@@ -255,10 +255,15 @@ verdict, active plan), asks the coach model, persists both turns and returns
 ## `POST /api/coach/chat/stream`
 
 Same body and limits as `/chat`, but streams the reply as Server-Sent Events:
-`data: {"delta":"…"}` per token, then `data: {"done":true}`; on failure mid-stream
-`data: {"error":"…"}`. The user message is stored up front, and the assistant
-message is stored with whatever text was produced — so a client Stop (which aborts
-the request and the upstream model call) keeps the partial answer.
+`data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
+something up, then `data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
+
+The coach can call read-only tools (`get_lift_history`, `get_daily_logs`,
+`get_weekly_verdicts`, `get_plan_vs_actual`, `get_activity_logs`) — all scoped to
+the authenticated user, in a bounded loop (max 4 rounds). The user message is
+stored up front, and the assistant message is stored with whatever text was
+produced — so a client Stop (which aborts the request and the upstream model call)
+keeps the partial answer.
 
 Deployment note: this route needs nginx `proxy_buffering off;` (the route already
 sets `X-Accel-Buffering: no`), or the VPS proxy buffers the whole response and
