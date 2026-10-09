@@ -10,6 +10,7 @@ import {
   Platform,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
 import { useSignIn, useSSO } from "@clerk/clerk-expo";
 import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
 import { radii, spacing } from "../src/theme/spacing";
@@ -47,7 +48,9 @@ export default function SignInScreen() {
     try {
       const result = await startSSOFlow({
         strategy: "oauth_google",
-        redirectUrl: "log://sso-callback",
+        // Expo Go runs under exp://<lan-ip>:8081, a standalone/dev build under
+        // log://. createURL() picks the right scheme per environment.
+        redirectUrl: Linking.createURL("/sso-callback"),
       });
       const sessionId = result.createdSessionId;
       const activate = result.setActive ?? setActive;

@@ -21,6 +21,18 @@ let lastReadinessReportAt = 0;
 app.set("trust proxy", 1);
 app.use(helmet());
 
+if (config.nodeEnv !== "production") {
+  app.use((req, res, next) => {
+    const startedAt = Date.now();
+    res.on("finish", () => {
+      const ms = Date.now() - startedAt;
+      const user = req.userId ? ` user=${req.userId}` : "";
+      console.log(`[req] ${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms${user}`);
+    });
+    next();
+  });
+}
+
 app.use(cors({
   origin: (origin, callback) => {
     if (isAllowedOrigin(origin, config.cors.allowedOrigins)) return callback(null, true);

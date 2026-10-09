@@ -155,7 +155,10 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
     res.json({
       verdict: verdictRow.verdict,
       week_start_date: toUtcDateString(verdictRow.weekStartDate),
-      weight_trend_kg_per_week: verdictRow.weightTrendKgPerWeek,
+      weight_trend_kg_per_week:
+        verdictRow.weightTrendKgPerWeek == null
+          ? null
+          : Number(verdictRow.weightTrendKgPerWeek),
       strength_trend: verdictRow.strengthTrend,
       adherence_pct: verdictRow.adherencePct,
       reasoning: verdictRow.reasoning as unknown as string[],

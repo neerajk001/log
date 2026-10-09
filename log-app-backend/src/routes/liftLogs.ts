@@ -1,5 +1,6 @@
 import { Router, Response } from "express";
 import * as Sentry from "@sentry/node";
+import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { idParamSchema, liftLogSchema, liftLogsQuerySchema } from "../validation/schemas";
@@ -15,8 +16,32 @@ router.post("/lift", requireAuth, validate(liftLogSchema), async (req, res: Resp
   Sentry.getCurrentScope().setTag("lift.has_request_id", requestId ? "true" : "false");
   if (requestId) Sentry.getCurrentScope().setTag("lift.request_id", requestId);
 
+  if (config.nodeEnv !== "production") {
+    console.log("[lift] POST /api/logs/lift <-", {
+      id: requestId ?? null,
+      user: req.userId,
+      date: req.body.date,
+      exercise_name: req.body.exercise_name,
+      weight_kg: req.body.weight_kg,
+      reps: req.body.reps,
+      plan_day_id: req.body.plan_day_id ?? null,
+    });
+  }
+
   const { log, created } = await createLiftLogIdempotent(req.userId, req.body);
   Sentry.getCurrentScope().setTag("lift.outcome", created ? "created" : "replayed");
+
+  if (config.nodeEnv !== "production") {
+    console.log("[lift] saved ->", {
+      id: log.id,
+      created,
+      exercise_name: log.exerciseName,
+      weight_kg: Number(log.weightKg),
+      reps: log.reps,
+      plan_day_id: log.planDayId,
+    });
+  }
+
   res.status(created ? 201 : 200).json(serializeLiftLog(log));
 });
 

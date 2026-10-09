@@ -80,9 +80,14 @@ export function useLiftLogs(date: string) {
         ]);
       }
 
+      if (__DEV__) {
+        console.log("[lift] -> POST /api/logs/lift", requestData);
+      }
+
       const request = api
         .createLiftLog(requestData)
         .then((saved) => {
+          if (__DEV__) console.log("[lift] <- saved", saved);
           applyEntries((current) => {
             const exists = current.some((entry) => entry.id === id);
             return exists
@@ -92,6 +97,9 @@ export function useLiftLogs(date: string) {
           return saved;
         })
         .catch((err) => {
+          if (__DEV__) {
+            console.warn("[lift] x save failed", id, err instanceof Error ? err.message : err);
+          }
           if (!alreadyPresent) {
             applyEntries((current) => current.filter((entry) => entry.id !== id));
           }
