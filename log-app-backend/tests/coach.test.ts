@@ -225,9 +225,27 @@ describe("parseOpenAIEvent", () => {
     });
   });
 
+  it("returns the completed response id and token usage", () => {
+    expect(
+      parseOpenAIEvent(
+        JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_1",
+            usage: { input_tokens: 1200, output_tokens: 80, total_tokens: 1280 },
+          },
+        }),
+      ),
+    ).toEqual({
+      kind: "completed",
+      responseId: "resp_1",
+      usage: { inputTokens: 1200, outputTokens: 80, totalTokens: 1280 },
+    });
+  });
+
   it("ignores everything else", () => {
     expect(parseOpenAIEvent("[DONE]")).toEqual({ kind: "other" });
-    expect(parseOpenAIEvent(JSON.stringify({ type: "response.completed" }))).toEqual({ kind: "other" });
+    expect(parseOpenAIEvent(JSON.stringify({ type: "response.created" }))).toEqual({ kind: "other" });
   });
 });
 

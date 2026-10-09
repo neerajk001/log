@@ -7,6 +7,7 @@ import type { ParsedPlan } from "../validation/schemas";
 
 const CONTEXT_WINDOW_DAYS = 28;
 const HISTORY_TURNS = 12;
+const PROMPT_CACHE_KEY = "log-coach-v1";
 
 const COACH_SYSTEM = `You are an evidence-based strength and fat-loss coach inside a tracking app.
 
@@ -276,6 +277,7 @@ async function callModel(
         model: options.model,
         instructions,
         input,
+        prompt_cache_key: PROMPT_CACHE_KEY,
         ...(options.json ? { text: { format: { type: "json_object" } } } : {}),
         max_output_tokens: maxOutputTokens,
       }),
@@ -290,8 +292,19 @@ async function callModel(
   }
 
   const data = (await res.json()) as {
+    usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
     output?: { content?: { type?: string; text?: string }[] }[];
   };
+  if (data.usage) {
+    console.log(
+      "[coach] usage",
+      JSON.stringify({
+        model: options.model,
+        inputTokens: data.usage.input_tokens,
+        outputTokens: data.usage.output_tokens,
+      }),
+    );
+  }
   const text = data.output
     ?.flatMap((item) => item.content ?? [])
     .find((item) => item.type === "output_text")?.text;
@@ -341,14 +354,22 @@ export async function runCoachChat(userId: string, message: string): Promise<str
   return reply;
 }
 
+export interface CoachUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
 export type OpenAIEvent =
   | { kind: "text"; delta: string }
   | { kind: "function-call"; callId: string; name: string; args: string }
+  | { kind: "completed"; responseId: string | null; usage: CoachUsage | null }
   | { kind: "other" };
 
 /**
  * Parses one OpenAI Responses SSE `data:` payload into the events we act on:
- * streamed text deltas and completed function calls.
+ * streamed text deltas, completed function calls, and the final completion
+ * (which carries the response id for chaining plus token usage).
  */
 export function parseOpenAIEvent(payload: string): OpenAIEvent {
   if (!payload || payload === "[DONE]") return { kind: "other" };
@@ -356,6 +377,10 @@ export function parseOpenAIEvent(payload: string): OpenAIEvent {
     type?: string;
     delta?: unknown;
     item?: { type?: string; call_id?: string; name?: string; arguments?: string };
+    response?: {
+      id?: string;
+      usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+    };
   };
   try {
     event = JSON.parse(payload) as typeof event;
@@ -371,6 +396,20 @@ export function parseOpenAIEvent(payload: string): OpenAIEvent {
       callId: event.item.call_id ?? "",
       name: event.item.name ?? "",
       args: event.item.arguments ?? "{}",
+    };
+  }
+  if (event.type === "response.completed") {
+    const usage = event.response?.usage;
+    return {
+      kind: "completed",
+      responseId: event.response?.id ?? null,
+      usage: usage
+        ? {
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            totalTokens: usage.total_tokens ?? 0,
+          }
+        : null,
     };
   }
   return { kind: "other" };
@@ -605,6 +644,8 @@ type ToolCall = { callId: string; name: string; args: string };
 interface StreamRound {
   text: string;
   calls: ToolCall[];
+  responseId: string | null;
+  usage: CoachUsage | null;
 }
 
 /** One streaming Responses call; forwards text deltas and collects function calls. */
@@ -625,7 +666,9 @@ async function streamRound(
       signal,
     });
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") return { text: "", calls: [] };
+    if (err instanceof Error && err.name === "AbortError") {
+      return { text: "", calls: [], responseId: null, usage: null };
+    }
     throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
   }
 
@@ -638,6 +681,8 @@ async function streamRound(
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
+  let responseId: string | null = null;
+  let usage: CoachUsage | null = null;
   const calls: ToolCall[] = [];
 
   try {
@@ -656,6 +701,9 @@ async function streamRound(
           onDelta(event.delta);
         } else if (event.kind === "function-call") {
           calls.push({ callId: event.callId, name: event.name, args: event.args });
+        } else if (event.kind === "completed") {
+          if (event.responseId) responseId = event.responseId;
+          if (event.usage) usage = event.usage;
         }
       }
     }
@@ -664,13 +712,17 @@ async function streamRound(
     if (!(err instanceof Error && err.name === "AbortError")) throw err;
   }
 
-  return { text, calls };
+  return { text, calls, responseId, usage };
 }
 
 /**
  * Streaming variant of {@link runCoachChat} with tool calling. Persists the user
  * message up front, runs a bounded tool loop, forwards each text delta and tool
  * status, and stores whatever text was produced (so a Stop keeps the partial answer).
+ *
+ * Cost control: when the previous turn's response id is stored we continue that
+ * thread with `previous_response_id` and send only the new message (instead of
+ * replaying the whole history), and each tool round chains from the previous one.
  */
 export async function runCoachChatStream(
   userId: string,
@@ -684,7 +736,7 @@ export async function runCoachChatStream(
       where: { userId },
       orderBy: { createdAt: "desc" },
       take: HISTORY_TURNS,
-      select: { role: true, content: true },
+      select: { role: true, content: true, responseId: true },
     }),
   ]);
 
@@ -708,42 +760,70 @@ export async function runCoachChatStream(
 
   const instructions = `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
   const model = routeChatModel(message);
-  const input: unknown[] = [
-    ...history,
-    { role: "user", content: [{ type: "input_text", text: message }] },
-  ];
+  const userMessage = { role: "user", content: [{ type: "input_text", text: message }] };
+
+  const storedResponseId =
+    recent.find((m) => m.role === "assistant" && m.responseId)?.responseId ?? null;
+  let previousId: string | null = storedResponseId;
+  let input: unknown[] = previousId ? [userMessage] : [...history, userMessage];
 
   let full = "";
+  let lastResponseId: string | null = null;
+  let totalInput = 0;
+  let totalOutput = 0;
+  const usedTools: string[] = [];
+  const startedAt = Date.now();
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     if (signal?.aborted) break;
     const allowTools = round < MAX_TOOL_ROUNDS;
+    const baseBody = {
+      model,
+      instructions,
+      prompt_cache_key: PROMPT_CACHE_KEY,
+      ...(allowTools ? { tools: COACH_TOOLS, tool_choice: "auto" } : {}),
+      stream: true,
+      max_output_tokens: 700,
+    };
 
-    const { text, calls } = await streamRound(
-      {
-        model,
-        instructions,
-        input,
-        ...(allowTools ? { tools: COACH_TOOLS, tool_choice: "auto" } : {}),
-        stream: true,
-        max_output_tokens: 700,
-      },
-      signal,
-      handlers.onDelta,
-    );
-    full += text;
+    let result: StreamRound;
+    try {
+      result = await streamRound(
+        { ...baseBody, input, ...(previousId ? { previous_response_id: previousId } : {}) },
+        signal,
+        handlers.onDelta,
+      );
+    } catch (err) {
+      // Chaining can fail if the stored response is gone — retry once from full history.
+      if (round === 0 && previousId) {
+        previousId = null;
+        result = await streamRound(
+          { ...baseBody, input: [...history, userMessage] },
+          signal,
+          handlers.onDelta,
+        );
+      } else {
+        throw err;
+      }
+    }
 
-    if (!allowTools || calls.length === 0) break;
+    full += result.text;
+    if (result.responseId) lastResponseId = result.responseId;
+    if (result.usage) {
+      totalInput += result.usage.inputTokens;
+      totalOutput += result.usage.outputTokens;
+    }
 
-    for (const call of calls) {
+    if (!allowTools || result.calls.length === 0) break;
+    // Continue the tool loop by chaining from this response.
+    if (!result.responseId) break;
+    previousId = result.responseId;
+
+    input = [];
+    for (const call of result.calls) {
       handlers.onStatus?.(TOOL_LABELS[call.name] ?? "Looking that up…");
+      usedTools.push(call.name);
       const output = await executeCoachTool(userId, call.name, call.args);
-      input.push({
-        type: "function_call",
-        call_id: call.callId,
-        name: call.name,
-        arguments: call.args,
-      });
       input.push({
         type: "function_call_output",
         call_id: call.callId,
@@ -752,9 +832,23 @@ export async function runCoachChatStream(
     }
   }
 
+  console.log(
+    "[coach] turn",
+    JSON.stringify({
+      model,
+      ms: Date.now() - startedAt,
+      chained: Boolean(storedResponseId),
+      tools: usedTools,
+      inputTokens: totalInput,
+      outputTokens: totalOutput,
+    }),
+  );
+
   const answer = full.trim();
   if (answer.length > 0) {
-    await prisma.coachMessage.create({ data: { userId, role: "assistant", content: answer } });
+    await prisma.coachMessage.create({
+      data: { userId, role: "assistant", content: answer, responseId: lastResponseId },
+    });
   }
   return answer;
 }

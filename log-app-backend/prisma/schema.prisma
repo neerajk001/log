@@ -137,12 +137,13 @@ model CoachProfile {
 }
 
 model CoachMessage {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @map("user_id") @db.Uuid
-  role      String   @db.Text
-  content   String   @db.Text
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
-  user      User     @relation(fields: [userId], references: [id])
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  role       String   @db.Text
+  content    String   @db.Text
+  responseId String?  @map("response_id") @db.Text
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user       User     @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])
   @@map("coach_messages")
