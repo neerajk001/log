@@ -8,6 +8,8 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type TextStyle,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
@@ -104,10 +106,11 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
                     <Text style={typography.small}>{status ?? "Coach is thinking…"}</Text>
                   </View>
                 ) : (
-                  <Text style={[typography.body, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}>
-                    {item.content}
-                    {item.streaming ? "▍" : ""}
-                  </Text>
+                  <MessageBody
+                    content={item.content}
+                    streaming={!!item.streaming}
+                    textStyle={[typography.body, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}
+                  />
                 )}
                 {item.failed ? (
                   <Pressable onPress={retry} hitSlop={8} style={styles.retryRow}>
@@ -173,6 +176,46 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
   );
 }
 
+/**
+ * Renders the coach's prose: blank-line-separated paragraphs get breathing room,
+ * and `**bold**` becomes a bold span. No other markdown, so replies stay prose.
+ */
+function MessageBody({
+  content,
+  streaming,
+  textStyle,
+}: {
+  content: string;
+  streaming: boolean;
+  textStyle: StyleProp<TextStyle>;
+}) {
+  const styles = useStyles();
+  const paragraphs = content.split(/\n{2,}/).filter((p) => p.trim().length > 0);
+
+  if (paragraphs.length === 0) {
+    return <Text style={textStyle}>{streaming ? "▍" : ""}</Text>;
+  }
+
+  return (
+    <>
+      {paragraphs.map((para, i) => (
+        <Text key={i} style={[textStyle, i > 0 ? styles.paragraphGap : null]}>
+          {para.split(/(\*\*[^*]+\*\*)/g).map((part, j) =>
+            part.length > 4 && part.startsWith("**") && part.endsWith("**") ? (
+              <Text key={j} style={styles.bold}>
+                {part.slice(2, -2)}
+              </Text>
+            ) : (
+              <Text key={j}>{part}</Text>
+            ),
+          )}
+          {streaming && i === paragraphs.length - 1 ? "▍" : ""}
+        </Text>
+      ))}
+    </>
+  );
+}
+
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg, gap: spacing.sm },
@@ -189,8 +232,10 @@ const useStyles = makeUseStyles((t) =>
     bubble: { maxWidth: "84%", borderRadius: radii.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
     bubbleMine: { backgroundColor: t.colors.primary },
     bubbleTheirs: { backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border },
-    bubbleTextMine: { color: t.colors.onPrimary },
-    bubbleTextTheirs: { color: t.colors.text },
+    bubbleTextMine: { color: t.colors.onPrimary, lineHeight: 21 },
+    bubbleTextTheirs: { color: t.colors.text, lineHeight: 21 },
+    paragraphGap: { marginTop: spacing.md },
+    bold: { fontWeight: "700" },
     typing: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     retryRow: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" },
     retryText: { fontSize: 12, fontWeight: "700", color: t.colors.danger },
