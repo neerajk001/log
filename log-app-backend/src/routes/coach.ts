@@ -105,6 +105,7 @@ router.get("/sessions", requireAuth, async (req: Request, res: Response, next: N
       select: {
         id: true,
         title: true,
+        agent: true,
         updatedAt: true,
         _count: { select: { messages: true } },
       },
@@ -113,6 +114,7 @@ router.get("/sessions", requireAuth, async (req: Request, res: Response, next: N
       sessions.map((s) => ({
         id: s.id,
         title: s.title,
+        agent: s.agent,
         updated_at: s.updatedAt.toISOString(),
         message_count: s._count.messages,
       })),
@@ -130,7 +132,7 @@ router.get(
     try {
       const session = await prisma.coachSession.findFirst({
         where: { id: req.params.id as string, userId: req.userId },
-        select: { id: true },
+        select: { id: true, agent: true },
       });
       if (!session) {
         next(new AppError(404, "NOT_FOUND", "Chat not found"));
@@ -142,14 +144,15 @@ router.get(
         take: 200,
         select: { id: true, role: true, content: true, createdAt: true },
       });
-      res.json(
-        messages.map((m) => ({
+      res.json({
+        agent: session.agent,
+        messages: messages.map((m) => ({
           id: m.id,
           role: m.role,
           content: m.content,
           created_at: m.createdAt.toISOString(),
         })),
-      );
+      });
     } catch (err) {
       next(err);
     }
@@ -218,7 +221,7 @@ router.post(
   chatRateLimit,
   validate(coachChatSchema),
   async (req: Request, res: Response) => {
-    const { message, sessionId, localDate } = req.body as z.infer<typeof coachChatSchema>;
+    const { message, sessionId, localDate, agent } = req.body as z.infer<typeof coachChatSchema>;
     const today = localDate ?? new Date().toISOString().slice(0, 10);
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -249,7 +252,9 @@ router.post(
           onSession: (id) => send({ sessionId: id }),
           onDelta: (delta) => send({ delta }),
           onStatus: (status) => send({ status }),
+          onProposal: (proposal) => send({ proposal }),
         },
+        agent,
         controller.signal,
       );
       send({ done: true });

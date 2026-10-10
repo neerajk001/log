@@ -7,8 +7,12 @@ const mocks = vi.hoisted(() => ({
   findManyLift: vi.fn(),
   findManyVerdicts: vi.fn(),
   findFirstPlan: vi.fn(),
+  findManyPlans: vi.fn(),
   findManyActivity: vi.fn(),
   findFirstDaily: vi.fn(),
+  findFirstLift: vi.fn(),
+  findManyMeals: vi.fn(),
+  findFirstMeal: vi.fn(),
   findManyCoachMessages: vi.fn(),
   findFirstSession: vi.fn(),
   createSession: vi.fn(),
@@ -20,9 +24,10 @@ vi.mock("../src/db/client", () => ({
   prisma: {
     coachProfile: { findUnique: mocks.findUniqueProfile },
     dailyLog: { findMany: mocks.findManyDaily, findFirst: mocks.findFirstDaily },
-    liftLog: { findMany: mocks.findManyLift },
+    liftLog: { findMany: mocks.findManyLift, findFirst: mocks.findFirstLift },
     weeklyVerdict: { findMany: mocks.findManyVerdicts },
-    workoutPlan: { findFirst: mocks.findFirstPlan },
+    workoutPlan: { findFirst: mocks.findFirstPlan, findMany: mocks.findManyPlans },
+    mealLog: { findMany: mocks.findManyMeals, findFirst: mocks.findFirstMeal },
     activityLog: { findMany: mocks.findManyActivity },
     coachMessage: { findMany: mocks.findManyCoachMessages, create: vi.fn().mockResolvedValue({}) },
     coachSession: {
@@ -35,11 +40,13 @@ vi.mock("../src/db/client", () => ({
 }));
 
 import {
+  AGENTS,
   buildAthleteContext,
   executeCoachTool,
   maybeUpdateMemory,
   parseOpenAIDelta,
   parseOpenAIEvent,
+  routeAgent,
   routeChatModel,
   runCoachChatStream,
 } from "../src/services/coach";
@@ -54,6 +61,10 @@ beforeEach(() => {
   mocks.findManyLift.mockReset().mockResolvedValue([]);
   mocks.findManyVerdicts.mockReset().mockResolvedValue([]);
   mocks.findFirstPlan.mockReset().mockResolvedValue(null);
+  mocks.findManyPlans.mockReset().mockResolvedValue([]);
+  mocks.findFirstLift.mockReset().mockResolvedValue(null);
+  mocks.findManyMeals.mockReset().mockResolvedValue([]);
+  mocks.findFirstMeal.mockReset().mockResolvedValue(null);
   mocks.findManyActivity.mockReset().mockResolvedValue([]);
   mocks.findFirstDaily.mockReset().mockResolvedValue(null);
   mocks.findManyCoachMessages.mockReset().mockResolvedValue([]);
@@ -203,7 +214,7 @@ describe("parseOpenAIDelta", () => {
 
 describe("routeChatModel", () => {
   it("sends short, simple questions to the fast model", () => {
-    expect(routeChatModel("how much protein did I eat?")).toBe(config.models.chatFast);
+    expect(routeChatModel("show me my last workout")).toBe(config.models.chatFast);
     expect(routeChatModel("thanks")).toBe(config.models.chatFast);
   });
 
@@ -215,6 +226,112 @@ describe("routeChatModel", () => {
 
   it("sends long messages to the smart model", () => {
     expect(routeChatModel("x".repeat(200))).toBe(config.models.chatSmart);
+  });
+});
+
+describe("routeAgent", () => {
+  it("routes food messages to the meal agent", () => {
+    expect(routeAgent("I ate 2 rotis and dal")).toBe("meal");
+    expect(routeAgent("breakfast was oats and eggs")).toBe("meal");
+  });
+
+  it("routes plan/lift messages to the training agent", () => {
+    expect(routeAgent("swap squat for leg press")).toBe("training");
+    expect(routeAgent("why is my bench stalling?")).toBe("training");
+  });
+
+  it("defaults to general", () => {
+    expect(routeAgent("how am I doing overall?")).toBe("general");
+  });
+
+  it("lets an explicit pick override the router", () => {
+    expect(routeAgent("I ate 2 rotis", "training")).toBe("training");
+    expect(routeAgent("swap squat for leg press", "meal")).toBe("meal");
+  });
+});
+
+describe("agents", () => {
+  const toolNames = (id: "general" | "meal" | "training") =>
+    (AGENTS[id].tools as { name: string }[]).map((t) => t.name);
+
+  it("general exposes every tool", () => {
+    expect(toolNames("general").length).toBeGreaterThan(toolNames("meal").length);
+  });
+
+  it("meal exposes only the meal + day-log tools", () => {
+    expect(toolNames("meal").sort()).toEqual([
+      "delete_meal",
+      "get_day_logs",
+      "get_meals",
+      "log_meal",
+      "lookup_food",
+      "update_meal",
+    ]);
+  });
+
+  it("training exposes plan/lift tools and no meal tool", () => {
+    expect(toolNames("training")).toContain("update_plan");
+    expect(toolNames("training")).toContain("update_logged_set");
+    expect(toolNames("training")).not.toContain("log_meal");
+  });
+});
+
+describe("lookup_food", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("normalises Open Food Facts results and drops entries without nutriments", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          products: [
+            {
+              product_name: "CORN FLAKES",
+              brands: "Kelloggs",
+              serving_size: "30g",
+              nutriments: { "energy-kcal_100g": 376.666666666667, proteins_100g: 7 },
+            },
+            { product_name: "No nutriments", nutriments: {} },
+          ],
+        }),
+      }),
+    );
+
+    const result = await executeCoachTool(
+      "user-1",
+      "lookup_food",
+      JSON.stringify({ query: "kellogg corn flakes test" }),
+    );
+
+    expect(result).toEqual({
+      source: "open_food_facts",
+      results: [
+        {
+          name: "CORN FLAKES",
+          brand: "Kelloggs",
+          serving_size: "30g",
+          kcal_per_100g: 376.7,
+          protein_per_100g: 7,
+        },
+      ],
+    });
+  });
+
+  it("returns an empty result + a note when nothing matches", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ products: [] }) }),
+    );
+
+    const result = (await executeCoachTool(
+      "user-1",
+      "lookup_food",
+      JSON.stringify({ query: "zzz-nothing-xyz" }),
+    )) as { results: unknown[]; note?: string };
+
+    expect(result.results).toEqual([]);
+    expect(result.note).toBeTruthy();
   });
 });
 
@@ -268,12 +385,18 @@ describe("parseOpenAIEvent", () => {
     expect(parseOpenAIEvent("[DONE]")).toEqual({ kind: "other" });
     expect(parseOpenAIEvent(JSON.stringify({ type: "response.created" }))).toEqual({ kind: "other" });
   });
+
+  it("flags an incomplete (truncated) response", () => {
+    expect(
+      parseOpenAIEvent(JSON.stringify({ type: "response.incomplete", response: { id: "resp_2" } })),
+    ).toEqual({ kind: "incomplete", responseId: "resp_2", usage: null });
+  });
 });
 
 describe("executeCoachTool", () => {
   it("scopes lift history to the user and maps rows", async () => {
     mocks.findManyLift.mockResolvedValue([
-      { date: new Date("2026-10-08"), exerciseName: "Bench", weightKg: 60, reps: 8 },
+      { id: "set-1", date: new Date("2026-10-08"), exerciseName: "Bench", weightKg: 60, reps: 8 },
     ]);
 
     const result = await executeCoachTool(
@@ -282,7 +405,9 @@ describe("executeCoachTool", () => {
       JSON.stringify({ days: 7, exercise: "Bench" }),
     );
 
-    expect(result).toEqual([{ date: "2026-10-08", exercise: "Bench", weight_kg: 60, reps: 8 }]);
+    expect(result).toEqual([
+      { id: "set-1", date: "2026-10-08", exercise: "Bench", weight_kg: 60, reps: 8 },
+    ]);
     const where = mocks.findManyLift.mock.calls[0][0].where as Record<string, unknown>;
     expect(where.userId).toBe("user-1");
     expect(where.exerciseName).toBe("Bench");
@@ -357,6 +482,217 @@ describe("executeCoachTool", () => {
     expect(await executeCoachTool("user-1", "nope", "{}")).toEqual({ error: "Unknown tool: nope" });
     mocks.findManyDaily.mockResolvedValue([]);
     expect(await executeCoachTool("user-1", "get_daily_logs", "{not json")).toEqual([]);
+  });
+});
+
+describe("coach proposals", () => {
+  const plan = (overrides: Record<string, unknown> = {}) => ({
+    id: "p1",
+    name: "PPL",
+    source: "ai_parsed",
+    isActive: true,
+    planDays: [
+      {
+        id: "d1",
+        dayName: "Push",
+        dayOrder: 1,
+        exercises: [{ name: "Bench", sets: 3, reps: "8" }],
+      },
+    ],
+    ...overrides,
+  });
+
+  it("lists the user's plans with days and exercises", async () => {
+    mocks.findManyPlans.mockResolvedValue([plan()]);
+
+    const result = await executeCoachTool("user-1", "get_plans", "{}");
+
+    expect(result).toEqual([
+      {
+        id: "p1",
+        name: "PPL",
+        is_active: true,
+        days: [{ day_name: "Push", exercises: [{ name: "Bench", sets: 3, reps: "8" }] }],
+      },
+    ]);
+  });
+
+  it("proposes a plan update resolved by name", async () => {
+    mocks.findManyPlans.mockResolvedValue([plan()]);
+
+    const result = await executeCoachTool(
+      "user-1",
+      "update_plan",
+      JSON.stringify({
+        plan: "ppl",
+        days: [{ day_name: "Push", exercises: [{ name: "Bench", sets: 3, reps: "5" }] }],
+        summary: "Bench to 3x5",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      __proposal: {
+        kind: "plan_update",
+        plan_id: "p1",
+        plan_name: "PPL",
+        name: "PPL",
+        source: "ai_parsed",
+        summary: "Bench to 3x5",
+        days: [{ day_name: "Push", exercises: [{ name: "Bench", sets: 3, reps: "5" }] }],
+      },
+    });
+  });
+
+  it("patches a single named day and keeps the rest", async () => {
+    mocks.findManyPlans.mockResolvedValue([
+      plan({
+        planDays: [
+          { id: "d1", dayName: "Upper", dayOrder: 1, exercises: [{ name: "Bench", sets: 3, reps: "8" }] },
+          { id: "d2", dayName: "Lower", dayOrder: 2, exercises: [{ name: "Squat", sets: 3, reps: "5" }] },
+        ],
+      }),
+    ]);
+
+    const result = (await executeCoachTool(
+      "user-1",
+      "update_plan",
+      JSON.stringify({
+        plan: "PPL",
+        day_name: "Lower",
+        exercises: [{ name: "Leg Press", sets: 3, reps: "10" }],
+        summary: "Swap squat for leg press",
+      }),
+    )) as { __proposal: { days: { day_name: string; exercises: { name: string }[] }[] } };
+
+    expect(result.__proposal.days).toEqual([
+      { day_name: "Upper", exercises: [{ name: "Bench", sets: 3, reps: "8" }] },
+      { day_name: "Lower", exercises: [{ name: "Leg Press", sets: 3, reps: "10" }] },
+    ]);
+  });
+
+  it("rejects a plan update with invalid days", async () => {
+    mocks.findManyPlans.mockResolvedValue([plan()]);
+
+    const result = await executeCoachTool(
+      "user-1",
+      "update_plan",
+      JSON.stringify({ days: [] }),
+    );
+
+    expect(result).toHaveProperty("error");
+  });
+
+  it("proposes activating and deleting a plan", async () => {
+    mocks.findManyPlans.mockResolvedValue([plan({ isActive: false })]);
+
+    expect(
+      await executeCoachTool("user-1", "activate_plan", JSON.stringify({ plan: "PPL" })),
+    ).toEqual({ __proposal: { kind: "plan_activate", plan_id: "p1", plan_name: "PPL" } });
+    expect(
+      await executeCoachTool("user-1", "delete_plan", JSON.stringify({ plan: "PPL" })),
+    ).toEqual({ __proposal: { kind: "plan_delete", plan_id: "p1", plan_name: "PPL" } });
+  });
+
+  it("errors when no plan matches the reference", async () => {
+    mocks.findManyPlans.mockResolvedValue([plan()]);
+
+    const result = await executeCoachTool(
+      "user-1",
+      "activate_plan",
+      JSON.stringify({ plan: "nope" }),
+    );
+
+    expect(result).toHaveProperty("error");
+  });
+
+  it("proposes a logged-set correction with the current values", async () => {
+    mocks.findFirstLift.mockResolvedValue({
+      id: "s1",
+      date: new Date("2026-10-08"),
+      exerciseName: "Bench",
+      weightKg: 60,
+      reps: 8,
+    });
+
+    const result = await executeCoachTool(
+      "user-1",
+      "update_logged_set",
+      JSON.stringify({ set_id: "s1", weight_kg: 62.5, reps: 8 }),
+    );
+
+    expect(result).toEqual({
+      __proposal: {
+        kind: "set_update",
+        set_id: "s1",
+        date: "2026-10-08",
+        exercise: "Bench",
+        from: { weight_kg: 60, reps: 8 },
+        to: { weight_kg: 62.5, reps: 8 },
+      },
+    });
+  });
+
+  it("errors when the target set is not the caller's", async () => {
+    mocks.findFirstLift.mockResolvedValue(null);
+
+    const result = await executeCoachTool(
+      "user-1",
+      "delete_logged_set",
+      JSON.stringify({ set_id: "nope" }),
+    );
+
+    expect(result).toHaveProperty("error");
+  });
+
+  it("proposes a meal with summed totals", async () => {
+    const result = await executeCoachTool(
+      "user-1",
+      "log_meal",
+      JSON.stringify({
+        title: "Breakfast",
+        items: [
+          { name: "Roti", quantity: "2 medium", calories: 240, protein_g: 6 },
+          { name: "Curd", quantity: "1 bowl", calories: 120, protein_g: 8 },
+        ],
+      }),
+      "2026-10-10",
+    );
+
+    expect(result).toEqual({
+      __proposal: {
+        kind: "meal_log",
+        date: "2026-10-10",
+        title: "Breakfast",
+        items: [
+          { name: "Roti", quantity: "2 medium", calories: 240, protein_g: 6 },
+          { name: "Curd", quantity: "1 bowl", calories: 120, protein_g: 8 },
+        ],
+        calories: 360,
+        protein_g: 14,
+      },
+    });
+  });
+
+  it("lists the day's meals and totals", async () => {
+    mocks.findManyMeals.mockResolvedValue([
+      { id: "m1", title: "Breakfast", items: [], calories: 360, proteinG: 14 },
+      { id: "m2", title: "Lunch", items: [], calories: 600, proteinG: 40 },
+    ]);
+
+    const result = (await executeCoachTool("user-1", "get_meals", "{}", "2026-10-10")) as {
+      meals: unknown[];
+      totals: { calories: number; protein_g: number };
+    };
+
+    expect(result.meals).toHaveLength(2);
+    expect(result.totals).toEqual({ calories: 960, protein_g: 54 });
+  });
+
+  it("errors when the meal to delete isn't the caller's", async () => {
+    mocks.findFirstMeal.mockResolvedValue(null);
+    expect(await executeCoachTool("user-1", "delete_meal", JSON.stringify({ meal_id: "x" }))).toHaveProperty(
+      "error",
+    );
   });
 });
 

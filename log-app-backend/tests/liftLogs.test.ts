@@ -4,9 +4,10 @@ import { AppError } from "../src/middleware/errorHandler";
 import {
   createLiftLogIdempotent,
   serializeLiftLog,
+  updateLiftLog,
   type LiftLogInput,
 } from "../src/services/liftLogs";
-import { liftLogSchema } from "../src/validation/schemas";
+import { liftLogSchema, liftLogUpdateSchema } from "../src/validation/schemas";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const otherUserId = "22222222-2222-4222-8222-222222222222";
@@ -46,9 +47,10 @@ function client(options: {
   const create = options.createError
     ? vi.fn().mockRejectedValue(options.createError)
     : vi.fn().mockResolvedValue(options.created ?? record());
+  const updateMany = vi.fn().mockResolvedValue({ count: 1 });
   const findFirst = vi.fn().mockResolvedValue({ id: "plan-day" });
   return {
-    liftLog: { findUnique, create },
+    liftLog: { findUnique, create, updateMany },
     planDay: { findFirst },
   };
 }
@@ -156,5 +158,46 @@ describe("serializeLiftLog", () => {
       reps: 8,
       plan_day_id: null,
     });
+  });
+});
+
+describe("liftLogUpdateSchema", () => {
+  it("accepts a positive weight and reps", () => {
+    expect(liftLogUpdateSchema.safeParse({ weight_kg: 62.5, reps: 8 }).success).toBe(true);
+  });
+
+  it("rejects non-positive or missing values", () => {
+    expect(liftLogUpdateSchema.safeParse({ weight_kg: 0, reps: 8 }).success).toBe(false);
+    expect(liftLogUpdateSchema.safeParse({ weight_kg: 60 }).success).toBe(false);
+  });
+});
+
+describe("updateLiftLog", () => {
+  it("updates an owned set and returns the fresh row", async () => {
+    const mock = client();
+    mock.liftLog.updateMany.mockResolvedValue({ count: 1 });
+    mock.liftLog.findUnique.mockResolvedValue(record({ weightKg: new Prisma.Decimal(62.5) }));
+
+    const result = await updateLiftLog(
+      userId,
+      requestId,
+      { weight_kg: 62.5, reps: 8 },
+      mock as never,
+    );
+
+    expect(mock.liftLog.updateMany).toHaveBeenCalledWith({
+      where: { id: requestId, userId },
+      data: { weightKg: 62.5, reps: 8 },
+    });
+    expect(result?.weightKg.toString()).toBe("62.5");
+  });
+
+  it("returns null when the set isn't the caller's", async () => {
+    const mock = client();
+    mock.liftLog.updateMany.mockResolvedValue({ count: 0 });
+
+    expect(
+      await updateLiftLog(userId, requestId, { weight_kg: 62.5, reps: 8 }, mock as never),
+    ).toBeNull();
   });
 });

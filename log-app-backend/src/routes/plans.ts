@@ -303,4 +303,75 @@ router.put(
   },
 );
 
+router.post(
+  "/:id/activate",
+  requireAuth,
+  validate(planIdParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const planId = req.params.id as string;
+
+      const existing = await prisma.workoutPlan.findFirst({
+        where: { id: planId, userId: req.userId },
+        select: { id: true },
+      });
+      if (!existing) {
+        next(new AppError(404, "NOT_FOUND", "Plan not found"));
+        return;
+      }
+
+      const plan = await prisma.$transaction(async (tx) => {
+        await tx.workoutPlan.updateMany({
+          where: { userId: req.userId, isActive: true },
+          data: { isActive: false },
+        });
+        const updated = await tx.workoutPlan.updateMany({
+          where: { id: planId, userId: req.userId },
+          data: { isActive: true },
+        });
+        if (updated.count === 0) {
+          throw new AppError(404, "NOT_FOUND", "Plan not found");
+        }
+        return tx.workoutPlan.findFirstOrThrow({
+          where: { id: planId, userId: req.userId },
+          include: { planDays: { orderBy: { dayOrder: "asc" } } },
+        });
+      });
+
+      res.json(serializePlan(plan));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.delete(
+  "/:id",
+  requireAuth,
+  validate(planIdParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const planId = req.params.id as string;
+
+      const existing = await prisma.workoutPlan.findFirst({
+        where: { id: planId, userId: req.userId },
+        select: { id: true },
+      });
+      if (!existing) {
+        next(new AppError(404, "NOT_FOUND", "Plan not found"));
+        return;
+      }
+
+      await prisma.$transaction([
+        prisma.planDay.deleteMany({ where: { planId, plan: { userId: req.userId } } }),
+        prisma.workoutPlan.deleteMany({ where: { id: planId, userId: req.userId } }),
+      ]);
+
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 export default router;

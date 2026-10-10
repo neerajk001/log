@@ -3,9 +3,9 @@ import * as Sentry from "@sentry/node";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { idParamSchema, liftLogSchema, liftLogsQuerySchema } from "../validation/schemas";
+import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
-import { createLiftLogIdempotent, serializeLiftLog } from "../services/liftLogs";
+import { createLiftLogIdempotent, serializeLiftLog, updateLiftLog } from "../services/liftLogs";
 import { assertRangeSize } from "../utils/range";
 
 const router = Router();
@@ -100,6 +100,27 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
     logs.map(serializeLiftLog),
   );
 });
+
+router.put(
+  "/lift/:id",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  validate(liftLogUpdateSchema),
+  async (req, res: Response) => {
+    const { id } = req.params as unknown as { id: string };
+    const input = req.body as { weight_kg: number; reps: number };
+
+    const log = await updateLiftLog(req.userId, id, input);
+    if (!log) {
+      res
+        .status(404)
+        .json({ error: { code: "NOT_FOUND", message: "Lift log not found" } });
+      return;
+    }
+
+    res.json(serializeLiftLog(log));
+  },
+);
 
 router.delete(
   "/lift/:id",

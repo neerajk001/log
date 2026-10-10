@@ -3,13 +3,21 @@ import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
 import { parsePlanOutput, PlanParseError } from "./planParser";
 import { resolvePlanDayForDate } from "./planRotation";
-import type { ParsedPlan } from "../validation/schemas";
+import { parsedPlanSchema, type ParsedPlan } from "../validation/schemas";
 
 const CONTEXT_WINDOW_DAYS = 28;
 const HISTORY_TURNS = 12;
 const PROMPT_CACHE_KEY = "log-coach-v1";
 
-const COACH_SYSTEM = `You are an evidence-based strength and fat-loss coach inside a tracking app.
+/** Messages about eating food → the meal agent. */
+const MEAL_HINT =
+  /\b(ate|eat|eaten|eating|drank|drink|meal|breakfast|lunch|dinner|snack|food|portion|serving|calorie|calories|kcal|roti|chapati|naan|rice|dal|curry|curd|yogurt|paneer|chicken|beef|fish|egg|eggs|oats|milk|banana|apple|whey)\b/i;
+
+/** Messages about the plan/lifts → the training agent. */
+const TRAINING_HINT =
+  /\b(plan|workout|exercise|squat|bench|deadlift|overhead press|row|pull|push|curl|lift|lifts|deload|program|split|routine|swap|replace|plateau|stall|volume|training|reps?)\b/i;
+
+const COACH_MAIN = `You are an evidence-based strength and fat-loss coach inside a tracking app.
 
 You are given TODAY's date, the units in use, and a bounded summary of the athlete's real data under
 "ATHLETE CONTEXT". Use only that data — never invent numbers or history.
@@ -22,17 +30,16 @@ Facts and honesty:
   recent weekly verdicts, and the active plan's days.
 - What you CANNOT see: individual sets beyond the top set, individual meals, or anything older than
   ~4 weeks. If asked about those, say so.
-- You also have tools to look up the user's data on demand (get_day_logs, get_lift_history,
-  get_daily_logs, get_weekly_verdicts, get_plan_vs_actual, get_activity_logs). Prefer calling a tool
-  over guessing, and don't call one for facts already in the context above.
+- You have tools to look up the athlete's data on demand; prefer calling a tool over guessing, and
+  don't call one for facts already in the context above.
 - "What did I log" questions: call get_day_logs and report exactly what it returns — including
   off-plan exercises. Use get_plan_vs_actual ONLY for plan-adherence questions (it compares against
   the prescription and exercise names may differ), never to state what was logged, and never say a
   planned exercise "wasn't logged" unless that day's logs actually show it missing.
 - You are not a doctor: never diagnose or give medical advice. For injuries or medical concerns, tell
-  the user to consult a professional.
+  the user to consult a professional.`;
 
-How to write (this matters as much as the content):
+const COACH_STYLE = `How to write (this matters as much as the content):
 - Sound like a coach texting a client: warm, direct, second person, contractions ("you're", "I'd"). A
   person talking, not a report.
 - Lead with the takeaway in the first sentence. No preamble, no "great question", no restating what
@@ -43,6 +50,38 @@ How to write (this matters as much as the content):
 - You may bold one short phrase with **double asterisks**; use no other formatting.
 - If it genuinely needs more, stop and offer "want me to go deeper?" instead of writing an essay.
 - If a missing detail blocks the answer, ask one short clarifying question.`;
+
+const PLAN_PROPOSAL_RULES = `- You can PROPOSE changes to the athlete's plan and logged sets: update_plan (rewrite a plan's
+  days/exercises/sets/reps, optionally rename it), activate_plan (switch which plan is active),
+  delete_plan, update_logged_set, delete_logged_set. These never change anything themselves — they
+  create a proposal the athlete reviews and confirms in the app. Use get_plans to see their plans and
+  current prescriptions, and get_lift_history (each set includes its id) to target a logged set. Only
+  propose when the athlete asks for a change or clearly agrees to one, and NEVER say a change is done
+  — say you've prepared it and it's waiting for their confirmation, then briefly state what you proposed.`;
+
+const MEAL_RULES = `- The athlete can log what they ate right here in chat. Estimate calories and protein per item from a
+  common portion and put the assumed portion in the item's "quantity" (e.g. "1 cup cooked"). Keep
+  estimates close to accurate and conservative; use the common home preparation for regional dishes.
+  When a portion or dish is genuinely ambiguous, ask ONE short clarifying question instead of guessing
+  and wait for the answer. Use get_meals to see what's already logged (avoid duplicates), then call
+  log_meal to propose it — update_meal / delete_meal to correct one. Never say a meal is logged before
+  the athlete confirms.
+- Branded or packaged food (or anything you're unsure about): call lookup_food first and base the estimate
+  on its per-100 g figures times the portion you assume — say where the numbers came from and the portion.
+  If nothing is found, ask for the label or quantity, or estimate and say it's an estimate.`;
+
+const FOCUS_GENERAL = `Your job: answer anything about the athlete's training, nutrition and progress — you have every tool.
+${PLAN_PROPOSAL_RULES}
+${MEAL_RULES}`;
+
+const FOCUS_MEAL = `Your job right now: help the athlete log what they ate, and correct or remove meals they already logged.
+${MEAL_RULES}`;
+
+const FOCUS_TRAINING = `Your job right now: manage their training — review the plan, look at logged lifts, and propose
+changes (edit a plan, swap/reorder exercises or sets, switch or delete a plan, fix a logged set).
+${PLAN_PROPOSAL_RULES}`;
+
+const COACH_SYSTEM = `${COACH_MAIN}\n\n${FOCUS_GENERAL}\n\n${COACH_STYLE}`;
 
 const PLAN_SYSTEM = `You design structured workout programs and return them as JSON only.
 
@@ -278,29 +317,56 @@ export function routeChatModel(message: string): string {
   return looksDeep ? config.models.chatSmart : config.models.chatFast;
 }
 
+type AiProvider = "ai" | "openai";
+
+/**
+ * Resolves the endpoint for a call. "ai" is the coach/meal provider (OpenAI by
+ * default, or any OpenAI-Responses-compatible endpoint via AI_BASE_URL);
+ * "openai" is pinned to OpenAI for plan generation and physique analysis.
+ */
+function resolveProvider(name: AiProvider): { baseUrl: string; apiKey: string } {
+  if (name === "openai") {
+    return { baseUrl: "https://api.openai.com/v1", apiKey: config.openai.apiKey };
+  }
+  return { baseUrl: config.ai.baseUrl, apiKey: config.ai.apiKey || config.openai.apiKey };
+}
+
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl;
+  }
+}
+
 async function callModel(
   instructions: string,
   input: InputMessage[],
   maxOutputTokens: number,
-  options: { json?: boolean; model: string },
+  options: { json?: boolean; model: string; provider?: AiProvider; thinking?: boolean },
 ): Promise<string> {
-  if (!config.openai.apiKey) {
+  const providerName = options.provider ?? "ai";
+  const { baseUrl, apiKey } = resolveProvider(providerName);
+  if (!apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
   }
+  const promptCache = providerName === "openai" || config.ai.promptCache;
 
   let res: Response;
   try {
-    res = await fetch("https://api.openai.com/v1/responses", {
+    res = await fetch(`${baseUrl}/responses`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
       body: JSON.stringify({
         model: options.model,
         instructions,
         input,
-        prompt_cache_key: PROMPT_CACHE_KEY,
+        ...(promptCache ? { prompt_cache_key: PROMPT_CACHE_KEY } : {}),
+        // Reasoning models (e.g. DeepSeek Flash) can be told to skip "thinking".
+        ...(options.thinking === false ? { thinking: { type: "disabled" } } : {}),
         ...(options.json ? { text: { format: { type: "json_object" } } } : {}),
         max_output_tokens: maxOutputTokens,
       }),
@@ -310,8 +376,10 @@ async function callModel(
   }
 
   if (!res.ok) {
-    console.error("[coach] OpenAI error:", res.status);
-    throw new AppError(502, "COACH_ERROR", `The AI service returned ${res.status}`);
+    const detail = await res.text().catch(() => "");
+    const host = hostOf(baseUrl);
+    console.error(`[coach] ${host} error ${res.status}:`, detail.slice(0, 300));
+    throw new AppError(502, "COACH_ERROR", `The AI service (${host}) returned ${res.status}`);
   }
 
   const data = (await res.json()) as {
@@ -366,7 +434,7 @@ export async function runCoachChat(userId: string, message: string): Promise<str
     `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`,
     [...history, { role: "user", content: [{ type: "input_text", text: message }] }],
     400,
-    { model: routeChatModel(message) },
+    { model: routeChatModel(message), thinking: false },
   );
 
   await prisma.$transaction([
@@ -387,6 +455,7 @@ export type OpenAIEvent =
   | { kind: "text"; delta: string }
   | { kind: "function-call"; callId: string; name: string; args: string }
   | { kind: "completed"; responseId: string | null; usage: CoachUsage | null }
+  | { kind: "incomplete"; responseId: string | null; usage: CoachUsage | null }
   | { kind: "other" };
 
 /**
@@ -425,6 +494,20 @@ export function parseOpenAIEvent(payload: string): OpenAIEvent {
     const usage = event.response?.usage;
     return {
       kind: "completed",
+      responseId: event.response?.id ?? null,
+      usage: usage
+        ? {
+            inputTokens: usage.input_tokens ?? 0,
+            outputTokens: usage.output_tokens ?? 0,
+            totalTokens: usage.total_tokens ?? 0,
+          }
+        : null,
+    };
+  }
+  if (event.type === "response.incomplete" || event.type === "response.failed") {
+    const usage = event.response?.usage;
+    return {
+      kind: "incomplete",
       responseId: event.response?.id ?? null,
       usage: usage
         ? {
@@ -513,7 +596,287 @@ const COACH_TOOLS = [
       properties: { days: { type: "number", description: "How many days back, 1-90 (default 28)." } },
     },
   },
+  {
+    type: "function",
+    name: "get_plans",
+    description:
+      "List the athlete's saved workout plans with their days and exercises (id, name, is_active).",
+    parameters: { type: "object", properties: {} },
+  },
+  {
+    type: "function",
+    name: "update_plan",
+    description:
+      "PROPOSE a change to a plan. To change ONE day, pass day_name + exercises (that day's new exercises) — prefer this. To replace the whole plan, pass days. Optionally rename with name. Does not apply — creates a proposal the athlete confirms.",
+    parameters: {
+      type: "object",
+      properties: {
+        plan: { type: "string", description: "Plan name or id to update; omit to use the active plan." },
+        day_name: { type: "string", description: "The single day to change (e.g. 'Lower'). Use with exercises." },
+        exercises: {
+          type: "array",
+          description: "New exercises for day_name (replaces just that day's exercises).",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              sets: { type: "number" },
+              reps: { type: "string" },
+            },
+            required: ["name", "sets", "reps"],
+          },
+        },
+        days: {
+          type: "array",
+          description: "The COMPLETE new set of workout days (replaces all of the plan's days).",
+          items: {
+            type: "object",
+            properties: {
+              day_name: { type: "string" },
+              exercises: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    sets: { type: "number" },
+                    reps: { type: "string" },
+                  },
+                  required: ["name", "sets", "reps"],
+                },
+              },
+            },
+            required: ["day_name", "exercises"],
+          },
+        },
+        name: { type: "string", description: "New plan name (optional)." },
+        summary: { type: "string", description: "One short sentence describing the change." },
+      },
+    },
+  },
+  {
+    type: "function",
+    name: "activate_plan",
+    description:
+      "PROPOSE making a plan the active one (only one plan is active at a time). Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: { plan: { type: "string", description: "Plan name or id." } },
+      required: ["plan"],
+    },
+  },
+  {
+    type: "function",
+    name: "delete_plan",
+    description: "PROPOSE deleting a plan. Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: { plan: { type: "string", description: "Plan name or id." } },
+      required: ["plan"],
+    },
+  },
+  {
+    type: "function",
+    name: "update_logged_set",
+    description:
+      "PROPOSE a correction to one already-logged set (weight and/or reps). Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: {
+        set_id: { type: "string", description: "The set's id, from get_lift_history." },
+        weight_kg: { type: "number" },
+        reps: { type: "number" },
+      },
+      required: ["set_id", "weight_kg", "reps"],
+    },
+  },
+  {
+    type: "function",
+    name: "delete_logged_set",
+    description: "PROPOSE deleting one already-logged set. Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: { set_id: { type: "string", description: "The set's id, from get_lift_history." } },
+      required: ["set_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "get_meals",
+    description:
+      "List the meals the athlete has logged for a day (defaults to today), with per-item calories/protein and totals.",
+    parameters: {
+      type: "object",
+      properties: { date: { type: "string", description: "YYYY-MM-DD; defaults to today." } },
+    },
+  },
+  {
+    type: "function",
+    name: "log_meal",
+    description:
+      "PROPOSE logging a meal the athlete described (or a photo). Estimate each item's calories and protein from a common portion and state the assumed portion in `quantity`. Does not apply — creates a proposal the athlete confirms.",
+    parameters: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "YYYY-MM-DD; defaults to today." },
+        title: { type: "string", description: "Short label, e.g. 'Breakfast' or 'Chicken rice'." },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              quantity: { type: "string", description: "Assumed portion, e.g. '1 cup cooked'." },
+              calories: { type: "number" },
+              protein_g: { type: "number" },
+            },
+            required: ["name", "calories", "protein_g"],
+          },
+        },
+        summary: { type: "string", description: "One short sentence for the athlete." },
+      },
+      required: ["title", "items"],
+    },
+  },
+  {
+    type: "function",
+    name: "update_meal",
+    description:
+      "PROPOSE correcting a previously logged meal (fix items/portions). Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: {
+        meal_id: { type: "string", description: "The meal's id, from get_meals." },
+        title: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              quantity: { type: "string" },
+              calories: { type: "number" },
+              protein_g: { type: "number" },
+            },
+            required: ["name", "calories", "protein_g"],
+          },
+        },
+      },
+      required: ["meal_id", "items"],
+    },
+  },
+  {
+    type: "function",
+    name: "delete_meal",
+    description: "PROPOSE deleting a logged meal. Does not apply — creates a proposal.",
+    parameters: {
+      type: "object",
+      properties: { meal_id: { type: "string", description: "The meal's id, from get_meals." } },
+      required: ["meal_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "lookup_food",
+    description:
+      "Look up a branded/packaged food or a dish to get real calories and protein (Open Food Facts, then web). Prefer this over guessing for brands or anything you're unsure about.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: 'Brand + product or dish, e.g. "Kellogg\'s corn flakes" or "Amul butter".',
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
+
+/* --------------------------------------------------------------- agents */
+
+export type AgentId = "general" | "meal" | "training";
+
+const MEAL_TOOL_NAMES = [
+  "get_meals",
+  "log_meal",
+  "update_meal",
+  "delete_meal",
+  "get_day_logs",
+  "lookup_food",
+];
+const TRAINING_TOOL_NAMES = [
+  "get_plans",
+  "get_plan_vs_actual",
+  "get_lift_history",
+  "update_plan",
+  "activate_plan",
+  "delete_plan",
+  "update_logged_set",
+  "delete_logged_set",
+];
+
+function toolsNamed(names: string[]) {
+  return COACH_TOOLS.filter((t) => names.includes(t.name));
+}
+
+function agentSystem(focus: string): string {
+  return `${COACH_MAIN}\n\n${focus}\n\n${COACH_STYLE}`;
+}
+
+export interface Agent {
+  id: AgentId;
+  label: string;
+  system: string;
+  tools: unknown[];
+  model: (message: string) => string;
+  /** Whether to let a reasoning model "think" (off for speed on chat). */
+  thinking: boolean;
+}
+
+export const AGENTS: Record<AgentId, Agent> = {
+  general: {
+    id: "general",
+    label: "General",
+    system: COACH_SYSTEM,
+    tools: COACH_TOOLS,
+    model: (m) => routeChatModel(m),
+    thinking: config.ai.thinking !== "disabled",
+  },
+  meal: {
+    id: "meal",
+    label: "Meals",
+    system: agentSystem(FOCUS_MEAL),
+    tools: toolsNamed(MEAL_TOOL_NAMES),
+    model: () => config.models.meal,
+    thinking: true,
+  },
+  training: {
+    id: "training",
+    label: "Training",
+    system: agentSystem(FOCUS_TRAINING),
+    tools: toolsNamed(TRAINING_TOOL_NAMES),
+    model: () => config.models.chatSmart,
+    thinking: config.ai.thinking !== "disabled",
+  },
+};
+
+export function isAgentId(value: unknown): value is AgentId {
+  return value === "general" || value === "meal" || value === "training";
+}
+
+/**
+ * Picks an agent for a turn. An explicit pick (from the UI chips) always wins;
+ * otherwise keywords route meal/training, and everything else stays general
+ * (which keeps every tool, so a misroute is still answerable).
+ */
+export function routeAgent(message: string, requested?: AgentId): AgentId {
+  if (requested && requested in AGENTS) return requested;
+  const text = message.trim();
+  if (MEAL_HINT.test(text)) return "meal";
+  if (TRAINING_HINT.test(text)) return "training";
+  return "general";
+}
 
 const TOOL_LABELS: Record<string, string> = {
   get_lift_history: "Checking your lift history…",
@@ -522,6 +885,16 @@ const TOOL_LABELS: Record<string, string> = {
   get_weekly_verdicts: "Reviewing your weekly verdicts…",
   get_plan_vs_actual: "Comparing your plan with what you logged…",
   get_activity_logs: "Checking your activities…",
+  get_plans: "Reading your plans…",
+  update_plan: "Putting together a plan update…",
+  activate_plan: "Preparing to switch plans…",
+  delete_plan: "Preparing to delete the plan…",
+  update_logged_set: "Preparing that set correction…",
+  delete_logged_set: "Preparing to remove that set…",
+  get_meals: "Reading your meals…",
+  log_meal: "Working out that meal…",
+  update_meal: "Preparing that meal correction…",
+  delete_meal: "Preparing to remove that meal…",
 };
 
 function clampDays(value: unknown, fallback: number): number {
@@ -534,6 +907,291 @@ function daysAgo(days: number, today: string): Date {
   const d = new Date(`${today}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() - (days - 1));
   return d;
+}
+
+export type CoachProposal =
+  | {
+      kind: "plan_update";
+      plan_id: string;
+      plan_name: string;
+      name: string;
+      source: string;
+      days: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+      summary: string;
+    }
+  | { kind: "plan_activate"; plan_id: string; plan_name: string }
+  | { kind: "plan_delete"; plan_id: string; plan_name: string }
+  | {
+      kind: "set_update";
+      set_id: string;
+      date: string;
+      exercise: string;
+      from: { weight_kg: number; reps: number };
+      to: { weight_kg: number; reps: number };
+    }
+  | {
+      kind: "set_delete";
+      set_id: string;
+      date: string;
+      exercise: string;
+      weight_kg: number;
+      reps: number;
+    }
+  | {
+      kind: "meal_log";
+      date: string;
+      title: string;
+      items: MealItemDraft[];
+      calories: number;
+      protein_g: number;
+    }
+  | {
+      kind: "meal_update";
+      meal_id: string;
+      date: string;
+      title: string;
+      items: MealItemDraft[];
+      calories: number;
+      protein_g: number;
+    }
+  | {
+      kind: "meal_delete";
+      meal_id: string;
+      date: string;
+      title: string;
+      calories: number;
+      protein_g: number;
+    };
+
+interface PlanWithDays {
+  id: string;
+  name: string;
+  source: string;
+  isActive: boolean;
+  planDays: { id: string; dayName: string; dayOrder: number; exercises: unknown }[];
+}
+
+/** Resolve a plan by exact id, exact name, or partial name; the active plan when no ref. */
+async function resolvePlan(
+  userId: string,
+  ref?: string,
+): Promise<PlanWithDays | { error: string }> {
+  const plans = await prisma.workoutPlan.findMany({
+    where: { userId },
+    include: { planDays: { orderBy: { dayOrder: "asc" } } },
+  });
+  if (plans.length === 0) return { error: "You don't have any saved plans yet." };
+  if (!ref || !ref.trim()) return plans.find((p) => p.isActive) ?? plans[0];
+
+  const needle = ref.trim().toLowerCase();
+  const match =
+    plans.find((p) => p.id === ref) ??
+    plans.find((p) => p.name.toLowerCase() === needle) ??
+    plans.find((p) => p.name.toLowerCase().includes(needle));
+  if (!match) {
+    return {
+      error: `No plan matching "${ref}". Their plans: ${plans.map((p) => p.name).join(", ")}.`,
+    };
+  }
+  return match;
+}
+
+function serializePlanSummary(plan: PlanWithDays) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    is_active: plan.isActive,
+    days: plan.planDays.map((d) => ({
+      day_name: d.dayName,
+      exercises: d.exercises as unknown as { name: string; sets: number; reps: string }[],
+    })),
+  };
+}
+
+function positiveNumber(value: unknown, max: number): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(max, n);
+}
+
+function positiveInt(value: unknown, max: number): number | null {
+  const n = positiveNumber(value, max);
+  return n == null ? null : Math.floor(n);
+}
+
+function numValue(value: unknown, min: number, max: number): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+
+interface MealItemDraft {
+  name: string;
+  quantity?: string;
+  calories: number;
+  protein_g: number;
+}
+
+/** Validates and normalises a model-supplied list of meal items. */
+function mealItemsFromArgs(raw: unknown): MealItemDraft[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 30) return null;
+  const items: MealItemDraft[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return null;
+    const r = entry as Record<string, unknown>;
+    const name = typeof r.name === "string" ? r.name.trim().slice(0, 120) : "";
+    const calories = numValue(r.calories, 0, 5000);
+    const protein = numValue(r.protein_g, 0, 500);
+    if (!name || calories == null || protein == null) return null;
+    const quantity =
+      typeof r.quantity === "string" && r.quantity.trim() ? r.quantity.trim().slice(0, 60) : undefined;
+    items.push({
+      name,
+      ...(quantity ? { quantity } : {}),
+      calories: Math.round(calories),
+      protein_g: Math.round(protein),
+    });
+  }
+  return items;
+}
+
+/* ------------------------------------------------------- food lookup */
+
+const FOOD_CACHE_MS = 24 * 60 * 60 * 1000;
+const foodCache = new Map<string, { at: number; data: unknown }>();
+
+function round1(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? Math.round(n * 10) / 10 : null;
+}
+
+async function fetchJson(
+  url: string,
+  init?: RequestInit,
+  timeoutMs = 6000,
+  retries = 0,
+): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      // Open Food Facts is flaky (occasional 503) — one short retry helps.
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+/**
+ * Looks up a food/brand: Open Food Facts first (structured per-100g), then an
+ * optional web search. Cached, and never throws — returns a note when nothing
+ * matches so the model can ask the athlete or fall back to estimating.
+ */
+async function lookupFood(query: string): Promise<unknown> {
+  const key = query.trim().toLowerCase();
+  const cached = foodCache.get(key);
+  if (cached && Date.now() - cached.at < FOOD_CACHE_MS) return cached.data;
+
+  // Open Food Facts dislikes punctuation (and "Kellogg's" must become "Kelloggs").
+  const cleaned = query
+    .replace(/['’`]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const term = cleaned.length >= 2 ? cleaned : query;
+
+  const offUrl =
+    "https://world.openfoodfacts.org/cgi/search.pl?" +
+    new URLSearchParams({
+      search_terms: term,
+      search_simple: "1",
+      action: "process",
+      json: "1",
+      page_size: "5",
+      fields: "product_name,brands,serving_size,nutriments",
+    }).toString();
+
+  try {
+    const data = (await fetchJson(
+      offUrl,
+      { headers: { "User-Agent": config.food.offUserAgent, Accept: "application/json" } },
+      6000,
+      1,
+    )) as {
+      products?: {
+        product_name?: string;
+        brands?: string;
+        serving_size?: string;
+        nutriments?: Record<string, unknown>;
+      }[];
+    };
+    const results = (data.products ?? [])
+      .map((p) => ({
+        name: p.product_name?.trim(),
+        brand: p.brands?.trim(),
+        serving_size: p.serving_size?.trim(),
+        kcal_per_100g: round1(p.nutriments?.["energy-kcal_100g"]),
+        protein_per_100g: round1(p.nutriments?.["proteins_100g"]),
+      }))
+      .filter((r) => r.name && (r.kcal_per_100g != null || r.protein_per_100g != null))
+      .slice(0, 3);
+
+    if (results.length > 0) {
+      const out = { source: "open_food_facts", results };
+      foodCache.set(key, { at: Date.now(), data: out });
+      return out;
+    }
+  } catch (err) {
+    // fall through to the web-search fallback
+    console.warn("[coach] lookup_food OFF failed:", err instanceof Error ? err.message : err);
+  }
+
+  if (config.food.searchApiKey) {
+    try {
+      const res = await fetch("https://api.tavily.com/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          api_key: config.food.searchApiKey,
+          query: `${query} calories protein per 100g`,
+          max_results: 3,
+        }),
+        signal: AbortSignal.timeout(6000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          results?: { title?: string; url?: string; content?: string }[];
+        };
+        const results = (data.results ?? [])
+          .slice(0, 3)
+          .map((r) => ({ title: r.title, url: r.url, snippet: r.content }));
+        const out = { source: "web", results };
+        foodCache.set(key, { at: Date.now(), data: out });
+        return out;
+      }
+    } catch {
+      // fall through to the no-match note
+    }
+  }
+
+  return {
+    results: [],
+    note: "No match found. Ask the athlete for the label or quantity, or estimate and say it's an estimate.",
+  };
+}
+
+/** A proposal returned by a tool; the loop forwards it to the client and tells the model it's pending. */
+function extractProposal(output: unknown): CoachProposal | null {
+  if (output && typeof output === "object" && "__proposal" in output) {
+    return (output as { __proposal: CoachProposal }).__proposal;
+  }
+  return null;
 }
 
 /**
@@ -564,9 +1222,10 @@ export async function executeCoachTool(
           where,
           orderBy: { date: "desc" },
           take: 100,
-          select: { date: true, exerciseName: true, weightKg: true, reps: true },
+          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
         });
         return rows.map((r) => ({
+          id: r.id,
           date: fmtDate(r.date),
           exercise: r.exerciseName,
           weight_kg: Number(r.weightKg),
@@ -727,6 +1386,228 @@ export async function executeCoachTool(
         }));
       }
 
+      case "get_plans": {
+        const plans = await prisma.workoutPlan.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          include: { planDays: { orderBy: { dayOrder: "asc" } } },
+        });
+        return plans.map((p) => serializePlanSummary(p as PlanWithDays));
+      }
+
+      case "update_plan": {
+        const ref = typeof args.plan === "string" ? args.plan : undefined;
+        const plan = await resolvePlan(userId, ref);
+        if ("error" in plan) return plan;
+
+        const existingDays = plan.planDays.map((d) => ({
+          day_name: d.dayName,
+          exercises: d.exercises as unknown as { name: string; sets: number; reps: string }[],
+        }));
+
+        let nextDays: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+        if (Array.isArray(args.days)) {
+          nextDays = args.days as typeof nextDays;
+        } else if (
+          typeof args.day_name === "string" &&
+          args.day_name.trim() &&
+          Array.isArray(args.exercises)
+        ) {
+          const target = args.day_name.trim();
+          const patched = {
+            day_name: target,
+            exercises: args.exercises as { name: string; sets: number; reps: string }[],
+          };
+          const idx = existingDays.findIndex(
+            (d) => d.day_name.toLowerCase() === target.toLowerCase(),
+          );
+          nextDays =
+            idx >= 0
+              ? existingDays.map((d, i) => (i === idx ? patched : d))
+              : [...existingDays, patched];
+        } else {
+          return {
+            error: "Provide day_name + exercises to change one day, or days to replace the whole plan.",
+          };
+        }
+
+        const parsed = parsedPlanSchema.safeParse({ days: nextDays });
+        if (!parsed.success) {
+          return { error: `Invalid plan: ${parsed.error.issues.map((i) => i.message).join("; ")}` };
+        }
+        const newName =
+          typeof args.name === "string" && args.name.trim() ? args.name.trim().slice(0, 200) : plan.name;
+        const summary =
+          typeof args.summary === "string" && args.summary.trim()
+            ? args.summary.trim().slice(0, 300)
+            : `Update "${plan.name}"`;
+        return {
+          __proposal: {
+            kind: "plan_update",
+            plan_id: plan.id,
+            plan_name: plan.name,
+            name: newName,
+            source: plan.source,
+            days: parsed.data.days,
+            summary,
+          },
+        };
+      }
+
+      case "activate_plan": {
+        const ref = typeof args.plan === "string" ? args.plan : undefined;
+        const plan = await resolvePlan(userId, ref);
+        if ("error" in plan) return plan;
+        return { __proposal: { kind: "plan_activate", plan_id: plan.id, plan_name: plan.name } };
+      }
+
+      case "delete_plan": {
+        const ref = typeof args.plan === "string" ? args.plan : undefined;
+        const plan = await resolvePlan(userId, ref);
+        if ("error" in plan) return plan;
+        return { __proposal: { kind: "plan_delete", plan_id: plan.id, plan_name: plan.name } };
+      }
+
+      case "update_logged_set": {
+        const setId = typeof args.set_id === "string" ? args.set_id : "";
+        const row = await prisma.liftLog.findFirst({
+          where: { id: setId, userId },
+          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
+        });
+        if (!row) return { error: "That logged set wasn't found." };
+        const weight = positiveNumber(args.weight_kg, 9999);
+        const reps = positiveInt(args.reps, 9999);
+        if (weight == null || reps == null) {
+          return { error: "Provide a positive weight and a whole number of reps." };
+        }
+        return {
+          __proposal: {
+            kind: "set_update",
+            set_id: row.id,
+            date: fmtDate(row.date),
+            exercise: row.exerciseName,
+            from: { weight_kg: Number(row.weightKg), reps: row.reps },
+            to: { weight_kg: weight, reps },
+          },
+        };
+      }
+
+      case "delete_logged_set": {
+        const setId = typeof args.set_id === "string" ? args.set_id : "";
+        const row = await prisma.liftLog.findFirst({
+          where: { id: setId, userId },
+          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
+        });
+        if (!row) return { error: "That logged set wasn't found." };
+        return {
+          __proposal: {
+            kind: "set_delete",
+            set_id: row.id,
+            date: fmtDate(row.date),
+            exercise: row.exerciseName,
+            weight_kg: Number(row.weightKg),
+            reps: row.reps,
+          },
+        };
+      }
+
+      case "get_meals": {
+        const dateStr = typeof args.date === "string" ? args.date : today;
+        const meals = await prisma.mealLog.findMany({
+          where: { userId, date: new Date(`${dateStr}T00:00:00Z`) },
+          orderBy: { createdAt: "asc" },
+          select: { id: true, title: true, items: true, calories: true, proteinG: true },
+        });
+        return {
+          date: dateStr,
+          meals: meals.map((m) => ({
+            id: m.id,
+            title: m.title,
+            items: m.items as unknown as MealItemDraft[],
+            calories: m.calories,
+            protein_g: m.proteinG,
+          })),
+          totals: meals.reduce(
+            (acc, m) => ({
+              calories: acc.calories + m.calories,
+              protein_g: acc.protein_g + m.proteinG,
+            }),
+            { calories: 0, protein_g: 0 },
+          ),
+        };
+      }
+
+      case "log_meal": {
+        const dateStr = typeof args.date === "string" ? args.date : today;
+        const title =
+          typeof args.title === "string" && args.title.trim()
+            ? args.title.trim().slice(0, 120)
+            : "Meal";
+        const items = mealItemsFromArgs(args.items);
+        if (!items) {
+          return { error: "Provide a meal title and at least one item with calories and protein." };
+        }
+        return {
+          __proposal: {
+            kind: "meal_log",
+            date: dateStr,
+            title,
+            items,
+            calories: items.reduce((a, i) => a + i.calories, 0),
+            protein_g: Math.round(items.reduce((a, i) => a + i.protein_g, 0)),
+          },
+        };
+      }
+
+      case "update_meal": {
+        const id = typeof args.meal_id === "string" ? args.meal_id : "";
+        const row = await prisma.mealLog.findFirst({
+          where: { id, userId },
+          select: { id: true, date: true, title: true },
+        });
+        if (!row) return { error: "That meal wasn't found." };
+        const items = mealItemsFromArgs(args.items);
+        if (!items) return { error: "Provide the corrected items with calories and protein." };
+        const title =
+          typeof args.title === "string" && args.title.trim() ? args.title.trim().slice(0, 120) : row.title;
+        return {
+          __proposal: {
+            kind: "meal_update",
+            meal_id: row.id,
+            date: fmtDate(row.date),
+            title,
+            items,
+            calories: items.reduce((a, i) => a + i.calories, 0),
+            protein_g: Math.round(items.reduce((a, i) => a + i.protein_g, 0)),
+          },
+        };
+      }
+
+      case "delete_meal": {
+        const id = typeof args.meal_id === "string" ? args.meal_id : "";
+        const row = await prisma.mealLog.findFirst({
+          where: { id, userId },
+          select: { id: true, date: true, title: true, calories: true, proteinG: true },
+        });
+        if (!row) return { error: "That meal wasn't found." };
+        return {
+          __proposal: {
+            kind: "meal_delete",
+            meal_id: row.id,
+            date: fmtDate(row.date),
+            title: row.title,
+            calories: row.calories,
+            protein_g: row.proteinG,
+          },
+        };
+      }
+
+      case "lookup_food": {
+        const query = typeof args.query === "string" ? args.query.trim().slice(0, 120) : "";
+        if (!query) return { error: "Provide a food or brand to look up." };
+        return lookupFood(query);
+      }
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -778,7 +1659,7 @@ export async function maybeUpdateMemory(userId: string): Promise<void> {
       ].join("\n\n"),
       [{ role: "user", content: [{ type: "input_text", text: "Write the updated memory." }] }],
       400,
-      { model: config.models.chatFast },
+      { model: config.models.chatFast, thinking: false },
     );
 
     await prisma.coachMemory.upsert({
@@ -798,20 +1679,24 @@ interface StreamRound {
   calls: ToolCall[];
   responseId: string | null;
   usage: CoachUsage | null;
+  /** The response was cut off (e.g. hit max_output_tokens) before it finished. */
+  incomplete: boolean;
 }
 
 /** One streaming Responses call; forwards text deltas and collects function calls. */
 async function streamRound(
+  baseUrl: string,
+  apiKey: string,
   body: Record<string, unknown>,
   signal: AbortSignal | undefined,
   onDelta: (delta: string) => void,
 ): Promise<StreamRound> {
   let res: Response;
   try {
-    res = await fetch("https://api.openai.com/v1/responses", {
+    res = await fetch(`${baseUrl}/responses`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.openai.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "content-type": "application/json",
       },
       body: JSON.stringify(body),
@@ -819,14 +1704,16 @@ async function streamRound(
     });
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
-      return { text: "", calls: [], responseId: null, usage: null };
+      return { text: "", calls: [], responseId: null, usage: null, incomplete: false };
     }
     throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
   }
 
   if (!res.ok || !res.body) {
-    console.error("[coach] OpenAI stream error:", res.status);
-    throw new AppError(502, "COACH_ERROR", `The AI service returned ${res.status}`);
+    const detail = await res.text().catch(() => "");
+    const host = hostOf(baseUrl);
+    console.error(`[coach] ${host} stream error ${res.status}:`, detail.slice(0, 300));
+    throw new AppError(502, "COACH_ERROR", `The AI service (${host}) returned ${res.status}`);
   }
 
   const reader = res.body.getReader();
@@ -835,6 +1722,7 @@ async function streamRound(
   let text = "";
   let responseId: string | null = null;
   let usage: CoachUsage | null = null;
+  let incomplete = false;
   const calls: ToolCall[] = [];
 
   try {
@@ -856,6 +1744,10 @@ async function streamRound(
         } else if (event.kind === "completed") {
           if (event.responseId) responseId = event.responseId;
           if (event.usage) usage = event.usage;
+        } else if (event.kind === "incomplete") {
+          incomplete = true;
+          if (event.responseId) responseId = event.responseId;
+          if (event.usage) usage = event.usage;
         }
       }
     }
@@ -864,7 +1756,7 @@ async function streamRound(
     if (!(err instanceof Error && err.name === "AbortError")) throw err;
   }
 
-  return { text, calls, responseId, usage };
+  return { text, calls, responseId, usage, incomplete };
 }
 
 /**
@@ -887,7 +1779,9 @@ export async function runCoachChatStream(
     onDelta: (delta: string) => void;
     onStatus?: (status: string) => void;
     onSession?: (sessionId: string) => void;
+    onProposal?: (proposal: CoachProposal) => void;
   },
+  agent?: AgentId,
   signal?: AbortSignal,
 ): Promise<string> {
   let session = sessionId
@@ -898,8 +1792,11 @@ export async function runCoachChatStream(
   }
   if (!session) {
     session = await prisma.coachSession.create({
-      data: { userId, title: message.trim().slice(0, 60) || "New chat" },
+      data: { userId, title: message.trim().slice(0, 60) || "New chat", agent: agent ?? "general" },
     });
+  } else if (agent && agent !== session.agent) {
+    // The user switched agent (chips) — persist it for this session.
+    session = await prisma.coachSession.update({ where: { id: session.id }, data: { agent } });
   }
   handlers.onSession?.(session.id);
 
@@ -921,7 +1818,8 @@ export async function runCoachChatStream(
     data: { updatedAt: new Date() },
   });
 
-  if (!config.openai.apiKey) {
+  const { baseUrl, apiKey } = resolveProvider("ai");
+  if (!apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
   }
 
@@ -937,14 +1835,22 @@ export async function runCoachChatStream(
       ] as InputPart[],
     }));
 
-  const instructions = `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
-  const model = routeChatModel(message);
+  const agentId = routeAgent(message, agent);
+  const activeAgent = AGENTS[agentId];
+  const instructions = `${activeAgent.system}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
+  const model = activeAgent.model(message);
   const userMessage = { role: "user", content: [{ type: "input_text", text: message }] };
 
-  const storedResponseId =
-    recent.find((m) => m.role === "assistant" && m.responseId)?.responseId ?? null;
+  const chaining = config.ai.chaining;
+  const storedResponseId = chaining
+    ? (recent.find((m) => m.role === "assistant" && m.responseId)?.responseId ?? null)
+    : null;
+
+  // Without provider-side response storage we replay the whole conversation each
+  // round; with chaining we send only the new bits + reference the last response.
+  const convo: unknown[] = [...history, userMessage];
   let previousId: string | null = storedResponseId;
-  let input: unknown[] = previousId ? [userMessage] : [...history, userMessage];
+  let input: unknown[] = previousId ? [userMessage] : convo;
 
   let full = "";
   let lastResponseId: string | null = null;
@@ -959,15 +1865,20 @@ export async function runCoachChatStream(
     const baseBody = {
       model,
       instructions,
-      prompt_cache_key: PROMPT_CACHE_KEY,
-      ...(allowTools ? { tools: COACH_TOOLS, tool_choice: "auto" } : {}),
+      ...(config.ai.promptCache ? { prompt_cache_key: PROMPT_CACHE_KEY } : {}),
+      ...(activeAgent.thinking ? {} : { thinking: { type: "disabled" } }),
+      ...(allowTools ? { tools: activeAgent.tools, tool_choice: "auto" } : {}),
       stream: true,
-      max_output_tokens: 400,
+      // Tool rounds must fit the tool-call arguments (e.g. a day's exercises),
+      // so they get more room than the short final reply.
+      max_output_tokens: allowTools ? config.ai.toolTokens : config.ai.replyTokens,
     };
 
     let result: StreamRound;
     try {
       result = await streamRound(
+        baseUrl,
+        apiKey,
         { ...baseBody, input, ...(previousId ? { previous_response_id: previousId } : {}) },
         signal,
         handlers.onDelta,
@@ -976,11 +1887,7 @@ export async function runCoachChatStream(
       // Chaining can fail if the stored response is gone — retry once from full history.
       if (round === 0 && previousId) {
         previousId = null;
-        result = await streamRound(
-          { ...baseBody, input: [...history, userMessage] },
-          signal,
-          handlers.onDelta,
-        );
+        result = await streamRound(baseUrl, apiKey, { ...baseBody, input: convo }, signal, handlers.onDelta);
       } else {
         throw err;
       }
@@ -993,21 +1900,57 @@ export async function runCoachChatStream(
       totalOutput += result.usage.outputTokens;
     }
 
-    if (!allowTools || result.calls.length === 0) break;
-    // Continue the tool loop by chaining from this response.
-    if (!result.responseId) break;
-    previousId = result.responseId;
+    if (result.incomplete) {
+      console.warn("[coach] response incomplete (likely truncated)", {
+        round,
+        hadCalls: result.calls.length,
+        textLen: result.text.length,
+      });
+      // Nothing usable came back — surface a clear error instead of a blank reply.
+      if (result.calls.length === 0 && full.trim().length === 0) {
+        throw new AppError(
+          502,
+          "COACH_TRUNCATED",
+          "That change was too large for the coach to prepare. Try asking for one day at a time.",
+        );
+      }
+    }
 
-    input = [];
+    if (!allowTools || result.calls.length === 0) break;
+
+    const outputs: unknown[] = [];
     for (const call of result.calls) {
       handlers.onStatus?.(TOOL_LABELS[call.name] ?? "Looking that up…");
       usedTools.push(call.name);
       const output = await executeCoachTool(userId, call.name, call.args, today);
-      input.push({
+      const proposal = extractProposal(output);
+      if (proposal) handlers.onProposal?.(proposal);
+      outputs.push({
         type: "function_call_output",
         call_id: call.callId,
-        output: JSON.stringify(output),
+        output: proposal
+          ? JSON.stringify({ ok: true, awaiting_confirmation: true })
+          : JSON.stringify(output),
       });
+    }
+
+    if (chaining) {
+      // Continue the tool loop by chaining from this response.
+      if (!result.responseId) break;
+      previousId = result.responseId;
+      input = outputs;
+    } else {
+      // Replay mode: carry the model's function_call items then their outputs forward.
+      convo.push(
+        ...result.calls.map((c) => ({
+          type: "function_call",
+          call_id: c.callId,
+          name: c.name,
+          arguments: c.args,
+        })),
+        ...outputs,
+      );
+      input = convo;
     }
   }
 
@@ -1015,6 +1958,7 @@ export async function runCoachChatStream(
     "[coach] turn",
     JSON.stringify({
       model,
+      agent: agentId,
       ms: Date.now() - startedAt,
       chained: Boolean(storedResponseId),
       tools: usedTools,
@@ -1031,7 +1975,7 @@ export async function runCoachChatStream(
         sessionId: session.id,
         role: "assistant",
         content: answer,
-        responseId: lastResponseId,
+        responseId: chaining ? lastResponseId : null,
       },
     });
   }
@@ -1062,7 +2006,7 @@ export async function generateCoachPlan(
     instructions,
     [{ role: "user", content: [{ type: "input_text", text: "Create the program as JSON." }] }],
     2500,
-    { json: true, model: config.models.chatSmart },
+    { json: true, model: config.models.chatSmart, provider: "openai" },
   );
 
   try {
@@ -1103,6 +2047,97 @@ export async function analyzePhysique(
       },
     ],
     400,
-    { model: config.models.vision },
+    { model: config.models.vision, provider: "openai" },
   );
+}
+
+const MEAL_SYSTEM = `You estimate the calories and protein of a meal from a photo and/or a short description.
+
+Return ONLY a JSON object, no prose and no markdown fences, matching exactly:
+{
+  "title": "string",
+  "items": [ { "name": "string", "quantity": "string", "calories": number, "protein_g": number } ],
+  "calories": number,
+  "protein_g": number,
+  "confidence": "low" | "medium" | "high",
+  "question": "string (optional)"
+}
+
+Accuracy rules:
+- Estimate each item from a common, realistic portion and state the assumed portion in "quantity"
+  (e.g. "1 cup cooked", "150 g", "2 medium", "1 tbsp").
+- Keep estimates close to accurate: use standard reference values and do not wildly inflate or deflate.
+- For regional/compound dishes, assume the most common home preparation.
+- "calories" and "protein_g" must equal the sum of the items.
+- If the portion or the dish itself is genuinely ambiguous, lower the confidence and put ONE short
+  clarifying question in "question" (omit it when confident).`;
+
+export interface MealAnalysis {
+  title: string;
+  items: MealItemDraft[];
+  calories: number;
+  protein_g: number;
+  confidence: "low" | "medium" | "high";
+  question?: string;
+}
+
+/**
+ * Estimates a meal from a photo (+ optional description). The image is sent to
+ * the model and the buffer is discarded — never stored.
+ */
+export async function analyzeMeal(
+  imageBuffer: Buffer,
+  mimeType: string,
+  description?: string,
+): Promise<MealAnalysis> {
+  const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+  const raw = await callModel(
+    MEAL_SYSTEM,
+    [
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: description ? `The athlete says: ${description}` : "Estimate this meal.",
+          },
+          { type: "input_image", image_url: dataUrl },
+        ],
+      },
+    ],
+    700,
+    { json: true, model: config.models.meal },
+  );
+
+  let parsed: {
+    title?: unknown;
+    items?: unknown;
+    calories?: unknown;
+    protein_g?: unknown;
+    confidence?: unknown;
+    question?: unknown;
+  };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new AppError(502, "MEAL_ANALYZE_FAILED", "Couldn't read that meal. Try again, or type it instead.");
+  }
+
+  const items = mealItemsFromArgs(parsed.items);
+  if (!items) {
+    throw new AppError(422, "MEAL_ANALYZE_FAILED", "Couldn't identify any food. Try another photo or type the meal.");
+  }
+
+  const calories = items.reduce((a, i) => a + i.calories, 0);
+  const protein_g = Math.round(items.reduce((a, i) => a + i.protein_g, 0));
+  const confidence =
+    parsed.confidence === "low" || parsed.confidence === "high" ? parsed.confidence : "medium";
+  const question =
+    typeof parsed.question === "string" && parsed.question.trim()
+      ? parsed.question.trim().slice(0, 300)
+      : undefined;
+  const title =
+    typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 120) : "Meal";
+
+  return { title, items, calories, protein_g, confidence, ...(question ? { question } : {}) };
 }

@@ -118,3 +118,18 @@ export async function createLiftLogIdempotent(
     throw err;
   }
 }
+
+/** Update the weight/reps of one owned set. Returns null when not found. */
+export async function updateLiftLog(
+  userId: string,
+  id: string,
+  input: { weight_kg: number; reps: number },
+  client: LiftLogClient = prisma,
+): Promise<LiftLogRecord | null> {
+  const result = await client.liftLog.updateMany({
+    where: { id, userId },
+    data: { weightKg: input.weight_kg, reps: input.reps },
+  });
+  if (result.count === 0) return null;
+  return findExisting(client, id);
+}

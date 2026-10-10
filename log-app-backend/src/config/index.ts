@@ -28,6 +28,28 @@ export const config = {
     // Reasoning-heavy chat, program generation and physique analysis.
     chatSmart: process.env.COACH_MODEL || "gpt-4.1",
     vision: process.env.COACH_VISION_MODEL || process.env.COACH_MODEL || "gpt-4.1",
+    // Meal photo/description estimation (needs vision + accuracy).
+    meal: process.env.COACH_MEAL_MODEL || process.env.COACH_VISION_MODEL || process.env.COACH_MODEL || "gpt-4.1",
+  },
+  // Coach chat + meal provider. Defaults to OpenAI; point AI_BASE_URL at any
+  // OpenAI-Responses-compatible endpoint (e.g. Command Code) for other models.
+  // Plan parsing and physique analysis stay on the OpenAI client above.
+  ai: {
+    baseUrl: process.env.AI_BASE_URL || "https://api.openai.com/v1",
+    apiKey:
+      process.env.AI_API_KEY || process.env.COMMANDCODE_API_KEY || process.env.OPENAI_API_KEY || "",
+    // previous_response_id chaining (off for providers without response storage).
+    chaining: process.env.AI_RESPONSE_CHAINING !== "false",
+    promptCache: process.env.AI_PROMPT_CACHE !== "false",
+    // "disabled" tells reasoning models to skip thinking (faster/cheaper chat).
+    thinking: process.env.AI_THINKING || "",
+    replyTokens: parseInt(process.env.AI_REPLY_TOKENS || "400", 10),
+    toolTokens: parseInt(process.env.AI_TOOL_TOKENS || "1600", 10),
+  },
+  // Food lookup: Open Food Facts first (free), optional web-search fallback.
+  food: {
+    offUserAgent: process.env.OFF_USER_AGENT || "LogApp/1.0 (meal logging)",
+    searchApiKey: process.env.TAVILY_API_KEY || process.env.WEB_SEARCH_API_KEY || "",
   },
   cors: {
     allowedOrigins: parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS),

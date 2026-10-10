@@ -27,6 +27,33 @@ export const liftLogSchema = z.object({
   plan_day_id: z.string().uuid().optional().nullable(),
 });
 
+export const liftLogUpdateSchema = z.object({
+  weight_kg: z.number().positive().max(9999),
+  reps: z.number().int().positive().max(9999),
+});
+
+export const mealItemSchema = z.object({
+  name: z.string().min(1).max(120),
+  quantity: z.string().max(60).optional(),
+  calories: z.number().int().min(0).max(5000),
+  protein_g: z.number().min(0).max(500),
+});
+
+export const createMealSchema = z.object({
+  date: dateString,
+  title: z.string().min(1).max(120),
+  items: z.array(mealItemSchema).min(1).max(30),
+  calories: z.number().int().min(1).max(10000),
+  protein_g: z.number().min(0).max(1000),
+  source: z.enum(["ai", "photo", "manual"]),
+});
+
+export const updateMealSchema = createMealSchema.omit({ date: true });
+
+export const mealDateQuerySchema = z.object({
+  date: dateString,
+});
+
 export const dailyDefaultsSchema = z
   .object({
     weight_kg: z.number().positive().max(999).nullable().optional(),
@@ -134,6 +161,8 @@ export const coachChatSchema = z.object({
   sessionId: z.string().uuid().optional(),
   /** The athlete's local date (server may be on UTC). */
   localDate: dateString.optional(),
+  /** Explicit agent pick (UI chips). Omit to let the router decide. */
+  agent: z.enum(["general", "meal", "training"]).optional(),
 });
 
 export const coachPlanSchema = z.object({
