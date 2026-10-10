@@ -46,6 +46,7 @@ interface PlanExercise {
   name: string;
   sets: number;
   reps: string;
+  weight_kg?: number;
 }
 
 function serializePlan(plan: {
@@ -241,6 +242,7 @@ router.get(
               name: exercise.name,
               sets: exercise.sets,
               reps: exercise.reps,
+              weight_kg: exercise.weight_kg ?? null,
               logged: logs.length > 0,
               last_log: lastLog
                 ? { weight_kg: lastLog.weightKg, reps: lastLog.reps }

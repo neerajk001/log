@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { coachChatSchema, coachProfileSchema } from "../src/validation/schemas";
+import {
+  coachChatSchema,
+  coachProfileSchema,
+  onboardingSchema,
+  planExerciseSchema,
+  updateMeSchema,
+} from "../src/validation/schemas";
 
 const mocks = vi.hoisted(() => ({
   findUniqueProfile: vi.fn(),
@@ -182,6 +188,65 @@ describe("coachProfileSchema", () => {
 
   it("rejects out-of-range days per week", () => {
     expect(coachProfileSchema.safeParse({ days_per_week: 9 }).success).toBe(false);
+  });
+});
+
+describe("planExerciseSchema", () => {
+  it("accepts an optional target weight", () => {
+    expect(
+      planExerciseSchema.safeParse({ name: "Squat", sets: 3, reps: "5", weight_kg: 100 }).success,
+    ).toBe(true);
+    expect(planExerciseSchema.safeParse({ name: "Squat", sets: 3, reps: "5" }).success).toBe(true);
+  });
+
+  it("rejects a non-positive weight", () => {
+    expect(
+      planExerciseSchema.safeParse({ name: "Squat", sets: 3, reps: "5", weight_kg: 0 }).success,
+    ).toBe(false);
+  });
+});
+
+describe("updateMeSchema", () => {
+  it("accepts rest days as weekday numbers", () => {
+    expect(updateMeSchema.safeParse({ rest_days: [0] }).success).toBe(true);
+    expect(updateMeSchema.safeParse({ rest_days: [0, 6] }).success).toBe(true);
+    expect(updateMeSchema.safeParse({ rest_days: null }).success).toBe(true);
+    expect(updateMeSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("rejects an out-of-range weekday", () => {
+    expect(updateMeSchema.safeParse({ rest_days: [7] }).success).toBe(false);
+    expect(updateMeSchema.safeParse({ rest_days: [-1] }).success).toBe(false);
+  });
+});
+
+describe("onboardingSchema", () => {
+  it("accepts a full payload", () => {
+    expect(
+      onboardingSchema.safeParse({
+        goal: "Build muscle",
+        sex: "male",
+        age: 22,
+        height_cm: 160,
+        weight_kg: 65,
+        target_weight_kg: 60,
+        experience: "beginner",
+        days_per_week: 5,
+        rest_days: [0, 6],
+        meal_tracking_enabled: true,
+        ai_coach_enabled: true,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("accepts a partial payload", () => {
+    expect(onboardingSchema.safeParse({ goal: "Stay fit" }).success).toBe(true);
+    expect(onboardingSchema.safeParse({}).success).toBe(true);
+  });
+
+  it("rejects a bad sex or age", () => {
+    expect(onboardingSchema.safeParse({ sex: "unspecified" }).success).toBe(false);
+    expect(onboardingSchema.safeParse({ age: 9 }).success).toBe(false);
   });
 });
 

@@ -33,6 +33,8 @@ interface ProfileRow {
   weightKg: unknown;
   targetWeightKg: unknown;
   heightCm: number | null;
+  sex: string | null;
+  age: number | null;
   experience: string | null;
   daysPerWeek: number | null;
   equipment: string | null;
@@ -47,6 +49,8 @@ function serializeProfile(p: ProfileRow) {
     weight_kg: p.weightKg == null ? null : Number(p.weightKg),
     target_weight_kg: p.targetWeightKg == null ? null : Number(p.targetWeightKg),
     height_cm: p.heightCm,
+    sex: p.sex,
+    age: p.age,
     experience: p.experience,
     days_per_week: p.daysPerWeek,
     equipment: p.equipment,
@@ -77,6 +81,8 @@ router.put(
         weightKg: d.weight_kg ?? null,
         targetWeightKg: d.target_weight_kg ?? null,
         heightCm: d.height_cm ?? null,
+        sex: d.sex ?? null,
+        age: d.age ?? null,
         experience: d.experience ?? null,
         daysPerWeek: d.days_per_week ?? null,
         equipment: d.equipment ?? null,

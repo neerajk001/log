@@ -88,7 +88,7 @@ const PLAN_SYSTEM = `You design structured workout programs and return them as J
 Output ONLY a JSON object, no surrounding text and no markdown fences, matching exactly:
 {
   "days": [
-    { "day_name": "string", "exercises": [ { "name": "string", "sets": number, "reps": "string" } ] }
+    { "day_name": "string", "exercises": [ { "name": "string", "sets": number, "reps": "string", "weight_kg": number } ] }
   ]
 }
 
@@ -96,6 +96,8 @@ Rules:
 - Respect the athlete's available training days, experience, and equipment.
 - "day_name" is a label like "Push", "Pull", "Legs", "Upper", "Lower", "Full Body".
 - "reps" preserves notation as a string (e.g. "5", "8-12").
+- Include "weight_kg" only when the athlete gave a target weight or their history
+  makes one obvious; otherwise omit the field.
 - Use 3-8 exercises per day; keep it realistic for the stated experience level.`;
 
 type InputPart =

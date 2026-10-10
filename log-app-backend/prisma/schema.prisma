@@ -14,6 +14,10 @@ model User {
   proteinTargetG   Int?          @map("protein_target_g")
   calorieTarget    Int?          @map("calorie_target")
   dailyDefaults    Json?         @map("daily_defaults")
+  restDays         Json?         @map("rest_days")
+  mealTrackingEnabled Boolean    @default(true) @map("meal_tracking_enabled")
+  aiCoachEnabled   Boolean       @default(true) @map("ai_coach_enabled")
+  onboardedAt      DateTime?     @map("onboarded_at") @db.Timestamptz()
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   dailyLogs        DailyLog[]
   liftLogs         LiftLog[]
@@ -58,6 +62,8 @@ model LiftLog {
   planDay       PlanDay?   @relation(fields: [planDayId], references: [id])
 
   @@index([userId, exerciseName, date])
+  // Date-only reads (history, insights, coach context) can't use the index above.
+  @@index([userId, date])
   @@map("lift_logs")
 }
 
@@ -71,6 +77,7 @@ model WorkoutPlan {
   user       User       @relation(fields: [userId], references: [id])
   planDays   PlanDay[]
 
+  @@index([userId])
   @@map("workout_plans")
 }
 
@@ -83,6 +90,7 @@ model PlanDay {
   plan       WorkoutPlan @relation(fields: [planId], references: [id])
   liftLogs   LiftLog[]
 
+  @@index([planId])
   @@map("plan_days")
 }
 
@@ -126,6 +134,8 @@ model CoachProfile {
   weightKg       Decimal? @map("weight_kg") @db.Decimal(5, 2)
   targetWeightKg Decimal? @map("target_weight_kg") @db.Decimal(5, 2)
   heightCm       Int?     @map("height_cm")
+  sex            String?  @db.Text
+  age            Int?
   experience     String?  @db.Text
   daysPerWeek    Int?     @map("days_per_week")
   equipment      String?  @db.Text

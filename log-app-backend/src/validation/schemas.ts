@@ -68,6 +68,12 @@ export const updateMeSchema = z.object({
   protein_target_g: z.number().int().positive().optional().nullable(),
   calorie_target: z.number().int().positive().optional().nullable(),
   daily_defaults: dailyDefaultsSchema.optional(),
+  /** Weekdays the athlete doesn't train (0 = Sun … 6 = Sat) — they don't break the streak. */
+  rest_days: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+  meal_tracking_enabled: z.boolean().optional(),
+  ai_coach_enabled: z.boolean().optional(),
+  /** Set the first-run onboarding flag (dev/testing helper). */
+  onboarded: z.boolean().optional(),
 });
 
 export const activityTypeSchema = z.enum(["run", "cycle", "walk", "swim", "other"]);
@@ -108,6 +114,8 @@ export const planExerciseSchema = z.object({
   name: z.string().min(1).max(120),
   sets: z.number().int().positive().max(99),
   reps: z.string().min(1).max(20),
+  /** Optional target weight the athlete plans to lift. */
+  weight_kg: z.number().positive().max(9999).optional(),
 });
 
 export const planDaySchema = z.object({
@@ -143,11 +151,15 @@ export const trendsQuerySchema = z.object({
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;
 export type CreatePlanInput = z.infer<typeof createPlanSchema>;
 
+export const sexSchema = z.enum(["male", "female", "other"]);
+
 export const coachProfileSchema = z.object({
   goal: z.string().max(200).optional().nullable(),
   weight_kg: z.number().positive().max(999).optional().nullable(),
   target_weight_kg: z.number().positive().max(999).optional().nullable(),
   height_cm: z.number().int().positive().max(300).optional().nullable(),
+  sex: sexSchema.optional().nullable(),
+  age: z.number().int().min(13).max(100).optional().nullable(),
   experience: z.enum(["beginner", "intermediate", "advanced"]).optional().nullable(),
   days_per_week: z.number().int().min(1).max(7).optional().nullable(),
   equipment: z.string().max(200).optional().nullable(),
@@ -155,6 +167,23 @@ export const coachProfileSchema = z.object({
   injuries: z.string().max(1000).optional().nullable(),
   notes: z.string().max(2000).optional().nullable(),
 });
+
+/** First-run onboarding: profile answers + user preferences, all optional. */
+export const onboardingSchema = z.object({
+  goal: z.string().max(200).optional().nullable(),
+  sex: sexSchema.optional().nullable(),
+  age: z.number().int().min(13).max(100).optional().nullable(),
+  height_cm: z.number().int().positive().max(300).optional().nullable(),
+  weight_kg: z.number().positive().max(999).optional().nullable(),
+  target_weight_kg: z.number().positive().max(999).optional().nullable(),
+  experience: z.enum(["beginner", "intermediate", "advanced"]).optional().nullable(),
+  days_per_week: z.number().int().min(1).max(7).optional().nullable(),
+  rest_days: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
+  meal_tracking_enabled: z.boolean().optional(),
+  ai_coach_enabled: z.boolean().optional(),
+});
+
+export type OnboardingInput = z.infer<typeof onboardingSchema>;
 
 export const coachChatSchema = z.object({
   message: z.string().min(1).max(2000),

@@ -10,7 +10,7 @@ Output ONLY a JSON object, with no surrounding text and no markdown code fences.
     {
       "day_name": "string",
       "exercises": [
-        { "name": "string", "sets": number, "reps": "string" }
+        { "name": "string", "sets": number, "reps": "string", "weight_kg": number }
       ]
     }
   ]
@@ -21,6 +21,7 @@ Rules:
 - "exercises" lists every exercise for that day, in the order given.
 - "sets" is an integer count of working sets.
 - "reps" is the rep scheme as a string (e.g. "5", "8-12", "3x5"), preserving the source notation when present.
+- Include "weight_kg" only when the source states a target weight; otherwise omit it.
 - Never invent exercises that are not present in the source text. If a field is ambiguous, make your single best guess.`;
 
 export class PlanParseError extends Error {
