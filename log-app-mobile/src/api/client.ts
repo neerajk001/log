@@ -1,8 +1,37 @@
 import { useAuth } from "@clerk/clerk-expo";
+import Constants from "expo-constants";
 import { useEffect, useMemo, useRef } from "react";
 
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+/** Port the local backend dev server listens on (log-app-backend/.env PORT). */
+const DEV_BACKEND_PORT = 4000;
+
+/**
+ * The host Metro is served from, e.g. "192.168.0.103:8081". In development
+ * that is the dev machine's current LAN IP, so the API follows DHCP changes
+ * instead of a hardcoded address.
+ */
+function devServerHost(): string | null {
+  const expoConfig = Constants.expoConfig as { hostUri?: string } | null;
+  const hostUri =
+    expoConfig?.hostUri ??
+    (Constants as { expoGoConfig?: { debuggerHost?: string } }).expoGoConfig?.debuggerHost;
+  const host = hostUri?.split(":")[0]?.trim();
+  return host ? host : null;
+}
+
+/**
+ * Dev builds reach the backend on the same machine that serves Metro; release
+ * builds use the EXPO_PUBLIC_API_BASE_URL baked in at build time.
+ */
+function resolveApiBaseUrl(): string {
+  if (__DEV__) {
+    const host = devServerHost();
+    if (host) return `http://${host}:${DEV_BACKEND_PORT}`;
+  }
+  return process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
+}
+
+export const API_BASE_URL = resolveApiBaseUrl();
 export const REQUEST_TIMEOUT_MS = 15000;
 const PDF_UPLOAD_TIMEOUT_MS = 120000;
 
