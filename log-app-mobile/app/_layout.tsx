@@ -27,8 +27,12 @@ function AuthGate() {
   useEffect(() => {
     if (!isLoaded) return;
 
-    const first = (segments[0] as string) ?? "";
-    const step = (segments[1] as string) ?? "";
+    // Copy into a plain array: `useSegments()`'s tuple type depends on Expo's
+    // generated route types (.expo/types/router.d.ts), which a fresh checkout
+    // does not have — indexing it directly fails to typecheck in CI.
+    const path: string[] = [...segments];
+    const first = path[0] ?? "";
+    const step = path[1] ?? "";
     const inSignIn = first === "sign-in";
     const isCallback = first === "sso-callback";
     const inOnboarding = first === "onboarding";
