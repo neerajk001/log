@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import helmet from "helmet";
 import * as Sentry from "@sentry/node";
@@ -22,6 +23,16 @@ const READINESS_REPORT_INTERVAL_MS = 5 * 60 * 1000;
 let lastReadinessReportAt = 0;
 app.set("trust proxy", 1);
 app.use(helmet());
+app.use(
+  compression({
+    // Never gzip the coach's SSE stream — each token has to flush immediately.
+    filter: (req, res) => {
+      const type = res.getHeader("Content-Type")?.toString() ?? "";
+      if (type.includes("text/event-stream")) return false;
+      return compression.filter(req, res);
+    },
+  }),
+);
 
 if (config.nodeEnv !== "production") {
   app.use((req, res, next) => {
