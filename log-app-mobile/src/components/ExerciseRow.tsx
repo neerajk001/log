@@ -65,7 +65,6 @@ export function ExerciseRow({
   onToggle?: () => void;
   onAddSet?: (data: LiftLogCreate) => Promise<LiftLog>;
   onDeleteSet?: (id: string) => void;
-  showChevron?: boolean;
   logsLoading?: boolean;
   pendingIds?: Set<string>;
 }) {

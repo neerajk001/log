@@ -11,10 +11,6 @@ export function useLiftLogsApi() {
       /** The Next.js API accepts `exercise`, or a `from`/`to` range. */
       getLiftLogsRange: (from: string, to: string) =>
         client.get<LiftLog[]>(`/api/logs/lift?from=${from}&to=${to}`),
-      getLiftHistory: (exercise: string, weeks = 8) =>
-        client.get<LiftLog[]>(
-          `/api/logs/lift?exercise=${encodeURIComponent(exercise)}&weeks=${weeks}`,
-        ),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
     }),
     [client],

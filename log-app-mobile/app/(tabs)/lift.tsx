@@ -59,7 +59,7 @@ export default function LiftScreen() {
     clearMutationError,
     refetch: refetchLifts,
   } = useLiftLogs(today);
-  const { names: recent } = useRecentExercises();
+  const { names: recent, lastByExercise } = useRecentExercises();
 
   const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -222,7 +222,7 @@ export default function LiftScreen() {
                     sets={ex.sets}
                     reps={ex.reps}
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
-                    lastLog={null}
+                    lastLog={lastByExercise.get(ex.name) ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
                     planDayId={day.id}
                     date={today}

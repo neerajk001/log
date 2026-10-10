@@ -90,7 +90,6 @@ export default function PlanDayScreen() {
               sets={ex.sets}
               reps={ex.reps}
               muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
-              showChevron
             />
           ))}
         </View>
