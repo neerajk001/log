@@ -19,7 +19,9 @@ import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useActivity } from "../../src/hooks/useActivity";
 import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
-import type { DailyField } from "../../src/api/types";
+import { useMeals } from "../../src/hooks/useMeals";
+import { MealSheet } from "../../src/components/MealSheet";
+import type { DailyField, MealLog } from "../../src/api/types";
 import { formatMediumDate } from "../../src/utils/date";
 
 interface FieldConfig {
@@ -81,6 +83,17 @@ export default function TodayScreen() {
     refetch: refetchActivities,
   } = useActivity(activeDate);
   const { data: verdict } = useWeeklyVerdict();
+  const { meals, loading: mealsLoading, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
+  const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
+
+  const mealTotals = useMemo(
+    () =>
+      meals.reduce(
+        (acc, m) => ({ calories: acc.calories + m.calories, protein: acc.protein + m.protein_g }),
+        { calories: 0, protein: 0 },
+      ),
+    [meals],
+  );
 
   /* Auto-repeat locked defaults into a day that's missing them. */
   const appliedRef = useRef<Set<string>>(new Set());
@@ -191,7 +204,15 @@ export default function TodayScreen() {
                   {activeDate === today ? "Today" : formatMediumDate(activeDate)}
                 </Text>
               </Pressable>
-              <IconButton name="sparkles-outline" accessibilityLabel="AI Coach" onPress={() => router.navigate("/coach" as never)} />
+              <Pressable
+                onPress={() => router.navigate("/coach" as never)}
+                style={styles.coachChip}
+                accessibilityRole="button"
+                accessibilityLabel="Open AI coach"
+              >
+                <Ionicons name="sparkles" size={15} color={colors.primary} />
+                <Text style={styles.coachChipText}>Coach</Text>
+              </Pressable>
               <IconButton name="ellipsis-horizontal" accessibilityLabel="More options" onPress={() => setMenuOpen(true)} />
             </>
           }
@@ -386,6 +407,55 @@ export default function TodayScreen() {
                 </View>
               )}
             </View>
+
+            <View style={styles.section}>
+              <SectionHeader title="Meals" actionLabel="Log" onAction={() => router.navigate("/coach" as never)} />
+              {mealsError ? (
+                <Banner
+                  tone="danger"
+                  message={mealsError}
+                  actionLabel="Retry"
+                  onAction={() => refetchMeals()}
+                  style={styles.block}
+                />
+              ) : null}
+              {mealsLoading && meals.length === 0 ? (
+                <LoadingState label="Loading meals…" />
+              ) : meals.length === 0 ? (
+                <EmptyState
+                  icon="restaurant-outline"
+                  title="No meals logged yet."
+                  subtitle="Tell the coach what you ate — it estimates the calories and protein for you."
+                >
+                  <Button label="Log with coach" icon="sparkles-outline" onPress={() => router.navigate("/coach" as never)} />
+                </EmptyState>
+              ) : (
+                <View style={styles.list}>
+                  {meals.map((m) => (
+                    <Pressable
+                      key={m.id}
+                      style={styles.mealRow}
+                      onPress={() => setEditingMeal(m)}
+                      accessibilityLabel={`${m.title} ${m.calories} calories`}
+                    >
+                      <IconBadge name="restaurant-outline" bg={colors.greenSoft} color={colors.green} size={36} rounded={false} />
+                      <View style={styles.activityText}>
+                        <Text style={typography.bodyStrong} numberOfLines={1}>
+                          {m.title}
+                        </Text>
+                        <Text style={typography.small} numberOfLines={1}>
+                          {m.calories} kcal · {m.protein_g} g protein
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                    </Pressable>
+                  ))}
+                  <Text style={[typography.caption, styles.hint]}>
+                    From meals: {mealTotals.calories} kcal · {mealTotals.protein} g protein
+                  </Text>
+                </View>
+              )}
+            </View>
           </>
         ) : null}
 
@@ -407,6 +477,14 @@ export default function TodayScreen() {
         onSubmit={async (payload) => {
           await addActivity(payload);
         }}
+      />
+
+      <MealSheet
+        key={editingMeal?.id ?? "none"}
+        meal={editingMeal}
+        visible={editingMeal != null}
+        onClose={() => setEditingMeal(null)}
+        onSaved={refetchMeals}
       />
 
       <OverflowMenu
@@ -451,10 +529,24 @@ const useStyles = makeUseStyles((t) =>
       borderRadius: radii.pill,
       paddingHorizontal: spacing.md,
       height: 38,
-      maxWidth: 190,
+      maxWidth: 150,
       flexShrink: 1,
     },
     todayChipText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
+
+    coachChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.xs,
+      backgroundColor: t.colors.primarySoft,
+      borderWidth: 1,
+      borderColor: t.colors.primary,
+      borderRadius: radii.pill,
+      paddingHorizontal: spacing.md,
+      height: 38,
+      flexShrink: 0,
+    },
+    coachChipText: { fontSize: 13, fontWeight: "700", color: t.colors.primary },
 
     backToday: {
       flexDirection: "row",
@@ -496,5 +588,15 @@ const useStyles = makeUseStyles((t) =>
 
     activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
     activityText: { flex: 1, gap: 2 },
+    mealRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      padding: spacing.md,
+    },
   }),
 );

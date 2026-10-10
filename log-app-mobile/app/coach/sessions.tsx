@@ -7,6 +7,13 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { Button, EmptyState, ErrorState, LoadingState } from "../../src/components/ui/primitives";
 import { useCoachSessions } from "../../src/hooks/useCoachSessions";
 import { formatMediumDate } from "../../src/utils/date";
+import type { AgentId } from "../../src/api/types";
+
+const AGENT_LABELS: Record<AgentId, string> = {
+  general: "General",
+  meal: "Meals",
+  training: "Training",
+};
 
 /** Coach chat history. */
 export default function CoachSessionsScreen() {
@@ -51,6 +58,7 @@ export default function CoachSessionsScreen() {
                 {item.title}
               </Text>
               <Text style={typography.caption}>
+                {AGENT_LABELS[item.agent] ?? "General"} ·{" "}
                 {formatMediumDate(item.updated_at.slice(0, 10))} · {item.message_count} message
                 {item.message_count === 1 ? "" : "s"}
               </Text>

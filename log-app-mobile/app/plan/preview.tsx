@@ -17,6 +17,7 @@ import type { CreatePlanInput } from "../../src/api/types";
 export default function PlanPreviewScreen() {
   const api = usePlansApi();
   const pending = getPendingPlan();
+  const editingPlanId = pending?.editingPlanId ?? null;
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
@@ -29,7 +30,7 @@ export default function PlanPreviewScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.padded}>
-          <ScreenHeader variant="detail" title="Import Preview" onBack={() => router.back()} />
+          <ScreenHeader variant="detail" title={editingPlanId ? "Update Plan" : "Import Preview"} onBack={() => router.back()} />
           <EmptyState
             icon="document-outline"
             title="Nothing to preview"
@@ -74,7 +75,8 @@ export default function PlanPreviewScreen() {
     setSaving(true);
     setError(null);
     try {
-      await api.createPlan(payload);
+      if (editingPlanId) await api.updatePlan(editingPlanId, payload);
+      else await api.createPlan(payload);
       clearPendingPlan();
       if (router.canDismiss()) router.dismissAll();
       router.replace("/(tabs)/plan" as never);
@@ -90,9 +92,11 @@ export default function PlanPreviewScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <ScreenHeader variant="detail" title="Import Preview" onBack={() => router.back()} />
+        <ScreenHeader variant="detail" title={editingPlanId ? "Update Plan" : "Import Preview"} onBack={() => router.back()} />
 
-        {pending.source === "ai_parsed" ? (
+        {editingPlanId ? (
+          <Banner tone="info" message="Your coach prepared these changes. Review them, then tap Update Plan." />
+        ) : pending.source === "ai_parsed" ? (
           <Banner tone="success" message="Plan parsed successfully! Review and make changes before saving." />
         ) : null}
 
@@ -113,7 +117,12 @@ export default function PlanPreviewScreen() {
 
         <PlanDaysEditor days={days} onChange={setDays} />
 
-        <Button label="Create Plan" icon="checkmark" onPress={save} loading={saving} />
+        <Button
+          label={editingPlanId ? "Update Plan" : "Create Plan"}
+          icon="checkmark"
+          onPress={save}
+          loading={saving}
+        />
         <Button label="Cancel" variant="ghost" onPress={() => router.back()} />
       </ScrollView>
     </View>

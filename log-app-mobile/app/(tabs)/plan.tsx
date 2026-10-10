@@ -68,9 +68,19 @@ export default function PlanScreen() {
           <EmptyState
             icon="clipboard-outline"
             title="No plan yet"
-            subtitle="Import a plan with AI or build one manually."
+            subtitle="Have your AI coach build one, import an existing plan, or build it manually."
           >
-            <Button label="Import (AI)" icon="sparkles-outline" onPress={() => router.navigate("/plan/import" as never)} />
+            <Button
+              label="Plan by coach"
+              icon="sparkles-outline"
+              onPress={() => router.navigate("/coach/onboarding" as never)}
+            />
+            <Button
+              label="Import (AI)"
+              icon="cloud-upload-outline"
+              variant="outline"
+              onPress={() => router.navigate("/plan/import" as never)}
+            />
             <Button
               label="Build manually"
               icon="create-outline"

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
@@ -11,7 +11,7 @@ import { usePlansApi } from "../../src/api/plans";
 /** Plan options (design 03.06). */
 export default function PlanOptionsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { plans, activePlan, loading } = usePlans();
+  const { plans, activePlan, loading, refetch } = usePlans();
   const api = usePlansApi();
 
   const [busy, setBusy] = useState<string | null>(null);
@@ -68,6 +68,44 @@ export default function PlanOptionsScreen() {
     }
   };
 
+  const activate = async () => {
+    if (plan.is_active) return;
+    setBusy("activate");
+    setError(null);
+    try {
+      await api.activatePlan(plan.id);
+      await refetch();
+      router.back();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to activate plan");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmDelete = () => {
+    Alert.alert("Delete plan?", `"${plan.name}" and its days will be removed.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          setBusy("delete");
+          setError(null);
+          try {
+            await api.deletePlan(plan.id);
+            await refetch();
+            router.back();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to delete plan");
+          } finally {
+            setBusy(null);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
@@ -121,24 +159,25 @@ export default function PlanOptionsScreen() {
             onPress={busy ? undefined : duplicate}
           />
           <Divider />
-          <ListRow icon="checkmark-circle-outline" title="Set as Active" disabled subtitle="Not available — no API endpoint" onPress={() => {}} />
+          <ListRow
+            icon="checkmark-circle-outline"
+            title="Set as Active"
+            subtitle={plan.is_active ? "This plan is already active" : "Make this your active plan"}
+            disabled={plan.is_active || busy === "activate"}
+            onPress={activate}
+          />
           <Divider />
           <ListRow
             icon="trash-outline"
             iconBg={colors.dangerSoft}
             iconColor={colors.danger}
             title="Delete Plan"
-            subtitle="Not available — no API endpoint"
+            subtitle="Remove this plan and its days"
             destructive
-            disabled
-            onPress={() => {}}
+            disabled={busy === "delete"}
+            onPress={confirmDelete}
           />
         </View>
-
-        <Banner
-          tone="info"
-          message="Deleting a plan isn't supported by the API yet, so that option is disabled. Activating a non-active plan isn't available either."
-        />
       </ScrollView>
     </View>
   );

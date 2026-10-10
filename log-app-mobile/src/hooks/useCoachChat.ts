@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { streamCoachChat, useCoachApi } from "../api/coach";
+import type { AgentId, CoachProposal } from "../api/types";
 import { todayLocal } from "../utils/date";
+
+export interface ChatProposal {
+  id: string;
+  proposal: CoachProposal;
+  status?: "applied" | "dismissed" | "error";
+  note?: string;
+}
 
 export interface ChatMessage {
   id: string;
@@ -11,6 +19,8 @@ export interface ChatMessage {
   streaming?: boolean;
   /** The stream failed (or produced nothing) — offer retry. */
   failed?: boolean;
+  /** Changes the coach prepared during this reply, awaiting confirmation. */
+  proposals?: ChatProposal[];
 }
 
 /** Coach chat for one session (or a fresh one when `initialSessionId` is absent). */
@@ -18,6 +28,7 @@ export function useCoachChat(initialSessionId?: string) {
   const api = useCoachApi();
   const { getToken } = useAuth();
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
+  const [agent, setAgent] = useState<AgentId>("general");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(Boolean(initialSessionId));
   const [streaming, setStreaming] = useState(false);
@@ -34,8 +45,9 @@ export function useCoachChat(initialSessionId?: string) {
     setLoading(true);
     setError(null);
     try {
-      const history = await api.getSessionMessages(initialSessionId);
-      setMessages(history.map((m) => ({ id: m.id, role: m.role, content: m.content })));
+      const res = await api.getSessionMessages(initialSessionId);
+      setAgent(res.agent);
+      setMessages(res.messages.map((m) => ({ id: m.id, role: m.role, content: m.content })));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load this chat");
     } finally {
@@ -66,6 +78,7 @@ export function useCoachChat(initialSessionId?: string) {
 
       const controller = new AbortController();
       abortRef.current = controller;
+      let proposalSeq = 0;
 
       try {
         const token = await getToken();
@@ -74,6 +87,7 @@ export function useCoachChat(initialSessionId?: string) {
           message,
           sessionId,
           localDate: todayLocal(),
+          agent,
           signal: controller.signal,
           onSessionId: (id) => setSessionId(id),
           onDelta: (delta) => {
@@ -83,10 +97,23 @@ export function useCoachChat(initialSessionId?: string) {
             );
           },
           onStatus: (next) => setStatus(next),
+          onProposal: (proposal) => {
+            proposalSeq += 1;
+            const id = `${assistantId}-p${proposalSeq}`;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantId
+                  ? { ...m, proposals: [...(m.proposals ?? []), { id, proposal }] }
+                  : m,
+              ),
+            );
+          },
         });
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, streaming: false, failed: m.content.length === 0 } : m,
+            m.id === assistantId
+              ? { ...m, streaming: false, failed: m.content.length === 0 && !m.proposals?.length }
+              : m,
           ),
         );
       } catch (err) {
@@ -107,7 +134,7 @@ export function useCoachChat(initialSessionId?: string) {
         setStatus(null);
       }
     },
-    [getToken, sessionId],
+    [getToken, sessionId, agent],
   );
 
   const send = useCallback(
@@ -132,5 +159,51 @@ export function useCoachChat(initialSessionId?: string) {
     void runStream(lastUser.content, false);
   }, [messages, runStream, streaming]);
 
-  return { sessionId, messages, loading, streaming, status, error, send, stop, retry, refetch: load };
+  const resolveProposal = useCallback(
+    (messageId: string, proposalId: string, status: "applied" | "dismissed" | "error", note?: string) => {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                proposals: (m.proposals ?? []).map((p) =>
+                  p.id === proposalId ? { ...p, status, note } : p,
+                ),
+              }
+            : m,
+        ),
+      );
+    },
+    [],
+  );
+
+  const injectAssistant = useCallback((text: string, proposal?: CoachProposal) => {
+    const id = `local-a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id,
+        role: "assistant",
+        content: text,
+        proposals: proposal ? [{ id: `${id}-p1`, proposal }] : undefined,
+      },
+    ]);
+  }, []);
+
+  return {
+    sessionId,
+    agent,
+    setAgent,
+    messages,
+    loading,
+    streaming,
+    status,
+    error,
+    send,
+    stop,
+    retry,
+    resolveProposal,
+    injectAssistant,
+    refetch: load,
+  };
 }

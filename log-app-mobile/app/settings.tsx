@@ -9,7 +9,7 @@ import { spacing } from "../src/theme/spacing";
 import { ScreenHeader } from "../src/components/ScreenHeader";
 import { SettingField } from "../src/components/SettingField";
 import { SegmentedControl } from "../src/components/ui/controls";
-import { Banner, Button, Card, IconBadge, LoadingState, ErrorState } from "../src/components/ui/primitives";
+import { Banner, Button, Card, Divider, IconBadge, ListRow, LoadingState, ErrorState } from "../src/components/ui/primitives";
 import { useMe } from "../src/hooks/useMe";
 import { lightTick, useHapticsPref } from "../src/hooks/useHaptics";
 import { invalidateGetCache } from "../src/api/client";
@@ -107,6 +107,39 @@ export default function SettingsScreen() {
             />
           </>
         )}
+
+        <Text style={styles.sectionLabel}>AI Coach</Text>
+        <Card padded={false}>
+          <ListRow
+            icon="sparkles"
+            iconBg={colors.primarySoft}
+            iconColor={colors.primary}
+            title="Chat with coach"
+            subtitle="Ask about your training, food or progress."
+            onPress={() => router.navigate("/coach" as never)}
+          />
+          <Divider />
+          <ListRow
+            icon="options-outline"
+            title="Your goals & coaching profile"
+            subtitle="Answer a few questions so your coach can build a plan."
+            onPress={() => router.navigate("/coach/onboarding" as never)}
+          />
+          <Divider />
+          <ListRow
+            icon="bulb-outline"
+            title="What the coach remembers"
+            subtitle="The summary your coach keeps about you."
+            onPress={() => router.navigate("/coach/memory" as never)}
+          />
+          <Divider />
+          <ListRow
+            icon="time-outline"
+            title="Chat history"
+            subtitle="Reopen and manage past conversations."
+            onPress={() => router.navigate("/coach/sessions" as never)}
+          />
+        </Card>
 
         <Text style={styles.sectionLabel}>Logging</Text>
         <Card style={styles.toggleRow}>

@@ -12,6 +12,8 @@ export function useLiftLogsApi() {
       getLiftLogsRange: (from: string, to: string) =>
         client.get<LiftLog[]>(`/api/logs/lift?from=${from}&to=${to}`),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
+      updateLiftLog: (id: string, data: { weight_kg: number; reps: number }) =>
+        client.put<LiftLog>(`/api/logs/lift/${id}`, data),
     }),
     [client],
   );

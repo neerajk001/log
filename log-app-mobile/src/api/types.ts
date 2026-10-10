@@ -184,9 +184,12 @@ export interface CoachMessage {
   created_at: string;
 }
 
+export type AgentId = "general" | "meal" | "training";
+
 export interface CoachSession {
   id: string;
   title: string;
+  agent: AgentId;
   updated_at: string;
   message_count: number;
 }
@@ -195,3 +198,93 @@ export interface CoachMemory {
   summary: string;
   updated_at: string;
 }
+
+export interface MealItem {
+  name: string;
+  quantity?: string;
+  calories: number;
+  protein_g: number;
+}
+
+export interface MealLog {
+  id: string;
+  date: string;
+  title: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+  source: "ai" | "photo" | "manual";
+}
+
+export interface MealLogCreate {
+  date: string;
+  title: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+  source: "ai" | "photo" | "manual";
+}
+
+export interface MealAnalysis {
+  title: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+  confidence: "low" | "medium" | "high";
+  question?: string;
+}
+
+/** A change the coach has prepared and the user must confirm. */
+export type CoachProposal =
+  | {
+      kind: "plan_update";
+      plan_id: string;
+      plan_name: string;
+      name: string;
+      source: "manual" | "ai_parsed";
+      days: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+      summary: string;
+    }
+  | { kind: "plan_activate"; plan_id: string; plan_name: string }
+  | { kind: "plan_delete"; plan_id: string; plan_name: string }
+  | {
+      kind: "set_update";
+      set_id: string;
+      date: string;
+      exercise: string;
+      from: { weight_kg: number; reps: number };
+      to: { weight_kg: number; reps: number };
+    }
+  | {
+      kind: "set_delete";
+      set_id: string;
+      date: string;
+      exercise: string;
+      weight_kg: number;
+      reps: number;
+    }
+  | {
+      kind: "meal_log";
+      date: string;
+      title: string;
+      items: MealItem[];
+      calories: number;
+      protein_g: number;
+    }
+  | {
+      kind: "meal_update";
+      meal_id: string;
+      date: string;
+      title: string;
+      items: MealItem[];
+      calories: number;
+      protein_g: number;
+    }
+  | {
+      kind: "meal_delete";
+      meal_id: string;
+      date: string;
+      title: string;
+      calories: number;
+      protein_g: number;
+    };

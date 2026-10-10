@@ -152,6 +152,12 @@ export default function ImportPlanScreen() {
               {"Couldn't parse? You can always build the plan manually."}
             </Text>
             <Button label="Build manually" variant="ghost" onPress={() => setMode("manual")} />
+            <Button
+              label="Or let the coach build it from your goals"
+              icon="sparkles-outline"
+              variant="outline"
+              onPress={() => router.navigate("/coach/onboarding" as never)}
+            />
           </>
         ) : (
           <>

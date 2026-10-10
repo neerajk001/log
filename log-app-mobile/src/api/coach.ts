@@ -2,10 +2,12 @@ import { useMemo } from "react";
 import { fetch as expoFetch } from "expo/fetch";
 import { API_BASE_URL, useApiClient } from "./client";
 import type {
+  AgentId,
   CoachMemory,
   CoachMessage,
   CoachProfile,
   CoachProfileInput,
+  CoachProposal,
   CoachSession,
   ParsedPlanPreview,
 } from "./types";
@@ -20,7 +22,9 @@ export function useCoachApi() {
         client.put<CoachProfile>("/api/coach/profile", data),
       getSessions: () => client.get<CoachSession[]>("/api/coach/sessions"),
       getSessionMessages: (id: string) =>
-        client.get<CoachMessage[]>(`/api/coach/sessions/${id}/messages`),
+        client.get<{ agent: AgentId; messages: CoachMessage[] }>(
+          `/api/coach/sessions/${id}/messages`,
+        ),
       deleteSession: (id: string) => client.del<{ ok: true }>(`/api/coach/sessions/${id}`),
       getMemory: () => client.get<CoachMemory | null>("/api/coach/memory"),
       clearMemory: () => client.del<{ ok: true }>("/api/coach/memory"),
@@ -45,18 +49,22 @@ export async function streamCoachChat({
   message,
   sessionId,
   localDate,
+  agent,
   onDelta,
   onStatus,
   onSessionId,
+  onProposal,
   signal,
 }: {
   token: string | null;
   message: string;
   sessionId?: string | null;
   localDate?: string;
+  agent?: AgentId;
   onDelta: (delta: string) => void;
   onStatus?: (status: string) => void;
   onSessionId?: (sessionId: string) => void;
+  onProposal?: (proposal: CoachProposal) => void;
   signal?: AbortSignal;
 }): Promise<string> {
   if (!token) throw new Error("Signed out. Please sign in again.");
@@ -68,7 +76,7 @@ export async function streamCoachChat({
       Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ message, sessionId: sessionId ?? undefined, localDate }),
+    body: JSON.stringify({ message, sessionId: sessionId ?? undefined, localDate, agent }),
     signal,
   });
 
@@ -106,6 +114,7 @@ export async function streamCoachChat({
         error?: string;
         status?: string;
         sessionId?: string;
+        proposal?: CoachProposal;
       };
       try {
         event = JSON.parse(payload) as typeof event;
@@ -114,6 +123,7 @@ export async function streamCoachChat({
       }
       if (event.error) serverError = event.error;
       if (event.sessionId) onSessionId?.(event.sessionId);
+      if (event.proposal) onProposal?.(event.proposal);
       if (typeof event.status === "string" && event.status.length > 0) onStatus?.(event.status);
       if (typeof event.delta === "string" && event.delta.length > 0) {
         full += event.delta;

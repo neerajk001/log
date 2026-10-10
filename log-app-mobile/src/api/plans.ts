@@ -15,6 +15,8 @@ export function usePlansApi() {
       updatePlan: (id: string, data: CreatePlanInput) =>
         client.put<WorkoutPlan>(`/api/plans/${id}`, data),
       getPlans: () => client.get<WorkoutPlan[]>("/api/plans"),
+      activatePlan: (id: string) => client.post<WorkoutPlan>(`/api/plans/${id}/activate`, {}),
+      deletePlan: (id: string) => client.del<{ ok: true }>(`/api/plans/${id}`),
       getPlanToday: (id: string, opts?: { force?: boolean }) =>
         client.get<PlanToday>(`/api/plans/${id}/today`, opts),
     }),

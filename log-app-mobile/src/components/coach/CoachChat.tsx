@@ -13,13 +13,25 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import * as DocumentPicker from "expo-document-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
 import { ScreenHeader } from "../ScreenHeader";
 import { Banner, IconBadge } from "../ui/primitives";
 import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
+import { ProposalCard } from "./ProposalCard";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
+import { useMealsApi } from "../../api/meals";
+import { todayLocal } from "../../utils/date";
+import type { AgentId, CoachProposal } from "../../api/types";
+
+const AGENT_LABELS: Record<AgentId, string> = {
+  general: "General",
+  meal: "Meals",
+  training: "Training",
+};
+const AGENT_ORDER: AgentId[] = ["general", "meal", "training"];
 
 const STARTERS = [
   "Give me this week's check-in",
@@ -35,10 +47,25 @@ const STARTERS = [
 export function CoachChat({ sessionId, title }: { sessionId?: string; title?: string }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const { messages, loading, streaming, status, error, send, stop, retry } = useCoachChat(sessionId);
+  const {
+    messages,
+    loading,
+    streaming,
+    status,
+    error,
+    send,
+    stop,
+    retry,
+    resolveProposal,
+    injectAssistant,
+    agent,
+    setAgent,
+  } = useCoachChat(sessionId);
+  const mealsApi = useMealsApi();
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
   const submit = (text: string) => {
@@ -47,11 +74,47 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
     send(text);
   };
 
+  const pickMealPhoto = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: "image/*",
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled || !res.assets?.length) return;
+      const file = res.assets[0];
+      const form = new FormData();
+      form.append("file", {
+        uri: file.uri,
+        name: file.name ?? "meal.jpg",
+        type: file.mimeType ?? "image/jpeg",
+      } as unknown as Blob);
+      setPhotoBusy(true);
+      const analysis = await mealsApi.analyzeMeal(form);
+      const proposal: CoachProposal = {
+        kind: "meal_log",
+        date: todayLocal(),
+        title: analysis.title,
+        items: analysis.items,
+        calories: analysis.calories,
+        protein_g: analysis.protein_g,
+      };
+      const text = analysis.question
+        ? `${analysis.question} I've estimated the rest below.`
+        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein. Confirm to log it.`;
+      injectAssistant(text, proposal);
+    } catch (err) {
+      injectAssistant(err instanceof Error ? err.message : "Couldn't analyze that photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">
       <ScreenHeader
         variant="detail"
         title={title ?? "Coach"}
+        subtitle={AGENT_LABELS[agent]}
         onBack={() => router.back()}
         right={
           <>
@@ -68,6 +131,12 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
           </>
         }
       />
+
+      <ChipRow style={styles.agentChips}>
+        {AGENT_ORDER.map((id) => (
+          <Chip key={id} label={AGENT_LABELS[id]} active={agent === id} onPress={() => setAgent(id)} />
+        ))}
+      </ChipRow>
 
       {error ? <Banner tone="warning" message={error} /> : null}
 
@@ -98,33 +167,54 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
           const mine = item.role === "user";
           const thinking = !!item.streaming && item.content.length === 0;
           return (
-            <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
-              <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-                {thinking ? (
-                  <View style={styles.typing}>
-                    <ActivityIndicator size="small" color={colors.textDim} />
-                    <Text style={typography.small}>{status ?? "Coach is thinking…"}</Text>
-                  </View>
-                ) : (
-                  <MessageBody
-                    content={item.content}
-                    streaming={!!item.streaming}
-                    textStyle={[typography.body, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}
-                  />
-                )}
-                {item.failed ? (
-                  <Pressable onPress={retry} hitSlop={8} style={styles.retryRow}>
-                    <Ionicons name="refresh" size={14} color={colors.danger} />
-                    <Text style={styles.retryText}>Retry</Text>
-                  </Pressable>
-                ) : null}
+            <View style={styles.itemWrap}>
+              <View style={[styles.bubbleRow, mine ? styles.rowMine : styles.rowTheirs]}>
+                <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
+                  {thinking ? (
+                    <View style={styles.typing}>
+                      <ActivityIndicator size="small" color={colors.textDim} />
+                      <Text style={typography.small}>{status ?? "Coach is thinking…"}</Text>
+                    </View>
+                  ) : (
+                    <MessageBody
+                      content={item.content}
+                      streaming={!!item.streaming}
+                      textStyle={[typography.body, mine ? styles.bubbleTextMine : styles.bubbleTextTheirs]}
+                    />
+                  )}
+                  {item.failed ? (
+                    <Pressable onPress={retry} hitSlop={8} style={styles.retryRow}>
+                      <Ionicons name="refresh" size={14} color={colors.danger} />
+                      <Text style={styles.retryText}>Retry</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </View>
+              {!mine && item.proposals?.length ? (
+                <View style={styles.proposals}>
+                  {item.proposals.map((p) => (
+                    <ProposalCard
+                      key={p.id}
+                      messageId={item.id}
+                      item={p}
+                      onResolved={resolveProposal}
+                    />
+                  ))}
+                </View>
+              ) : null}
             </View>
           );
         }}
       />
 
       <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
+        <IconButton
+          name={photoBusy ? "hourglass-outline" : "camera-outline"}
+          accessibilityLabel="Log a meal from a photo"
+          size={26}
+          color={photoBusy ? colors.textMuted : colors.text}
+          onPress={photoBusy ? undefined : pickMealPhoto}
+        />
         <TextInput
           value={input}
           onChangeText={setInput}
@@ -219,6 +309,7 @@ function MessageBody({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg, gap: spacing.sm },
+    agentChips: { paddingHorizontal: spacing.screen },
     list: { padding: spacing.screen, gap: spacing.sm, flexGrow: 1 },
 
     empty: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xxl, paddingHorizontal: spacing.md },
@@ -229,6 +320,8 @@ const useStyles = makeUseStyles((t) =>
     bubbleRow: { flexDirection: "row" },
     rowMine: { justifyContent: "flex-end" },
     rowTheirs: { justifyContent: "flex-start" },
+    itemWrap: { gap: spacing.sm },
+    proposals: { gap: spacing.sm, alignSelf: "stretch" },
     bubble: { maxWidth: "84%", borderRadius: radii.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
     bubbleMine: { backgroundColor: t.colors.primary },
     bubbleTheirs: { backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border },
