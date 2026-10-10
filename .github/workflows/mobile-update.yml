@@ -1,0 +1,86 @@
+name: mobile-update
+
+# Publishes an EAS Update (over-the-air JS/asset bundle) for the mobile app.
+#
+# - Push to main touching log-app-mobile -> publishes to the "preview" channel.
+# - Run manually (Actions -> Run workflow) to publish to "preview" or "production".
+#
+# Installed builds on that channel download the update on their next launch, so
+# normal code changes ship without rebuilding or reinstalling the APK.
+#
+# Requires the repo secret EXPO_TOKEN (an Expo access token from
+# https://expo.dev/accounts/<you>/settings/access-tokens). If it is missing the
+# publish step fails — add it before relying on this workflow.
+#
+# Reminder: native changes (new native module, app.json native keys) still need
+# a real rebuild; OTA only carries JS and assets. Never commit secrets here — the
+# two EXPO_PUBLIC_* values below are public/embedded by design.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "log-app-mobile/**"
+      - ".github/workflows/mobile-update.yml"
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: EAS Update channel to publish to
+        type: choice
+        options: [preview, production]
+        default: preview
+
+concurrency:
+  group: mobile-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish EAS update
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: log-app-mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: log-app-mobile/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Publish update
+        env:
+          # Must match the build profile env in eas.json — EXPO_PUBLIC_* values are
+          # inlined into the published bundle.
+          EXPO_PUBLIC_API_BASE_URL: "https://api.neerajx.site"
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZGFyaW5nLWZhbGNvbi01Mi5jbGVyay5hY2NvdW50cy5kZXYk"
+          UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+        run: |
+          set -euo pipefail
+          CHANNEL="${INPUT_CHANNEL:-preview}"
+          MSG="$(printf '%s' "${UPDATE_MESSAGE:-}" | head -n 1)"
+          [ -n "$MSG" ] || MSG="auto update ${GITHUB_SHA:0:7}"
+          echo "Publishing update -> channel: $CHANNEL"
+          eas update --channel "$CHANNEL" --non-interactive --message "$MSG"
