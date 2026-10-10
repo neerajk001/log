@@ -24,11 +24,11 @@ export interface ChatMessage {
 }
 
 /** Coach chat for one session (or a fresh one when `initialSessionId` is absent). */
-export function useCoachChat(initialSessionId?: string) {
+export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) {
   const api = useCoachApi();
   const { getToken } = useAuth();
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
-  const [agent, setAgent] = useState<AgentId>("general");
+  const [agent, setAgent] = useState<AgentId>(initialAgent ?? "general");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(Boolean(initialSessionId));
   const [streaming, setStreaming] = useState(false);

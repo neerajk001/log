@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useLiftLogsApi } from "../api/liftLogs";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { LiftLog } from "../api/types";
 import { addDays, todayLocal } from "../utils/date";
 
@@ -40,9 +41,7 @@ export function useRecentExercises(days = 120) {
     }
   }, [api, days]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["lift"], load);
 
   return { names, lastByExercise, refetch: load };
 }

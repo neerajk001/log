@@ -8,6 +8,8 @@ import { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeContext";
 import { loadHapticsPref } from "../src/hooks/useHaptics";
+import { useMe } from "../src/hooks/useMe";
+import { isDevPreview } from "../src/state/onboarding";
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 
@@ -20,24 +22,44 @@ function AuthGate() {
   const { colors } = useTheme();
   const segments = useSegments();
   const router = useRouter();
+  const { profile, loading: meLoading } = useMe();
 
   useEffect(() => {
     if (!isLoaded) return;
 
     const first = (segments[0] as string) ?? "";
+    const step = (segments[1] as string) ?? "";
     const inSignIn = first === "sign-in";
     const isCallback = first === "sso-callback";
+    const inOnboarding = first === "onboarding";
 
     if (isCallback) return;
 
-    if (!isSignedIn && !inSignIn) {
-      router.replace("/sign-in" as never);
-    } else if (isSignedIn && inSignIn) {
-      router.replace("/(tabs)/today" as never);
+    if (!isSignedIn) {
+      // Welcome is the signed-out entry point.
+      if (!inSignIn && step !== "welcome") router.replace("/onboarding/welcome" as never);
+      return;
     }
-  }, [isSignedIn, isLoaded, segments, router]);
 
-  if (!isLoaded) {
+    // Signed in — wait for /me before deciding where to send them.
+    if (meLoading && !profile) return;
+
+    if (profile?.onboarded_at == null) {
+      // `welcome` is allowed so the dev shortcuts in Settings can preview it.
+      if (!inOnboarding || step === "") {
+        router.replace("/onboarding/basics" as never);
+      }
+      return;
+    }
+
+    // Dev-only preview: don't bounce out of the onboarding screens.
+    if (__DEV__ && isDevPreview() && inOnboarding) return;
+
+    if (inSignIn || inOnboarding) router.replace("/(tabs)/today" as never);
+  }, [isSignedIn, isLoaded, segments, router, profile, meLoading]);
+
+  const waiting = !isLoaded || (isSignedIn && meLoading && !profile);
+  if (waiting) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color={colors.primary} />

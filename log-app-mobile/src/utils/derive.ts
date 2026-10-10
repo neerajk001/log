@@ -1,5 +1,5 @@
 import type { LiftLog } from "../api/types";
-import { addDays, currentWeekDays, dayNumber, startOfWeek, todayLocal, weekdayShort } from "./date";
+import { addDays, currentWeekDays, dayNumber, parseIso, startOfWeek, todayLocal, weekdayShort } from "./date";
 
 /** Total tonnage for a single logged set. */
 export function volumeOf(log: LiftLog): number {
@@ -142,14 +142,34 @@ export function workoutsThisWeek(logs: LiftLog[], from: string = todayLocal()): 
   return uniqueWorkoutDates(logs).filter((d) => d >= start).length;
 }
 
-/** Consecutive days (ending today or yesterday) that have at least one lift. */
-export function workoutStreak(logs: LiftLog[], from: string = todayLocal()): number {
-  const dates = new Set(logs.map((l) => l.date));
+/**
+ * Consecutive training days ending today (or yesterday, since today isn't over).
+ * Configured `restDays` (weekday numbers, 0 = Sun) are skipped: a rest day never
+ * breaks the streak, and training on a rest day simply counts.
+ */
+export function workoutStreak(
+  logs: LiftLog[],
+  from: string = todayLocal(),
+  restDays: number[] = [],
+): number {
+  const trained = new Set(logs.map((l) => l.date));
+  const rest = new Set(restDays);
+
   let streak = 0;
-  let cursor = dates.has(from) ? from : addDays(from, -1);
-  while (dates.has(cursor)) {
-    streak += 1;
-    cursor = addDays(cursor, -1);
+  // Today isn't over — an untrained today never breaks the streak.
+  let cursor = trained.has(from) ? from : addDays(from, -1);
+
+  for (;;) {
+    if (trained.has(cursor)) {
+      streak += 1;
+      cursor = addDays(cursor, -1);
+      continue;
+    }
+    if (rest.has(parseIso(cursor).getUTCDay())) {
+      cursor = addDays(cursor, -1);
+      continue;
+    }
+    break;
   }
   return streak;
 }
@@ -158,6 +178,54 @@ export function workoutStreak(logs: LiftLog[], from: string = todayLocal()): num
 export function currentWeekDots(logs: LiftLog[], from: string = todayLocal()): boolean[] {
   const dates = new Set(logs.map((l) => l.date));
   return currentWeekDays(from).map((d) => dates.has(d));
+}
+
+export interface WeekDayInfo {
+  iso: string;
+  trained: boolean;
+  rest: boolean;
+}
+
+/** Current week (Mon..Sun) with whether each day was trained and/or a rest day. */
+export function currentWeekInfo(
+  logs: LiftLog[],
+  restDays: number[] = [],
+  from: string = todayLocal(),
+): WeekDayInfo[] {
+  const trained = new Set(logs.map((l) => l.date));
+  const rest = new Set(restDays);
+  return currentWeekDays(from).map((iso) => ({
+    iso,
+    trained: trained.has(iso),
+    rest: rest.has(parseIso(iso).getUTCDay()),
+  }));
+}
+
+/** Sets (log entries) per day over the last `days` days (oldest first). */
+export function dailySetSeries(logs: LiftLog[], days = 7, from: string = todayLocal()): VolumeBar[] {
+  const counts = new Map<string, number>();
+  for (const l of logs) counts.set(l.date, (counts.get(l.date) ?? 0) + 1);
+  const out: VolumeBar[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const iso = addDays(from, -i);
+    out.push({ iso, label: weekdayShort(iso), value: counts.get(iso) ?? 0 });
+  }
+  return out;
+}
+
+/** Sets (log entries) per week over the last `weeks` weeks (oldest first). */
+export function weeklySetSeries(logs: LiftLog[], weeks = 13, from: string = todayLocal()): VolumeBar[] {
+  const counts = new Map<string, number>();
+  for (const l of logs) counts.set(l.date, (counts.get(l.date) ?? 0) + 1);
+  const out: VolumeBar[] = [];
+  const start = addDays(from, -(weeks * 7 - 1));
+  for (let w = 0; w < weeks; w++) {
+    const weekStart = addDays(start, w * 7);
+    let sum = 0;
+    for (let d = 0; d < 7; d++) sum += counts.get(addDays(weekStart, d)) ?? 0;
+    out.push({ iso: weekStart, label: String(dayNumber(weekStart)), value: sum });
+  }
+  return out;
 }
 
 export interface VolumeBar {

@@ -5,19 +5,24 @@ import { router } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, shadows, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { BarChart, DonutChart, Sparkline } from "../../src/components/ui/charts";
+import { BarChart, Sparkline } from "../../src/components/ui/charts";
 import {
   Card,
   ErrorState,
   IconBadge,
   LoadingState,
+  SectionHeader,
   type IoniconName,
 } from "../../src/components/ui/primitives";
 import { SegmentedControl } from "../../src/components/ui/controls";
 import { useInsights } from "../../src/hooks/useInsights";
 import { useTrends } from "../../src/hooks/useTrends";
+import { useMe } from "../../src/hooks/useMe";
+import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { formatNumber } from "../../src/utils/derive";
-import { weekDayLabels } from "../../src/utils/date";
+import { formatMediumDate, weekDayLabels } from "../../src/utils/date";
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const RANGES = [
   { value: "7", label: "7D" },
@@ -40,18 +45,10 @@ export default function InsightsScreen() {
   const rangeDays = Number(range);
   const { colors, typography } = useTheme();
   const styles = useStyles();
+  const { profile } = useMe();
+  const restDays = profile?.rest_days ?? [];
 
-  const sliceColors = [
-    colors.chart1,
-    colors.chart2,
-    colors.chart3,
-    colors.chart4,
-    colors.chart5,
-    colors.teal,
-    colors.amber,
-  ];
-
-  const { metrics, loading, error, refetch } = useInsights(rangeDays);
+  const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
   const { data: trends, loading: trendsLoading, refetch: refetchTrends } = useTrends();
 
   const weightValues = useMemo(
@@ -61,9 +58,26 @@ export default function InsightsScreen() {
   const currentAvg = weightValues.length > 0 ? weightValues[weightValues.length - 1] : null;
   const adherence = trends?.adherence_pct ?? null;
 
-  const totalSets = metrics.muscles.reduce((s, m) => s + m.sets, 0);
-  const hasVolume = metrics.totalVolume > 0;
-  const monthUp = metrics.monthStrengthPct != null && metrics.monthStrengthPct > 0;
+  // Recent weekly averages, newest first, with the change vs the prior week.
+  const recentWeeks = useMemo(() => {
+    const points = (trends?.weight ?? []).filter((w) => w.avg_kg != null);
+    const last = points.slice(-6);
+    const rows = last.map((w, i) => {
+      const globalIndex = points.length - last.length + i;
+      const prev = globalIndex > 0 ? points[globalIndex - 1].avg_kg : null;
+      return {
+        week_start: w.week_start,
+        avg: w.avg_kg as number,
+        delta: prev != null && w.avg_kg != null ? w.avg_kg - prev : null,
+      };
+    });
+    return rows
+      .reverse()
+      .map((r, i) => ({
+        ...r,
+        label: i === 0 ? "This week" : i === 1 ? "Last week" : formatMediumDate(r.week_start),
+      }));
+  }, [trends]);
 
   const refresh = () => {
     refetch();
@@ -121,9 +135,8 @@ export default function InsightsScreen() {
             icon="layers"
             iconBg={colors.blueSoft}
             iconColor={colors.blue}
-            value={formatNumber(metrics.totalVolume)}
-            unit="kg"
-            label="Total Volume"
+            value={String(metrics.sets)}
+            label="Sets"
           />
           <MetricTile
             icon="trending-up"
@@ -141,20 +154,51 @@ export default function InsightsScreen() {
           />
         </View>
 
+        <SectionHeader title="Progress" />
+
         {/* Weight (R5) */}
         <Card style={styles.section}>
           <View style={styles.cardHeaderLeft}>
             <IconBadge name="scale-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
-            <Text style={typography.bodyStrong}>Weight · 4-week average</Text>
+            <Text style={typography.bodyStrong}>Weight · weekly average</Text>
           </View>
           {weightValues.length > 0 ? (
-            <View style={styles.weightBody}>
-              <Text style={typography.metric}>
-                {currentAvg != null ? formatNumber(currentAvg) : "—"}
-                <Text style={typography.metricUnit}> kg</Text>
+            <>
+              <View style={styles.weightBody}>
+                <Text style={typography.metric}>
+                  {currentAvg != null ? formatNumber(currentAvg) : "—"}
+                  <Text style={typography.metricUnit}> kg</Text>
+                </Text>
+                <Sparkline values={weightValues} width={300} height={90} />
+              </View>
+              {recentWeeks.length > 1 ? (
+                <View style={styles.weekList}>
+                  {recentWeeks.map((w) => (
+                    <View key={w.week_start} style={styles.weekRow}>
+                      <Text style={[typography.small, styles.weekLabel]} numberOfLines={1}>
+                        {w.label}
+                      </Text>
+                      <Text style={typography.bodyStrong}>{formatNumber(w.avg)} kg</Text>
+                      <Text
+                        style={[
+                          typography.small,
+                          w.delta == null
+                            ? styles.weekFlat
+                            : w.delta < 0
+                              ? styles.weekDown
+                              : styles.weekUp,
+                        ]}
+                      >
+                        {w.delta == null ? "—" : `${w.delta > 0 ? "+" : ""}${w.delta.toFixed(1)} kg`}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <Text style={[typography.small, styles.note]}>
+                Average of your daily weights, each week.
               </Text>
-              <Sparkline values={weightValues} width={300} height={110} />
-            </View>
+            </>
           ) : (
             <Text style={[typography.small, styles.note]}>
               Log weight on the Today screen to see your trend.
@@ -162,67 +206,37 @@ export default function InsightsScreen() {
           )}
         </Card>
 
-        {/* Volume trend */}
+        {/* Sets per week */}
         <Card style={styles.section}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardHeaderLeft}>
-              <IconBadge name="bar-chart-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
-              <Text style={typography.bodyStrong}>Volume Trend</Text>
-            </View>
-            <View style={styles.pill}>
-              <Text style={styles.pillText}>Total Volume</Text>
-            </View>
+          <View style={styles.cardHeaderLeft}>
+            <IconBadge name="bar-chart-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
+            <Text style={typography.bodyStrong}>Sets per week</Text>
           </View>
-          {loading && !hasVolume ? (
+          {loading && metrics.sets === 0 ? (
             <LoadingState label="Crunching your numbers…" />
-          ) : hasVolume ? (
-            <BarChart data={metrics.volumeSeries} axis />
+          ) : metrics.sets > 0 ? (
+            <BarChart data={metrics.setsSeries} axis />
           ) : (
             <Text style={typography.small}>No workouts in this range yet.</Text>
           )}
+          <Text style={[typography.small, styles.note]}>Sets you logged each week.</Text>
         </Card>
 
-        {/* Muscle breakdown */}
+        <SectionHeader title="Training" />
+
+        {/* Muscle groups */}
         {metrics.muscles.length > 0 ? (
           <Card style={styles.section}>
-            <Text style={typography.bodyStrong}>Muscle Breakdown</Text>
-            <View style={styles.donutWrap}>
-              <DonutChart
-                slices={metrics.muscles.slice(0, 6).map((m, i) => ({
-                  label: m.muscle,
-                  value: m.sets,
-                  color: sliceColors[i % sliceColors.length],
-                }))}
-                centerTop={String(totalSets)}
-                centerBottom="sets"
-              />
-            </View>
-            <View style={styles.legend}>
-              {metrics.muscles.slice(0, 6).map((m, i) => (
-                <View key={m.muscle} style={styles.legendRow}>
-                  <View style={[styles.legendDot, { backgroundColor: sliceColors[i % sliceColors.length] }]} />
-                  <Text style={[typography.small, styles.legendLabel]} numberOfLines={1}>
+            <Text style={typography.bodyStrong}>Muscle groups</Text>
+            <Text style={[typography.small, styles.note]}>Sets logged per muscle group.</Text>
+            <View style={styles.rankList}>
+              {metrics.muscles.slice(0, 6).map((m) => (
+                <View key={m.muscle} style={styles.muscleRow}>
+                  <Text style={[typography.small, styles.rankName]} numberOfLines={1}>
                     {m.muscle}
                   </Text>
-                  <Text style={typography.small}>{m.pct}%</Text>
-                </View>
-              ))}
-            </View>
-          </Card>
-        ) : null}
-
-        {/* Top exercises */}
-        {metrics.top.length > 0 ? (
-          <Card style={styles.section}>
-            <Text style={typography.bodyStrong}>Top Exercises</Text>
-            <View style={styles.rankList}>
-              {metrics.top.map((t, i) => (
-                <View key={t.exercise} style={styles.rankRow}>
-                  <Text style={styles.rank}>{i + 1}</Text>
-                  <Text style={[typography.small, styles.rankName]} numberOfLines={1}>
-                    {t.exercise}
-                  </Text>
-                  <Text style={typography.small}>{formatNumber(t.volume)} kg</Text>
+                  <Text style={typography.bodyStrong}>{m.sets} sets</Text>
+                  <Text style={[typography.small, styles.musclePct]}>{m.pct}%</Text>
                 </View>
               ))}
             </View>
@@ -259,37 +273,58 @@ export default function InsightsScreen() {
           </Card>
         ) : null}
 
-        {/* Workout streak */}
+        {/* Top exercises */}
+        {metrics.top.length > 0 ? (
+          <Card style={styles.section}>
+            <Text style={typography.bodyStrong}>Top exercises</Text>
+            <View style={styles.rankList}>
+              {metrics.top.map((t, i) => (
+                <View key={t.exercise} style={styles.rankRow}>
+                  <Text style={styles.rank}>{i + 1}</Text>
+                  <Text style={[typography.small, styles.rankName]} numberOfLines={1}>
+                    {t.exercise}
+                  </Text>
+                  <Text style={typography.small}>{t.sets} sets</Text>
+                </View>
+              ))}
+            </View>
+          </Card>
+        ) : null}
+
+        {/* Streak */}
         <Card style={styles.section}>
           <View style={styles.cardHeaderLeft}>
             <IconBadge name="flame" bg={colors.orangeSoft} color={colors.orange} size={30} rounded={false} />
-            <Text style={typography.bodyStrong}>Workout Streak</Text>
+            <Text style={typography.bodyStrong}>Streak</Text>
           </View>
           <View style={styles.streakBody}>
             <Text style={styles.streakValue}>{metrics.streak}</Text>
-            <Text style={typography.small}>{metrics.streak === 1 ? "day" : "days"}</Text>
+            <Text style={typography.small}>
+              {metrics.streak === 1 ? "training day in a row" : "training days in a row"}
+            </Text>
           </View>
           <View style={styles.dots}>
-            {weekDayLabels().map((d, i) => (
-              <View key={`${d}-${i}`} style={styles.dotCol}>
-                <View style={[styles.dot, metrics.weekDots[i] && styles.dotActive]} />
-                <Text style={styles.dotLabel}>{d}</Text>
+            {metrics.weekInfo.map((d, i) => (
+              <View key={d.iso} style={styles.dotCol}>
+                <View
+                  style={[styles.dot, d.trained ? styles.dotActive : d.rest ? styles.dotRest : null]}
+                />
+                <Text style={styles.dotLabel}>{weekDayLabels()[i]}</Text>
               </View>
             ))}
           </View>
+          <Text style={[typography.small, styles.note]}>
+            {restDays.length > 0
+              ? `Rest days: ${restDays.map((d) => WEEKDAY_NAMES[d]).join(", ")}. They don't break it.`
+              : "Rest days never break it — set yours in Settings."}
+          </Text>
         </Card>
 
-        {/* Closing progress note */}
-        <MotivationCard
-          icon="flame"
-          iconBg={colors.orangeSoft}
-          iconColor={colors.orange}
-          title={monthUp ? "Keep going!" : "Keep logging"}
-          subtitle={
-            monthUp
-              ? `You're ${metrics.monthStrengthPct}% stronger than last month.`
-              : "Log more lifts to see your monthly progress."
-          }
+        <AskCoachRow
+          agent="general"
+          label="Ask the coach about my progress"
+          hint="What's working — and what to change next"
+          question="About my progress — "
         />
       </ScrollView>
     </View>
@@ -412,6 +447,16 @@ const useStyles = makeUseStyles((t) =>
 
     weightBody: { gap: spacing.sm, alignItems: "center" },
 
+    weekList: { gap: spacing.xs },
+    weekRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+    weekLabel: { flex: 1, color: t.colors.text },
+    weekUp: { color: t.colors.success },
+    weekDown: { color: t.colors.blue },
+    weekFlat: { color: t.colors.textMuted },
+
+    muscleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    musclePct: { color: t.colors.textDim, width: 40, textAlign: "right" },
+
     donutWrap: { alignItems: "center", paddingVertical: spacing.sm },
     legend: { gap: spacing.sm },
     legendRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
@@ -447,6 +492,7 @@ const useStyles = makeUseStyles((t) =>
       borderColor: t.colors.border,
     },
     dotActive: { backgroundColor: t.colors.primary, borderColor: t.colors.primary },
+    dotRest: { borderColor: t.colors.textMuted, borderStyle: "dashed" },
     dotLabel: { fontSize: 10, fontWeight: "600", color: t.colors.textMuted },
   }),
 );

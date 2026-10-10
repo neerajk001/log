@@ -27,6 +27,7 @@ import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { muscleGroupsForDay } from "../../src/utils/derive";
 import { successTick } from "../../src/hooks/useHaptics";
+import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
 interface QuickSet {
   key: string;
@@ -221,6 +222,7 @@ export default function LiftScreen() {
                     name={ex.name}
                     sets={ex.sets}
                     reps={ex.reps}
+                    plannedWeight={ex.weight_kg ?? null}
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
                     lastLog={lastByExercise.get(ex.name) ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
@@ -236,6 +238,13 @@ export default function LiftScreen() {
                 );
               })}
             </View>
+
+            <AskCoachRow
+              agent="training"
+              label="Ask the coach about my training"
+              hint="Swap an exercise, check your progress"
+              question="About my training — "
+            />
 
             <View style={styles.actions}>
               <Button

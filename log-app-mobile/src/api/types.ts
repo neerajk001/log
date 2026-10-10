@@ -69,12 +69,36 @@ export interface UserProfile {
   protein_target_g: number | null;
   calorie_target: number | null;
   daily_defaults?: DailyDefaults | null;
+  /** Weekdays the athlete doesn't train (0 = Sun … 6 = Sat). */
+  rest_days?: number[] | null;
+  /** Onboarding toggles; undefined means "assume on". */
+  meal_tracking_enabled?: boolean;
+  ai_coach_enabled?: boolean;
+  /** Null until first-run onboarding is finished. */
+  onboarded_at?: string | null;
+}
+
+/** First-run onboarding payload — every field optional. */
+export interface OnboardingInput {
+  goal?: string | null;
+  sex?: "male" | "female" | "other" | null;
+  age?: number | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  target_weight_kg?: number | null;
+  experience?: "beginner" | "intermediate" | "advanced" | null;
+  days_per_week?: number | null;
+  rest_days?: number[] | null;
+  meal_tracking_enabled?: boolean;
+  ai_coach_enabled?: boolean;
 }
 
 export interface PlanExercise {
   name: string;
   sets: number;
   reps: string;
+  /** Optional target weight the athlete plans to lift. */
+  weight_kg?: number | null;
 }
 
 export interface PlanDay {
@@ -98,6 +122,7 @@ export interface ParsedPlanPreview {
 }
 
 export interface PlanTodayExercise extends PlanExercise {
+  weight_kg: number | null;
   logged: boolean;
   last_log: { weight_kg: number; reps: number } | null;
 }
@@ -156,6 +181,8 @@ export interface CoachProfile {
   weight_kg: number | null;
   target_weight_kg: number | null;
   height_cm: number | null;
+  sex: "male" | "female" | "other" | null;
+  age: number | null;
   experience: string | null;
   days_per_week: number | null;
   equipment: string | null;

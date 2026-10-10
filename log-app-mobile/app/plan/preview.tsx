@@ -68,6 +68,7 @@ export default function PlanPreviewScreen() {
           name: e.name.trim().slice(0, 120),
           sets: parsePositiveInt(e.sets, 99) ?? 0,
           reps: e.reps.trim().slice(0, 20),
+          weight_kg: parsePositiveInt(e.weight, 9999) ?? undefined,
         })),
       })),
     };

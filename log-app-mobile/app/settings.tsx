@@ -8,17 +8,29 @@ import type { ThemePreference } from "../src/theme/colors";
 import { spacing } from "../src/theme/spacing";
 import { ScreenHeader } from "../src/components/ScreenHeader";
 import { SettingField } from "../src/components/SettingField";
-import { SegmentedControl } from "../src/components/ui/controls";
+import { SegmentedControl, Chip, ChipRow } from "../src/components/ui/controls";
 import { Banner, Button, Card, Divider, IconBadge, ListRow, LoadingState, ErrorState } from "../src/components/ui/primitives";
 import { useMe } from "../src/hooks/useMe";
 import { lightTick, useHapticsPref } from "../src/hooks/useHaptics";
-import { invalidateGetCache } from "../src/api/client";
+import { setDevPreview } from "../src/state/onboarding";
+import { clearAllCache } from "../src/api/cache";
 
 const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "trueBlack", label: "True Black" },
+];
+
+/** Sunday-first, matching the streak's weekday numbering (0 = Sun). */
+const WEEKDAYS: { value: number; label: string }[] = [
+  { value: 0, label: "Sun" },
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
 ];
 
 /** Settings — account, appearance, targets, logging prefs, data, about. */
@@ -33,6 +45,15 @@ export default function SettingsScreen() {
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const version = Constants.expoConfig?.version ?? "1.0.0";
+
+  const restDays = profile?.rest_days ?? [];
+  const toggleRestDay = (value: number) => {
+    const next = restDays.includes(value)
+      ? restDays.filter((d) => d !== value)
+      : [...restDays, value].sort((a, b) => a - b);
+    update({ rest_days: next.length > 0 ? next : null }).catch(() => {});
+    lightTick();
+  };
 
   return (
     <View style={styles.container}>
@@ -116,7 +137,7 @@ export default function SettingsScreen() {
             iconColor={colors.primary}
             title="Chat with coach"
             subtitle="Ask about your training, food or progress."
-            onPress={() => router.navigate("/coach" as never)}
+            onPress={() => router.navigate({ pathname: "/coach/new", params: { agent: "general" } } as never)}
           />
           <Divider />
           <ListRow
@@ -138,6 +159,56 @@ export default function SettingsScreen() {
             title="Chat history"
             subtitle="Reopen and manage past conversations."
             onPress={() => router.navigate("/coach/sessions" as never)}
+          />
+        </Card>
+
+        <Text style={styles.sectionLabel}>Training</Text>
+        <Card style={styles.restCard}>
+          <Text style={typography.bodyStrong}>Rest days</Text>
+          <Text style={typography.small}>
+            {"Days you don't train. They won't break your streak."}
+          </Text>
+          <ChipRow style={styles.restRow}>
+            {WEEKDAYS.map((d) => (
+              <Chip
+                key={d.value}
+                label={d.label}
+                active={restDays.includes(d.value)}
+                onPress={() => toggleRestDay(d.value)}
+              />
+            ))}
+          </ChipRow>
+        </Card>
+
+        <Text style={styles.sectionLabel}>Features</Text>
+        <Card style={styles.toggleRow}>
+          <View style={styles.toggleText}>
+            <Text style={typography.bodyStrong}>Meal tracking</Text>
+            <Text style={typography.small}>Show meals and let the coach log your food.</Text>
+          </View>
+          <Switch
+            value={profile?.meal_tracking_enabled !== false}
+            onValueChange={(v) => {
+              update({ meal_tracking_enabled: v }).catch(() => {});
+              lightTick();
+            }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.white}
+          />
+        </Card>
+        <Card style={styles.toggleRow}>
+          <View style={styles.toggleText}>
+            <Text style={typography.bodyStrong}>AI coach</Text>
+            <Text style={typography.small}>Show the coach entry points across the app.</Text>
+          </View>
+          <Switch
+            value={profile?.ai_coach_enabled !== false}
+            onValueChange={(v) => {
+              update({ ai_coach_enabled: v }).catch(() => {});
+              lightTick();
+            }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.white}
           />
         </Card>
 
@@ -167,7 +238,7 @@ export default function SettingsScreen() {
           icon="refresh"
           variant="outline"
           onPress={() => {
-            invalidateGetCache();
+            clearAllCache();
             setCacheCleared(true);
             lightTick();
           }}
@@ -193,6 +264,46 @@ export default function SettingsScreen() {
             Recovery. No AI guessing.
           </Text>
         </Card>
+
+        {__DEV__ ? (
+          <>
+            <Text style={styles.sectionLabel}>Developer</Text>
+            <Card padded={false}>
+              <ListRow
+                icon="sparkles-outline"
+                title="Run onboarding"
+                subtitle="Open the welcome screen"
+                onPress={() => {
+                  setDevPreview(true);
+                  update({ onboarded: false }).catch(() => {});
+                  router.navigate("/onboarding/welcome" as never);
+                }}
+              />
+              <Divider />
+              <ListRow
+                icon="options-outline"
+                title="Onboarding steps"
+                subtitle="Jump to the About you step"
+                onPress={() => {
+                  setDevPreview(true);
+                  update({ onboarded: false }).catch(() => {});
+                  router.navigate("/onboarding/basics" as never);
+                }}
+              />
+              <Divider />
+              <ListRow
+                icon="checkmark-done-outline"
+                title="Mark onboarding done"
+                subtitle="Stop previewing and go to Today"
+                onPress={() => {
+                  setDevPreview(false);
+                  update({ onboarded: true }).catch(() => {});
+                  router.replace("/(tabs)/today" as never);
+                }}
+              />
+            </Card>
+          </>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -208,6 +319,8 @@ const useStyles = makeUseStyles((t) =>
     accountText: { flex: 1, gap: 2 },
     toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
     toggleText: { flex: 1, gap: 2 },
+    restCard: { gap: spacing.sm },
+    restRow: { marginTop: spacing.xs },
     versionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     aboutCard: { gap: spacing.sm },
     aboutLine: { ...t.typography.small, color: t.colors.text, lineHeight: 19 },

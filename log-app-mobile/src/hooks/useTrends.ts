@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useTrendsApi } from "../api/trends";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { TrendsResponse } from "../api/types";
 
 export function useTrends() {
@@ -21,9 +22,7 @@ export function useTrends() {
     }
   }, [api]);
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
+  useDataSyncOnFocus(["trends"], fetch);
 
   return { data, loading, error, refetch: fetch };
 }

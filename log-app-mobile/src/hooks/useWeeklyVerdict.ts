@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useVerdictApi } from "../api/verdict";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { VerdictResponse } from "../api/types";
 
 export function useWeeklyVerdict() {
@@ -21,9 +22,7 @@ export function useWeeklyVerdict() {
     }
   }, [api]);
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
+  useDataSyncOnFocus(["verdict"], fetch);
 
   return { data, loading, error, refetch: fetch };
 }

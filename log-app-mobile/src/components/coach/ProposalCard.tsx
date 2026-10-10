@@ -8,7 +8,6 @@ import { Button } from "../ui/primitives";
 import { usePlansApi } from "../../api/plans";
 import { useLiftLogsApi } from "../../api/liftLogs";
 import { useMealsApi } from "../../api/meals";
-import { invalidateGetCache } from "../../api/client";
 import { setPendingPlan } from "../../state/parsedPlan";
 import { formatMediumDate } from "../../utils/date";
 import type { IoniconName } from "../ui/primitives";
@@ -87,6 +86,7 @@ export function ProposalCard({
                 name: e.name,
                 sets: String(e.sets),
                 reps: e.reps,
+                weight: "",
               })),
             }))
           : [],
@@ -101,7 +101,6 @@ export function ProposalCard({
     setError(null);
     try {
       await plansApi.activatePlan(proposal.plan_id);
-      invalidateGetCache();
       resolve("applied", `"${proposal.plan_name}" is now your active plan.`);
     } catch (err) {
       setError(messageOf(err));
@@ -119,7 +118,6 @@ export function ProposalCard({
         weight_kg: proposal.to.weight_kg,
         reps: proposal.to.reps,
       });
-      invalidateGetCache();
       resolve("applied", "Set updated.");
     } catch (err) {
       setError(messageOf(err));
@@ -134,15 +132,12 @@ export function ProposalCard({
     try {
       if (proposal.kind === "plan_delete") {
         await plansApi.deletePlan(proposal.plan_id);
-        invalidateGetCache();
         resolve("applied", `"${proposal.plan_name}" deleted.`);
       } else if (proposal.kind === "set_delete") {
         await liftApi.deleteLiftLog(proposal.set_id);
-        invalidateGetCache();
         resolve("applied", "Set deleted.");
       } else if (proposal.kind === "meal_delete") {
         await mealsApi.deleteMeal(proposal.meal_id);
-        invalidateGetCache();
         resolve("applied", `Removed "${proposal.title}".`);
       }
     } catch (err) {
@@ -165,7 +160,6 @@ export function ProposalCard({
         protein_g: proposal.protein_g,
         source: "ai",
       });
-      invalidateGetCache();
       resolve("applied", `Logged "${proposal.title}" — ${proposal.calories} kcal, ${proposal.protein_g} g protein.`);
     } catch (err) {
       setError(messageOf(err));
@@ -186,7 +180,6 @@ export function ProposalCard({
         protein_g: proposal.protein_g,
         source: "ai",
       });
-      invalidateGetCache();
       resolve("applied", `Updated "${proposal.title}".`);
     } catch (err) {
       setError(messageOf(err));

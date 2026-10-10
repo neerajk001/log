@@ -10,6 +10,7 @@ export interface EditableExercise {
   name: string;
   sets: string;
   reps: string;
+  weight: string;
 }
 
 export interface EditableDay {
@@ -18,7 +19,7 @@ export interface EditableDay {
 }
 
 export function emptyExercise(): EditableExercise {
-  return { name: "", sets: "", reps: "" };
+  return { name: "", sets: "", reps: "", weight: "" };
 }
 
 export function emptyDay(): EditableDay {
@@ -112,6 +113,14 @@ export function PlanDaysEditor({
                   placeholder="Reps"
                   placeholderTextColor={colors.textMuted}
                 />
+                <TextInput
+                  style={[styles.input, styles.exNum]}
+                  value={ex.weight}
+                  onChangeText={(t) => updateExercise(di, ei, { weight: t })}
+                  placeholder="kg"
+                  placeholderTextColor={colors.textMuted}
+                  keyboardType="numeric"
+                />
                 <Pressable
                   onPress={() =>
                     Alert.alert("Remove exercise?", "This removes the exercise from the plan.", [
@@ -191,8 +200,8 @@ const useStyles = makeUseStyles((t) =>
       fontSize: 14,
       color: t.colors.text,
     },
-    exName: { flex: 1 },
-    exNum: { width: 58, textAlign: "center" },
+    exName: { flex: 1, minWidth: 0 },
+    exNum: { width: 52, textAlign: "center", paddingHorizontal: spacing.xs },
     removeDay: { alignSelf: "flex-start", marginTop: spacing.xs },
     removeDayText: { ...t.typography.small, color: t.colors.danger },
     addDay: {

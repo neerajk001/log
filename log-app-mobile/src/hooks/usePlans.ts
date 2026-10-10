@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { usePlansApi } from "../api/plans";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { PlanDay, WorkoutPlan } from "../api/types";
 
 export function usePlans() {
@@ -20,9 +21,7 @@ export function usePlans() {
     }
   }, [api]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["plans"], load);
 
   const activePlan = useMemo(
     () => plans.find((p) => p.is_active) ?? plans[0] ?? null,

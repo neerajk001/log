@@ -44,7 +44,17 @@ const STARTERS = [
  * Coach chat, used for both a fresh chat (`sessionId` omitted — created on the
  * first message) and an existing one.
  */
-export function CoachChat({ sessionId, title }: { sessionId?: string; title?: string }) {
+export function CoachChat({
+  sessionId,
+  title,
+  initialAgent,
+  initialMessage,
+}: {
+  sessionId?: string;
+  title?: string;
+  initialAgent?: AgentId;
+  initialMessage?: string;
+}) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
   const {
@@ -60,10 +70,10 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
     injectAssistant,
     agent,
     setAgent,
-  } = useCoachChat(sessionId);
+  } = useCoachChat(sessionId, initialAgent);
   const mealsApi = useMealsApi();
   const insets = useSafeAreaInsets();
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialMessage ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -243,7 +253,7 @@ export function CoachChat({ sessionId, title }: { sessionId?: string; title?: st
           {
             label: "New chat",
             icon: "add",
-            onPress: () => router.replace("/coach" as never),
+            onPress: () => router.replace("/coach/new" as never),
           },
           {
             label: "Chat history",

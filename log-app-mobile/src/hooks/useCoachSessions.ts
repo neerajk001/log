@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { useCoachApi } from "../api/coach";
+import { useDataSync } from "./useDataSync";
 import type { CoachSession } from "../api/types";
 
 /** Chat history: the user's coach sessions, newest first. */
@@ -22,12 +23,15 @@ export function useCoachSessions() {
     }
   }, [api]);
 
-  // Refresh whenever the list regains focus (e.g. after a new chat).
+  // Refresh whenever the list regains focus (e.g. after a new chat), or when a
+  // streamed turn creates/renames one.
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
+
+  useDataSync(["coach"], load);
 
   const remove = useCallback(
     async (id: string) => {

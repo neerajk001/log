@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDailyLogsApi } from "../api/dailyLogs";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { DailyField, DailyLog } from "../api/types";
 import { addDays, todayLocal } from "../utils/date";
 
@@ -52,9 +53,7 @@ export function useTodayLog(activeDate: string) {
     return () => controller.abort();
   }, [api, activeDate]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["daily"], load);
 
   const save = useCallback(
     async (field: DailyField, value: number | null) => {

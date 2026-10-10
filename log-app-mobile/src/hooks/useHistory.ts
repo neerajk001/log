@@ -4,6 +4,7 @@ import { useDailyLogsApi } from "../api/dailyLogs";
 import { useLiftLogsApi } from "../api/liftLogs";
 import { useActivityApi } from "../api/activity";
 import { useCurrentDate } from "./useCurrentDate";
+import { useDataSync } from "./useDataSync";
 import type { ActivityLog, DailyLog, LiftLog } from "../api/types";
 import { addDays } from "../utils/date";
 import { groupByDate, strengthChangePct, totalVolume, uniqueWorkoutDates } from "../utils/derive";
@@ -61,6 +62,9 @@ export function useHistory(rangeDays: number) {
       load();
     }, [load]),
   );
+
+  // Meals move the day's calories/protein too, hence "daily" alongside the rest.
+  useDataSync(["daily", "lift", "activity"], load);
 
   const deleteDailyLog = useCallback(
     async (date: string) => {

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useMealsApi } from "../api/meals";
-import { invalidateGetCache } from "../api/client";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { MealLog } from "../api/types";
 
 /** The meals logged on a given day, with delete. */
@@ -23,9 +23,7 @@ export function useMeals(date: string) {
     }
   }, [api, date]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["meals"], load);
 
   const remove = useCallback(
     async (id: string) => {
@@ -33,7 +31,6 @@ export function useMeals(date: string) {
       setMeals((cur) => cur.filter((m) => m.id !== id));
       try {
         await api.deleteMeal(id);
-        invalidateGetCache();
       } catch (err) {
         setMeals(previous);
         throw err;

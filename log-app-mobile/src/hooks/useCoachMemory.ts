@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useCoachApi } from "../api/coach";
+import { useDataSync } from "./useDataSync";
 import type { CoachMemory } from "../api/types";
 
 /** What the coach remembers long-term. */
@@ -24,6 +25,8 @@ export function useCoachMemory() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useDataSync(["coach"], load);
 
   const clear = useCallback(async () => {
     setMemory(null);

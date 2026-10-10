@@ -8,6 +8,7 @@ import { ExerciseRow } from "../../../src/components/ExerciseRow";
 import { Button, Card, EmptyState, ErrorState, LoadingState } from "../../../src/components/ui/primitives";
 import { usePlans } from "../../../src/hooks/usePlans";
 import { muscleGroupsForDay } from "../../../src/utils/derive";
+import { AskCoachRow } from "../../../src/components/coach/AskCoachRow";
 
 /** Plan day details (design 03.02). */
 export default function PlanDayScreen() {
@@ -80,6 +81,13 @@ export default function PlanDayScreen() {
           </Text>
           <Text style={typography.caption}>~{"—"} min estimated</Text>
         </Card>
+
+        <AskCoachRow
+          agent="training"
+          label="Ask the coach about this day"
+          hint={`Change exercises or sets for ${day.day_name}`}
+          question={`About my ${day.day_name} day — `}
+        />
 
         <View style={styles.list}>
           {day.exercises.map((ex, i) => (

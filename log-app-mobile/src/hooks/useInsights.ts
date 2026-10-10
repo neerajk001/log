@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useLiftLogsApi } from "../api/liftLogs";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { LiftLog } from "../api/types";
 import { addDays, todayLocal } from "../utils/date";
 import {
-  currentWeekDots,
+  currentWeekInfo,
+  dailySetSeries,
   dailyVolumeSeries,
   muscleBreakdown,
   personalRecords,
@@ -11,6 +13,7 @@ import {
   topExercises,
   totalVolume,
   uniqueWorkoutDates,
+  weeklySetSeries,
   weeklyVolumeSeries,
   workoutStreak,
   workoutsThisWeek,
@@ -21,7 +24,7 @@ import {
  * range endpoint (no backend changes). Fetches a wider window than the tab
  * range so strength deltas can be compared against the preceding period.
  */
-export function useInsights(rangeDays: number) {
+export function useInsights(rangeDays: number, restDays: number[] = []) {
   const api = useLiftLogsApi();
   const [logs, setLogs] = useState<LiftLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,9 +46,7 @@ export function useInsights(rangeDays: number) {
     }
   }, [api, fetchDays]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["lift"], load);
 
   const metrics = useMemo(() => {
     const today = todayLocal();
@@ -63,15 +64,20 @@ export function useInsights(rangeDays: number) {
       top: topExercises(rangeLogs, 5),
       records: personalRecords(logs),
       muscles: muscleBreakdown(rangeLogs),
-      streak: workoutStreak(logs, today),
-      weekDots: currentWeekDots(logs, today),
+      sets: rangeLogs.length,
+      streak: workoutStreak(logs, today, restDays),
+      weekInfo: currentWeekInfo(logs, restDays, today),
       // Long ranges aggregate weekly so the chart stays readable.
+      setsSeries:
+        rangeDays >= 90
+          ? weeklySetSeries(rangeLogs, 13, today)
+          : dailySetSeries(rangeLogs, rangeDays, today),
       volumeSeries:
         rangeDays >= 90
           ? weeklyVolumeSeries(rangeLogs, 13, today)
           : dailyVolumeSeries(rangeLogs, rangeDays, today),
     };
-  }, [logs, rangeDays]);
+  }, [logs, rangeDays, restDays]);
 
   return { logs, loading, error, metrics, refetch: load };
 }

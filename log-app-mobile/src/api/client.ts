@@ -1,6 +1,15 @@
 import { useAuth } from "@clerk/clerk-expo";
 import Constants from "expo-constants";
 import { useEffect, useMemo, useRef } from "react";
+import {
+  clearAllCache,
+  clearInflight,
+  inflightFor,
+  invalidateForWrite,
+  readCache,
+  trackInflight,
+  writeCache,
+} from "./cache";
 
 /** Port the local backend dev server listens on (log-app-backend/.env PORT). */
 const DEV_BACKEND_PORT = 4000;
@@ -36,36 +45,11 @@ export const REQUEST_TIMEOUT_MS = 15000;
 const PDF_UPLOAD_TIMEOUT_MS = 120000;
 
 /**
- * Tiny stale-avoidance cache for GETs. Tab switches and remounts within
- * `GET_CACHE_TTL_MS` reuse the last response instead of refetching, so
- * returning to a tab is instant with no loading flash. Any successful
- * mutation clears the cache, and optimistic updates already keep the
- * visible screen correct — the cache only affects future loads.
+ * GETs are served from a small resource-aware cache (see ./cache): remounts and
+ * tab switches within the TTL are instant with no loading flash. Mutations drop
+ * only the resources they made stale and notify the screens that read them, so
+ * freshness comes from the invalidation map rather than a short TTL.
  */
-const GET_CACHE_TTL_MS = 30_000;
-const GET_CACHE_MAX_ENTRIES = 200;
-const getCache = new Map<string, { expires: number; data: unknown }>();
-
-function getCached<T>(path: string): T | undefined {
-  const hit = getCache.get(path);
-  if (!hit) return undefined;
-  if (Date.now() > hit.expires) {
-    getCache.delete(path);
-    return undefined;
-  }
-  return hit.data as T;
-}
-
-function setCached(path: string, data: unknown, ttlMs: number): void {
-  if (getCache.size >= GET_CACHE_MAX_ENTRIES) getCache.clear();
-  getCache.set(path, { expires: Date.now() + ttlMs, data });
-}
-
-/** Cleared automatically after every successful mutation. */
-export function invalidateGetCache(): void {
-  getCache.clear();
-}
-
 if (!__DEV__ && API_BASE_URL.startsWith("http://")) {
   throw new Error(
     `Refusing to use insecure API base URL in production: ${API_BASE_URL}. Set EXPO_PUBLIC_API_BASE_URL to an https:// URL.`,
@@ -159,6 +143,8 @@ export function useApiClient() {
         return await run();
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
+          // The signed-out user's data must not be handed to the next one.
+          clearAllCache();
           try {
             await signOutRef.current();
           } catch {}
@@ -173,16 +159,19 @@ export function useApiClient() {
     () => ({
       get: <T = unknown>(path: string, opts?: { ttlMs?: number; force?: boolean }) => {
         if (!opts?.force) {
-          const hit = getCached<T>(path);
+          const hit = readCache<T>(path);
           if (hit !== undefined) return Promise.resolve(hit);
+          // Already in flight (two hooks mounting together) — join the same request.
+          const pending = inflightFor(path);
+          if (pending) return pending as Promise<T>;
         }
-        const ttlMs = opts?.ttlMs ?? GET_CACHE_TTL_MS;
-        return wrap(() =>
+        const request = wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current()).then((data) => {
-            setCached(path, data, ttlMs);
+            writeCache(path, data, opts?.ttlMs);
             return data;
           }),
-        );
+        ).finally(() => clearInflight(path));
+        return trackInflight(path, request);
       },
       put: <T = unknown>(path: string, body: unknown) =>
         wrap(() =>
@@ -190,7 +179,7 @@ export function useApiClient() {
             method: "PUT",
             body: JSON.stringify(body),
           }).then((data) => {
-            invalidateGetCache();
+            invalidateForWrite(path);
             return data;
           }),
         ),
@@ -200,7 +189,7 @@ export function useApiClient() {
             method: "POST",
             body: JSON.stringify(body),
           }).then((data) => {
-            invalidateGetCache();
+            invalidateForWrite(path);
             return data;
           }),
         ),
@@ -215,14 +204,14 @@ export function useApiClient() {
             body: formData,
             timeoutMs,
           }).then((data) => {
-            invalidateGetCache();
+            invalidateForWrite(path);
             return data;
           }),
         ),
       del: <T = unknown>(path: string) =>
         wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current(), { method: "DELETE" }).then((data) => {
-            invalidateGetCache();
+            invalidateForWrite(path);
             return data;
           }),
         ),

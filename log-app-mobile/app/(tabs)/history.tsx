@@ -141,10 +141,18 @@ export default function HistoryScreen() {
 
             {/* Overall stats */}
             <View style={styles.statRow}>
-              <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={String(stats.workouts)} label="Workouts" />
-              <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={String(stats.daysLogged)} label="Days logged" />
-              <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
-              <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={strengthLabel} label="Strength" />
+              <View style={styles.statCell}>
+                <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={String(stats.workouts)} label="Workouts" />
+              </View>
+              <View style={styles.statCell}>
+                <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={String(stats.daysLogged)} label="Days logged" />
+              </View>
+              <View style={styles.statCell}>
+                <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
+              </View>
+              <View style={styles.statCell}>
+                <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={strengthLabel} label="Strength" />
+              </View>
             </View>
 
             <CalendarMonth
@@ -179,7 +187,6 @@ export default function HistoryScreen() {
         renderItem={({ item: day }) => {
           const isOpen = !!openDates[day.date];
           const muscles = Array.from(new Set(day.exercises.map(muscleGroupFor)));
-          const tint = muscles[0] ? muscleTagStyle(muscles[0], tagTheme).bg : colors.surface;
           const title = workoutTitle(day, planDayName);
           const dailySummary = day.daily ? formatDaily(day.daily) : "";
 
@@ -195,7 +202,7 @@ export default function HistoryScreen() {
               </View>
 
               <Pressable
-                style={[styles.workoutCard, { backgroundColor: tint }]}
+                style={styles.workoutCard}
                 onPress={() => setOpenDates((prev) => ({ ...prev, [day.date]: !prev[day.date] }))}
               >
                 <IconBadge name="barbell-outline" bg={colors.surface} color={colors.textDim} size={44} rounded={false} />
@@ -212,17 +219,16 @@ export default function HistoryScreen() {
                     </View>
                   ) : null}
 
-                  <View style={styles.metaRow}>
-                    {day.lifts.length > 0 ? (
-                      <>
-                        <Meta icon="barbell-outline" value={`${day.exercises.length}`} />
-                        <Meta icon="layers-outline" value={`${formatNumber(day.volume)} kg`} />
-                      </>
-                    ) : null}
-                    {day.activities.length > 0 ? (
-                      <Meta icon="walk-outline" value={`${day.activities.length}`} />
-                    ) : null}
-                  </View>
+                  {day.activities.length > 0 ? (
+                    <View style={styles.metaRow}>
+                      <Meta
+                        icon="walk-outline"
+                        value={`${day.activities.length} ${
+                          day.activities.length === 1 ? "activity" : "activities"
+                        }`}
+                      />
+                    </View>
+                  ) : null}
 
                   {day.daily ? (
                     <Text style={[typography.caption, styles.dailyLine]} numberOfLines={1}>
@@ -249,7 +255,8 @@ export default function HistoryScreen() {
                               onPress={() =>
                                 confirm("Delete set?", "This removes the logged set.", () => deleteLiftLog(l.id).catch(() => {}))
                               }
-                              hitSlop={8}
+                              hitSlop={14}
+                              accessibilityLabel="Delete set"
                             >
                               <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
                             </Pressable>
@@ -270,7 +277,8 @@ export default function HistoryScreen() {
                           onPress={() =>
                             confirm("Delete daily log?", "This removes all values for this day.", () => deleteDailyLog(day.date).catch(() => {}))
                           }
-                          hitSlop={8}
+                          hitSlop={14}
+                          accessibilityLabel="Delete daily log"
                         >
                           <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
                         </Pressable>
@@ -295,7 +303,8 @@ export default function HistoryScreen() {
                             onPress={() =>
                               confirm("Delete activity?", "This removes the logged activity.", () => deleteActivity(a.id).catch(() => {}))
                             }
-                            hitSlop={8}
+                            hitSlop={14}
+                            accessibilityLabel="Delete activity"
                           >
                             <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
                           </Pressable>
@@ -355,7 +364,8 @@ const useStyles = makeUseStyles((t) =>
     },
     filterText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
 
-    statRow: { flexDirection: "row", gap: spacing.sm },
+    statRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: spacing.sm },
+    statCell: { width: "48%" },
 
     group: { gap: spacing.sm },
     groupHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
@@ -363,6 +373,7 @@ const useStyles = makeUseStyles((t) =>
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.md,
+      backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.colors.border,

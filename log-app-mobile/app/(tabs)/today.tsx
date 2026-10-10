@@ -72,7 +72,7 @@ export default function TodayScreen() {
 
   const { data, placeholder, loading, error, fieldErrors, retry, save, retrySave, refetch } =
     useTodayLog(activeDate);
-  const { defaults, update: updateMe } = useMe();
+  const { profile, defaults, update: updateMe } = useMe();
   const { entries: lifts, deleteEntry: deleteLift, loading: liftsLoading, error: liftsError, refetch: refetchLifts } = useLiftLogs(activeDate);
   const {
     entries: activities,
@@ -204,15 +204,17 @@ export default function TodayScreen() {
                   {activeDate === today ? "Today" : formatMediumDate(activeDate)}
                 </Text>
               </Pressable>
-              <Pressable
-                onPress={() => router.navigate("/coach" as never)}
-                style={styles.coachChip}
-                accessibilityRole="button"
-                accessibilityLabel="Open AI coach"
-              >
-                <Ionicons name="sparkles" size={15} color={colors.primary} />
-                <Text style={styles.coachChipText}>Coach</Text>
-              </Pressable>
+              {profile?.ai_coach_enabled !== false ? (
+                <Pressable
+                  onPress={() => router.navigate("/coach" as never)}
+                  style={styles.coachChip}
+                  accessibilityRole="button"
+                  accessibilityLabel="Open AI coach"
+                >
+                  <Ionicons name="sparkles" size={15} color={colors.primary} />
+                  <Text style={styles.coachChipText}>Coach</Text>
+                </Pressable>
+              ) : null}
               <IconButton name="ellipsis-horizontal" accessibilityLabel="More options" onPress={() => setMenuOpen(true)} />
             </>
           }
@@ -231,7 +233,7 @@ export default function TodayScreen() {
 
         <View style={styles.greeting}>
           <Text style={typography.h2}>
-            {greeting()}, {user?.firstName ?? "there"} 👋
+            {greeting()}, {user?.firstName ?? "there"}
           </Text>
           <Text style={typography.small}>Consistency today, strength tomorrow.</Text>
         </View>
@@ -317,7 +319,10 @@ export default function TodayScreen() {
             ) : null}
 
             <View style={styles.section}>
-              <SectionHeader title="Today's Lifts" actionLabel="Add" onAction={goLift} />
+              <SectionHeader
+                title="Today's Lifts"
+                {...(groupedLifts.length > 0 ? { actionLabel: "Add", onAction: goLift } : {})}
+              />
               {liftsError ? (
                 <Banner
                   tone="danger"
@@ -331,6 +336,7 @@ export default function TodayScreen() {
                 <LoadingState label="Loading lifts…" />
               ) : groupedLifts.length === 0 ? (
                 <EmptyState
+                  compact
                   icon="barbell-outline"
                   title="No lifts logged yet."
                   subtitle="Log your sets directly."
@@ -364,7 +370,10 @@ export default function TodayScreen() {
             </View>
 
             <View style={styles.section}>
-              <SectionHeader title="Activity" actionLabel="Add" onAction={() => setActivityOpen(true)} />
+              <SectionHeader
+                title="Activity"
+                {...(activities.length > 0 ? { actionLabel: "Add", onAction: () => setActivityOpen(true) } : {})}
+              />
               {activitiesError ? (
                 <Banner
                   tone="danger"
@@ -378,6 +387,7 @@ export default function TodayScreen() {
                 <LoadingState label="Loading activity…" />
               ) : activities.length === 0 ? (
                 <EmptyState
+                  compact
                   icon="walk-outline"
                   title="No activity logged yet."
                   subtitle="Log your walk, run, cycle or more."
@@ -399,7 +409,7 @@ export default function TodayScreen() {
                           {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
                         </Text>
                       </View>
-                      <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={8} accessibilityLabel="Delete activity">
+                      <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={14} accessibilityLabel="Delete activity">
                         <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
                       </Pressable>
                     </Card>
@@ -408,8 +418,18 @@ export default function TodayScreen() {
               )}
             </View>
 
+            {profile?.meal_tracking_enabled !== false ? (
             <View style={styles.section}>
-              <SectionHeader title="Meals" actionLabel="Log" onAction={() => router.navigate("/coach" as never)} />
+              <SectionHeader
+                title="Meals"
+                {...(meals.length > 0
+                  ? {
+                      actionLabel: "Log",
+                      onAction: () =>
+                        router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never),
+                    }
+                  : {})}
+              />
               {mealsError ? (
                 <Banner
                   tone="danger"
@@ -423,11 +443,12 @@ export default function TodayScreen() {
                 <LoadingState label="Loading meals…" />
               ) : meals.length === 0 ? (
                 <EmptyState
+                  compact
                   icon="restaurant-outline"
                   title="No meals logged yet."
                   subtitle="Tell the coach what you ate — it estimates the calories and protein for you."
                 >
-                  <Button label="Log with coach" icon="sparkles-outline" onPress={() => router.navigate("/coach" as never)} />
+                  <Button label="Log with coach" icon="sparkles-outline" onPress={() => router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never)} />
                 </EmptyState>
               ) : (
                 <View style={styles.list}>
@@ -456,6 +477,7 @@ export default function TodayScreen() {
                 </View>
               )}
             </View>
+            ) : null}
           </>
         ) : null}
 

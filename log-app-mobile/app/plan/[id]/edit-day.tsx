@@ -11,12 +11,21 @@ import {
 import { Button, Banner, LoadingState, EmptyState } from "../../../src/components/ui/primitives";
 import { usePlans } from "../../../src/hooks/usePlans";
 import { usePlansApi } from "../../../src/api/plans";
+import { parsePositiveInt } from "../../../src/utils/parse";
 import type { CreatePlanInput } from "../../../src/api/types";
 
-function toEditable(dayName: string, exercises: { name: string; sets: number; reps: string }[]): EditableDay {
+function toEditable(
+  dayName: string,
+  exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[],
+): EditableDay {
   return {
     day_name: dayName,
-    exercises: exercises.map((e) => ({ name: e.name, sets: String(e.sets), reps: e.reps })),
+    exercises: exercises.map((e) => ({
+      name: e.name,
+      sets: String(e.sets),
+      reps: e.reps,
+      weight: e.weight_kg != null ? String(e.weight_kg) : "",
+    })),
   };
 }
 
@@ -80,11 +89,17 @@ export default function EditDayScreen() {
                 name: e.name.trim(),
                 sets: parseInt(e.sets, 10),
                 reps: e.reps.trim(),
+                weight_kg: parsePositiveInt(e.weight, 9999) ?? undefined,
               })),
             }
           : {
               day_name: d.day_name,
-              exercises: d.exercises.map((e) => ({ name: e.name, sets: e.sets, reps: e.reps })),
+              exercises: d.exercises.map((e) => ({
+                name: e.name,
+                sets: e.sets,
+                reps: e.reps,
+                weight_kg: e.weight_kg ?? undefined,
+              })),
             },
       ),
     };

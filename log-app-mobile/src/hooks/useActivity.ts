@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useActivityApi } from "../api/activity";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { ActivityLog, ActivityLogCreate } from "../api/types";
 
 /** Activity logs for a single date, with optimistic add/delete. */
@@ -21,9 +22,7 @@ export function useActivity(date: string) {
     }
   }, [api, date]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useDataSyncOnFocus(["activity"], load);
 
   const addEntry = useCallback(
     async (data: ActivityLogCreate) => {

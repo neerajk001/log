@@ -37,7 +37,7 @@ export default function CoachSessionsScreen() {
           <>
             <ScreenHeader variant="detail" title="Chats" onBack={() => router.back()} />
             {error ? <ErrorState message={error} onRetry={refetch} /> : null}
-            <Button label="New chat" icon="add" onPress={() => router.replace("/coach" as never)} />
+            <Button label="New chat" icon="add" onPress={() => router.replace("/coach/new" as never)} />
           </>
         }
         ListEmptyComponent={

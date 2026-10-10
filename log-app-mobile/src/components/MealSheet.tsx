@@ -3,7 +3,6 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { spacing } from "../theme/spacing";
 import { useMealsApi } from "../api/meals";
-import { invalidateGetCache } from "../api/client";
 import { parsePositiveInt } from "../utils/parse";
 import { Banner, Button } from "./ui/primitives";
 import { Sheet, TextField } from "./ui/controls";
@@ -49,7 +48,6 @@ export function MealSheet({
         protein_g: prot,
         source: meal.source,
       });
-      invalidateGetCache();
       onSaved();
       onClose();
     } catch (err) {
@@ -70,7 +68,6 @@ export function MealSheet({
           setError(null);
           try {
             await api.deleteMeal(meal.id);
-            invalidateGetCache();
             onSaved();
             onClose();
           } catch (err) {

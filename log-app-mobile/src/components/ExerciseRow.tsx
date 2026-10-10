@@ -35,11 +35,25 @@ function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
   };
 }
 
+/** First integer in a rep scheme, e.g. "8-12" -> 8. */
+function firstInt(value: string): number | null {
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function canLogDraft(draft: Draft): boolean {
+  return (
+    parsePositiveNumber(draft.weight.trim(), 9999) != null &&
+    parsePositiveInt(draft.reps.trim(), 9999) != null
+  );
+}
+
 export function ExerciseRow({
   index,
   name,
   sets,
   reps,
+  plannedWeight,
   muscle,
   lastLog,
   loggedSets,
@@ -56,6 +70,8 @@ export function ExerciseRow({
   name: string;
   sets: number;
   reps: string;
+  /** Target weight from the plan; used to pre-fill the inputs. */
+  plannedWeight?: number | null;
   muscle?: string;
   lastLog?: { weight_kg: number; reps: number } | null;
   loggedSets?: LiftLog[];
@@ -112,12 +128,19 @@ export function ExerciseRow({
     if (initializedScopeRef.current === scopeKey) return;
     initializedScopeRef.current = scopeKey;
     const count = Math.max(1, sets - confirmedLogged.length);
+    // Pre-fill: the plan's target weight, else what you lifted last session.
+    const seedWeight = plannedWeight ?? lastLog?.weight_kg ?? null;
+    const seedReps = firstInt(reps) ?? lastLog?.reps ?? null;
     const next = Array.from({ length: count }, (_, draftIndex) =>
-      makeDraft(confirmedLogged.length + draftIndex + 1),
+      makeDraft(
+        confirmedLogged.length + draftIndex + 1,
+        seedWeight != null ? String(seedWeight) : "",
+        seedReps != null ? String(seedReps) : "",
+      ),
     );
     draftsRef.current = next;
     setDrafts(next);
-  }, [confirmedLogged.length, expanded, logsLoading, scopeKey, sets]);
+  }, [confirmedLogged.length, expanded, lastLog, logsLoading, plannedWeight, reps, scopeKey, sets]);
 
   useEffect(() => clearAllTimers, [clearAllTimers]);
 
@@ -256,6 +279,7 @@ export function ExerciseRow({
           </Text>
           <Text style={[typography.small, styles.prescription]} numberOfLines={1}>
             {sets} sets × {reps} reps
+            {plannedWeight != null ? `  ·  ${plannedWeight} kg` : ""}
             {doneCount > 0 ? `  ·  ${doneCount} logged` : ""}
           </Text>
           {lastLog ? (
@@ -290,7 +314,7 @@ export function ExerciseRow({
                   </Text>
                   <Pressable
                     onPress={() => confirmDelete(entry.id)}
-                    hitSlop={8}
+                    hitSlop={14}
                     accessibilityLabel="Delete set"
                     disabled={pendingIds?.has(entry.id)}
                   >
@@ -330,7 +354,27 @@ export function ExerciseRow({
                   style={styles.input}
                   editable={draft.status !== "saving"}
                 />
-                <RowStatusIcon status={draft.status} />
+                {draft.status === "saving" ? null : draft.status === "error" ? (
+                  <Ionicons name="alert-circle" size={22} color={colors.danger} />
+                ) : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Log set ${draft.ordinal}`}
+                    onPress={() => {
+                      clearTimer(draft.key);
+                      void commitSet(draft.key);
+                    }}
+                    disabled={!canLogDraft(draft)}
+                    hitSlop={8}
+                    style={styles.tick}
+                  >
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={26}
+                      color={canLogDraft(draft) ? colors.primary : colors.borderStrong}
+                    />
+                  </Pressable>
+                )}
               </View>
               {draft.status === "error" ? (
                 <View style={styles.retryRow}>
@@ -351,14 +395,6 @@ export function ExerciseRow({
       ) : null}
     </View>
   );
-}
-
-function RowStatusIcon({ status }: { status: RowStatus }) {
-  const { colors } = useTheme();
-  if (status === "saving") return null;
-  if (status === "error") return <Ionicons name="alert-circle" size={22} color={colors.danger} />;
-  if (status === "editing") return <Ionicons name="ellipse-outline" size={22} color={colors.textDim} />;
-  return <View style={{ width: 22 }} />;
 }
 
 const useStyles = makeUseStyles((t) =>
@@ -419,6 +455,7 @@ const useStyles = makeUseStyles((t) =>
       color: t.colors.text,
     },
     x: { fontSize: 15, fontWeight: "600", color: t.colors.textMuted },
+    tick: { padding: 2 },
     retryRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
     errorText: { ...t.typography.caption, color: t.colors.danger, flex: 1 },
     retryText: { fontSize: 13, fontWeight: "700", color: t.colors.primary },

@@ -1,12 +1,16 @@
 import { useCallback, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import type { ReactNode } from "react";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { Banner, Button, Card, IconBadge, LoadingState } from "../../src/components/ui/primitives";
+import { Banner, Button, Card, LoadingState } from "../../src/components/ui/primitives";
+import type { IoniconName } from "../../src/components/ui/primitives";
 import { Chip, ChipRow, TextField } from "../../src/components/ui/controls";
+import { OptionCard } from "../../src/components/OptionCard";
+import { StepScaffold } from "../../src/components/onboarding/StepScaffold";
 import { useCoachProfile } from "../../src/hooks/useCoachProfile";
 import { useCoachApi } from "../../src/api/coach";
 import { setPendingPlan } from "../../src/state/parsedPlan";
@@ -14,7 +18,13 @@ import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
 import type { CoachProfile, CoachProfileInput } from "../../src/api/types";
 import type { EditableDay } from "../../src/components/PlanDaysEditor";
 
-const GOALS = ["Lose fat", "Build muscle", "Recomp", "Get stronger", "General fitness"];
+const GOALS: { value: string; subtitle: string; icon: IoniconName }[] = [
+  { value: "Lose fat", subtitle: "Cut weight while keeping your strength", icon: "flame-outline" },
+  { value: "Build muscle", subtitle: "Add size with steady progressive overload", icon: "barbell-outline" },
+  { value: "Recomp", subtitle: "Lose fat and build muscle at the same time", icon: "swap-horizontal-outline" },
+  { value: "Get stronger", subtitle: "Push your main lifts up", icon: "trending-up-outline" },
+  { value: "General fitness", subtitle: "Stay consistent and healthy", icon: "heart-outline" },
+];
 const EXPERIENCE = [
   { value: "beginner", label: "Beginner" },
   { value: "intermediate", label: "Intermediate" },
@@ -23,16 +33,53 @@ const EXPERIENCE = [
 const EQUIPMENT = ["Full gym", "Home dumbbells", "Bodyweight"];
 const DAYS = [2, 3, 4, 5, 6];
 
+const STEPS = [
+  {
+    title: "What are you after?",
+    subtitle: "Pick as many as you like — it shapes the plan the coach writes.",
+  },
+  {
+    title: "Your training",
+    subtitle: "How you train shapes the split and the exercise picks.",
+  },
+  {
+    title: "Body & notes",
+    subtitle: "Optional details the coach uses for volume and calorie targets.",
+  },
+];
+
+const GOAL_VALUES = GOALS.map((g) => g.value);
+
+/** Goals are stored as one comma-joined string; unknown values are kept so nothing is lost. */
+function parseGoals(stored: string | null | undefined): string[] {
+  if (!stored) return [];
+  return stored
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function orderGoals(selected: string[]): string[] {
+  const known = GOAL_VALUES.filter((v) => selected.includes(v));
+  const extra = selected.filter((v) => !GOAL_VALUES.includes(v));
+  return [...known, ...extra];
+}
+
 function toEditableDays(
-  days: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[],
+  days: { day_name: string; exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[] }[],
 ): EditableDay[] {
   return days.map((d) => ({
     day_name: d.day_name,
-    exercises: d.exercises.map((e) => ({ name: e.name, sets: String(e.sets), reps: e.reps })),
+    exercises: d.exercises.map((e) => ({
+      name: e.name,
+      sets: String(e.sets),
+      reps: e.reps,
+      weight: e.weight_kg != null ? String(e.weight_kg) : "",
+    })),
   }));
 }
 
-/** Optional onboarding quiz — the AI coach uses this to build your plan. */
+/** Optional plan-builder quiz — the AI coach uses these answers to write your plan. */
 export default function CoachOnboardingScreen() {
   const { profile, loading, save } = useCoachProfile();
   const styles = useStyles();
@@ -48,26 +95,22 @@ export default function CoachOnboardingScreen() {
     );
   }
 
-  if (!profile) {
-    // Rendered once the initial fetch settles; `initial` seeds the form.
-    return <OnboardingForm initial={null} onSave={save} />;
-  }
-
-  return <OnboardingForm initial={profile} onSave={save} />;
+  return <PlanBuilderWizard initial={profile} onSave={save} />;
 }
 
-function OnboardingForm({
+function PlanBuilderWizard({
   initial,
   onSave,
 }: {
   initial: CoachProfile | null;
   onSave: (data: CoachProfileInput) => Promise<CoachProfile>;
 }) {
-  const { colors, typography } = useTheme();
+  const { typography } = useTheme();
   const styles = useStyles();
   const coachApi = useCoachApi();
 
-  const [goal, setGoal] = useState<string | null>(initial?.goal ?? null);
+  const [step, setStep] = useState(1);
+  const [goals, setGoals] = useState<string[]>(parseGoals(initial?.goal));
   const [experience, setExperience] = useState<string | null>(initial?.experience ?? null);
   const [equipment, setEquipment] = useState<string | null>(initial?.equipment ?? null);
   const [daysPerWeek, setDaysPerWeek] = useState<number | null>(initial?.days_per_week ?? null);
@@ -86,7 +129,7 @@ function OnboardingForm({
 
   const payload = useCallback(
     (): CoachProfileInput => ({
-      goal,
+      goal: goals.length ? orderGoals(goals).join(", ") : null,
       experience,
       equipment,
       days_per_week: daysPerWeek,
@@ -97,7 +140,7 @@ function OnboardingForm({
       injuries: injuries.trim() || null,
       notes: notes.trim() || null,
     }),
-    [goal, experience, equipment, daysPerWeek, weight, target, height, dietNotes, injuries, notes],
+    [goals, experience, equipment, daysPerWeek, weight, target, height, dietNotes, injuries, notes],
   );
 
   const onSavePress = useCallback(async () => {
@@ -119,7 +162,7 @@ function OnboardingForm({
     try {
       await onSave(payload());
       const result = await coachApi.generatePlan({
-        goal: goal ?? undefined,
+        goal: goals.length ? orderGoals(goals).join(", ") : undefined,
         notes: notes.trim() || undefined,
       });
       setPendingPlan({ name: "AI Coach Plan", source: "ai_parsed", days: toEditableDays(result.days) });
@@ -129,7 +172,7 @@ function OnboardingForm({
     } finally {
       setBusy(null);
     }
-  }, [onSave, payload, coachApi, goal, notes]);
+  }, [onSave, payload, coachApi, goals, notes]);
 
   const onPickPhoto = useCallback(async () => {
     setError(null);
@@ -155,122 +198,174 @@ function OnboardingForm({
   }, [coachApi, notes]);
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <ScreenHeader variant="detail" title="Your goals" onBack={() => router.back()} />
+    <StepScaffold
+      step={step}
+      total={3}
+      title={STEPS[step - 1].title}
+      subtitle={STEPS[step - 1].subtitle}
+      onBack={step > 1 ? () => setStep(step - 1) : undefined}
+      nextLabel={step === 3 ? "Generate my plan" : "Next"}
+      nextDisabled={busy != null}
+      onNext={step === 3 ? onGeneratePlan : () => setStep(step + 1)}
+      secondary={
+        step === 3
+          ? {
+              label: "Just save my answers",
+              onPress: onSavePress,
+              disabled: busy != null,
+              loading: busy === "save",
+            }
+          : undefined
+      }
+    >
+      {error ? <Banner tone="danger" message={error} /> : null}
 
-        <Card style={styles.hero}>
-          <IconBadge name="sparkles" bg={colors.primarySoft} color={colors.primary} size={48} rounded={false} />
-          <Text style={[typography.small, styles.heroText]}>
-            All of this is optional. Fill in what you know and your coach can build a plan around it.
-          </Text>
-        </Card>
+      {step === 1
+        ? GOALS.map((g) => (
+            <OptionCard
+              key={g.value}
+              icon={g.icon}
+              title={g.value}
+              subtitle={g.subtitle}
+              selected={goals.includes(g.value)}
+              disabled={busy != null}
+              onPress={() =>
+                setGoals((cur) =>
+                  cur.includes(g.value) ? cur.filter((v) => v !== g.value) : [...cur, g.value],
+                )
+              }
+            />
+          ))
+        : null}
 
-        {error ? <Banner tone="danger" message={error} /> : null}
+      {step === 2 ? (
+        <>
+          <Field label="Experience">
+            <ChipRow>
+              {EXPERIENCE.map((e) => (
+                <Chip
+                  key={e.value}
+                  label={e.label}
+                  active={experience === e.value}
+                  onPress={() => setExperience((cur) => (cur === e.value ? null : e.value))}
+                />
+              ))}
+            </ChipRow>
+          </Field>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Primary goal</Text>
-          <ChipRow>
-            {GOALS.map((g) => (
-              <Chip key={g} label={g} active={goal === g} onPress={() => setGoal((cur) => (cur === g ? null : g))} />
-            ))}
-          </ChipRow>
-        </View>
+          <Field label="Days per week you can train">
+            <ChipRow>
+              {DAYS.map((d) => (
+                <Chip
+                  key={d}
+                  label={String(d)}
+                  active={daysPerWeek === d}
+                  onPress={() => setDaysPerWeek((cur) => (cur === d ? null : d))}
+                />
+              ))}
+            </ChipRow>
+          </Field>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Experience</Text>
-          <ChipRow>
-            {EXPERIENCE.map((e) => (
-              <Chip
-                key={e.value}
-                label={e.label}
-                active={experience === e.value}
-                onPress={() => setExperience((cur) => (cur === e.value ? null : e.value))}
-              />
-            ))}
-          </ChipRow>
-        </View>
+          <Field label="Equipment">
+            <ChipRow>
+              {EQUIPMENT.map((eq) => (
+                <Chip
+                  key={eq}
+                  label={eq}
+                  active={equipment === eq}
+                  onPress={() => setEquipment((cur) => (cur === eq ? null : eq))}
+                />
+              ))}
+            </ChipRow>
+          </Field>
+        </>
+      ) : null}
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Days per week you can train</Text>
-          <ChipRow>
-            {DAYS.map((d) => (
-              <Chip
-                key={d}
-                label={String(d)}
-                active={daysPerWeek === d}
-                onPress={() => setDaysPerWeek((cur) => (cur === d ? null : d))}
-              />
-            ))}
-          </ChipRow>
-        </View>
+      {step === 3 ? (
+        <>
+          <View style={styles.row}>
+            <TextField
+              label="Weight (kg)"
+              value={weight}
+              onChangeText={setWeight}
+              keyboardType="numeric"
+              placeholder="80"
+              style={styles.flex}
+            />
+            <TextField
+              label="Target (kg)"
+              value={target}
+              onChangeText={setTarget}
+              keyboardType="numeric"
+              placeholder="75"
+              style={styles.flex}
+            />
+          </View>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Equipment</Text>
-          <ChipRow>
-            {EQUIPMENT.map((eq) => (
-              <Chip
-                key={eq}
-                label={eq}
-                active={equipment === eq}
-                onPress={() => setEquipment((cur) => (cur === eq ? null : eq))}
-              />
-            ))}
-          </ChipRow>
-        </View>
+          <TextField
+            label="Height (cm)"
+            value={height}
+            onChangeText={setHeight}
+            keyboardType="numeric"
+            placeholder="180"
+          />
 
-        <View style={styles.row}>
-          <TextField label="Weight (kg)" value={weight} onChangeText={setWeight} keyboardType="numeric" placeholder="80" style={styles.flex} />
-          <TextField label="Target (kg)" value={target} onChangeText={setTarget} keyboardType="numeric" placeholder="75" style={styles.flex} />
-          <TextField label="Height (cm)" value={height} onChangeText={setHeight} keyboardType="numeric" placeholder="180" style={styles.flex} />
-        </View>
+          <TextField
+            label="Diet approach / targets (optional)"
+            value={dietNotes}
+            onChangeText={setDietNotes}
+            placeholder="e.g. 2200 kcal, 160 g protein"
+            multiline
+            autoCapitalize="sentences"
+          />
 
-        <TextField
-          label="Diet approach / targets (optional)"
-          value={dietNotes}
-          onChangeText={setDietNotes}
-          placeholder="e.g. 2200 kcal, 160 g protein"
-          multiline
-          autoCapitalize="sentences"
-        />
-        <TextField
-          label="Injuries or limitations (optional)"
-          value={injuries}
-          onChangeText={setInjuries}
-          placeholder="e.g. cranky right shoulder"
-          multiline
-          autoCapitalize="sentences"
-        />
-        <TextField
-          label="Anything else about your goal? (optional)"
-          value={notes}
-          onChangeText={setNotes}
-          placeholder="Describe what you want to achieve…"
-          multiline
-          autoCapitalize="sentences"
-        />
+          <TextField
+            label="Injuries or limitations (optional)"
+            value={injuries}
+            onChangeText={setInjuries}
+            placeholder="e.g. cranky right shoulder"
+            multiline
+            autoCapitalize="sentences"
+          />
 
-        <Button
-          label="Add a body photo (optional)"
-          icon="camera-outline"
-          variant="outline"
-          onPress={onPickPhoto}
-          loading={busy === "photo"}
-          disabled={busy != null}
-        />
-        {analysis ? (
-          <Card style={styles.analysis}>
-            <Text style={typography.bodyStrong}>{"Coach's read on your photo"}</Text>
-            <Text style={typography.small}>{analysis}</Text>
-            <Text style={[typography.caption, styles.privacyNote]}>
-              Photo analyzed in the moment, never stored.
-            </Text>
-          </Card>
-        ) : null}
+          <TextField
+            label="Anything else about your goal? (optional)"
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Describe what you want to achieve…"
+            multiline
+            autoCapitalize="sentences"
+          />
 
-        <Button label="Generate my plan" icon="sparkles-outline" onPress={onGeneratePlan} loading={busy === "plan"} disabled={busy != null} />
-        <Button label="Save answers" icon="checkmark" variant="soft" onPress={onSavePress} loading={busy === "save"} disabled={busy != null} />
-      </ScrollView>
+          <Button
+            label="Add a body photo (optional)"
+            icon="camera-outline"
+            variant="outline"
+            onPress={onPickPhoto}
+            loading={busy === "photo"}
+            disabled={busy != null}
+          />
+          {analysis ? (
+            <Card style={styles.analysis}>
+              <Text style={typography.bodyStrong}>{"Coach's read on your photo"}</Text>
+              <Text style={typography.small}>{analysis}</Text>
+              <Text style={[typography.caption, styles.privacyNote]}>
+                Photo analyzed in the moment, never stored.
+              </Text>
+            </Card>
+          ) : null}
+        </>
+      ) : null}
+    </StepScaffold>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  const styles = useStyles();
+  return (
+    <View style={styles.field}>
+      <Text style={styles.label}>{label}</Text>
+      {children}
     </View>
   );
 }
@@ -279,9 +374,6 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
     padded: { padding: spacing.screen },
-    scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
-    hero: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    heroText: { flex: 1, color: t.colors.textDim },
     field: { gap: spacing.sm },
     label: { ...t.typography.caption, color: t.colors.textDim },
     row: { flexDirection: "row", gap: spacing.sm },

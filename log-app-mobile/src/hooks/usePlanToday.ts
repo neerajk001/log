@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePlansApi } from "../api/plans";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { PlanToday } from "../api/types";
 
 /**
@@ -39,9 +40,7 @@ export function usePlanToday(scopeDate?: string) {
     }
   }, [api]);
 
-  useEffect(() => {
-    fetch();
-  }, [fetch]);
+  useDataSyncOnFocus(["plans"], fetch);
 
   useEffect(() => {
     // Midnight rollover: bypass the GET cache (a 23:59 fetch may still be

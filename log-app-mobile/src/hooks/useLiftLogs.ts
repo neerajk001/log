@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { useLiftLogsApi } from "../api/liftLogs";
+import { useDataSync } from "./useDataSync";
 import type { LiftLog, LiftLogCreate } from "../api/types";
 
 export function useLiftLogs(date: string) {
@@ -55,6 +56,9 @@ export function useLiftLogs(date: string) {
       load();
     }, [load]),
   );
+
+  // A set logged elsewhere (history delete, coach proposal) re-reads this range.
+  useDataSync(["lift"], load);
 
   const addEntry = useCallback(
     async (data: LiftLogCreate): Promise<LiftLog> => {

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { fetch as expoFetch } from "expo/fetch";
 import { API_BASE_URL, useApiClient } from "./client";
+import { invalidateResources } from "./cache";
 import type {
   AgentId,
   CoachMemory,
@@ -133,5 +134,8 @@ export async function streamCoachChat({
   }
 
   if (serverError) throw new Error(serverError);
+  // The stream bypasses the API client, so the turn's own writes (a new session,
+  // its title) are announced here instead.
+  invalidateResources(["coach"]);
   return full;
 }

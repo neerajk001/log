@@ -9,6 +9,7 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { Button, EmptyState, ErrorState, LoadingState, IconBadge, SectionHeader } from "../../src/components/ui/primitives";
 import { usePlans } from "../../src/hooks/usePlans";
 import { muscleGroupsForDay } from "../../src/utils/derive";
+import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
 function accents(colors: Palette) {
   return [
@@ -113,6 +114,13 @@ export default function PlanScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
+
+            <AskCoachRow
+              agent="training"
+              label="Ask the coach to change my plan"
+              hint="Swap exercises, adjust sets, switch plans"
+              question="About my plan — "
+            />
 
             <View style={styles.section}>
               <SectionHeader title="Workout Days" />

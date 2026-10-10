@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useCoachApi } from "../api/coach";
+import { useDataSync } from "./useDataSync";
 import type { CoachProfile, CoachProfileInput } from "../api/types";
 
 export function useCoachProfile() {
@@ -23,6 +24,8 @@ export function useCoachProfile() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useDataSync(["coach"], load);
 
   const save = useCallback(
     async (data: CoachProfileInput) => {
