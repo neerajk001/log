@@ -44,16 +44,19 @@ export default function NewCoachChatScreen() {
    * rollover still starts the next day's thread.
    */
   const [resolvedSessionId, setResolvedSessionId] = useState<string | undefined>(undefined);
+  const [lookupSettled, setLookupSettled] = useState(false);
   const resolvedRef = useRef(false);
   useEffect(() => {
     if (resolvedRef.current || (isDaily && loading)) return;
     resolvedRef.current = true;
     setResolvedSessionId(dailySession?.id);
+    setLookupSettled(true);
   }, [isDaily, loading, dailySession?.id]);
 
-  // Resolve today's chat before mounting: otherwise the first message would create a
-  // second session while the lookup is still in flight.
-  if (isDaily && loading) return <LoadingState label="Opening today's food log…" />;
+  // Placeholder only until the FIRST lookup settles. Every later refetch reports loading
+  // again, and gating on that would swap the chat out from under an estimate waiting to be
+  // confirmed — which is what "Opening today's food log…" appearing mid-flow was.
+  if (isDaily && !lookupSettled) return <LoadingState label="Opening today's food log…" />;
 
   return (
     <CoachChat
