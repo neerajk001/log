@@ -23,6 +23,7 @@ import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
 import { useMealsApi } from "../../api/meals";
+import { preparePhoto } from "../../utils/image";
 import { todayLocal } from "../../utils/date";
 import type { AgentId, CoachProposal } from "../../api/types";
 
@@ -92,12 +93,13 @@ export function CoachChat({
         copyToCacheDirectory: true,
       });
       if (res.canceled || !res.assets?.length) return;
-      const file = res.assets[0];
+      // Shrink before upload: the vision cost scales with pixels.
+      const photo = await preparePhoto(res.assets[0]);
       const form = new FormData();
       form.append("file", {
-        uri: file.uri,
-        name: file.name ?? "meal.jpg",
-        type: file.mimeType ?? "image/jpeg",
+        uri: photo.uri,
+        name: photo.name,
+        type: photo.type,
       } as unknown as Blob);
       // The athlete's local date, so the estimate knows what's logged today.
       form.append("date", todayLocal());
