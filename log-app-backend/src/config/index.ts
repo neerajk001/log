@@ -25,7 +25,7 @@ export const config = {
     parsing: process.env.OPENAI_PARSE_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
     // Short, simple chat turns.
     chatFast: process.env.COACH_FAST_MODEL || "gpt-4.1-mini",
-    // Reasoning-heavy chat, program generation and plan parsing stay on OpenAI.
+    // Reasoning-heavy chat and program generation.
     chatSmart: process.env.COACH_MODEL || "gpt-4.1",
     // Physique photo analysis runs on the cheap vision model (Command Code by
     // default, same family as meal photos) — no longer OpenAI.
@@ -42,7 +42,7 @@ export const config = {
   },
   // Coach chat + meal provider. Defaults to OpenAI; point AI_BASE_URL at any
   // OpenAI-Responses-compatible endpoint (e.g. Command Code) for other models.
-  // Plan parsing and physique analysis stay on the OpenAI client above.
+  // Plan parsing is the one path pinned to OpenAI (see services/planParser.ts).
   ai: {
     baseUrl: process.env.AI_BASE_URL || "https://api.openai.com/v1",
     apiKey:

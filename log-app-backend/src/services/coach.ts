@@ -497,17 +497,12 @@ export function routeChatModel(message: string): string {
   return looksDeep ? config.models.chatSmart : config.models.chatFast;
 }
 
-type AiProvider = "ai" | "openai";
-
 /**
- * Resolves the endpoint for a call. "ai" is the coach/meal provider (OpenAI by
- * default, or any OpenAI-Responses-compatible endpoint via AI_BASE_URL);
- * "openai" is pinned to OpenAI for plan generation and physique analysis.
+ * The coach/meal/plan endpoint: OpenAI by default, or any OpenAI-Responses-compatible
+ * service via AI_BASE_URL. Plan *parsing* is the one path that talks to OpenAI
+ * directly — see services/planParser.ts, which sends PDFs as `input_file`.
  */
-function resolveProvider(name: AiProvider): { baseUrl: string; apiKey: string } {
-  if (name === "openai") {
-    return { baseUrl: "https://api.openai.com/v1", apiKey: config.openai.apiKey };
-  }
+function aiEndpoint(): { baseUrl: string; apiKey: string } {
   return { baseUrl: config.ai.baseUrl, apiKey: config.ai.apiKey || config.openai.apiKey };
 }
 
@@ -523,14 +518,13 @@ async function callModel(
   instructions: string,
   input: InputMessage[],
   maxOutputTokens: number,
-  options: { json?: boolean; model: string; provider?: AiProvider; thinking?: boolean },
+  options: { json?: boolean; model: string; thinking?: boolean },
 ): Promise<string> {
-  const providerName = options.provider ?? "ai";
-  const { baseUrl, apiKey } = resolveProvider(providerName);
+  const { baseUrl, apiKey } = aiEndpoint();
   if (!apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
   }
-  const promptCache = providerName === "openai" || config.ai.promptCache;
+  const promptCache = config.ai.promptCache;
 
   let res: Response;
   try {
@@ -2011,7 +2005,7 @@ export async function runCoachChatStream(
     data: { updatedAt: new Date() },
   });
 
-  const { baseUrl, apiKey } = resolveProvider("ai");
+  const { baseUrl, apiKey } = aiEndpoint();
   if (!apiKey) {
     throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
   }
@@ -2207,7 +2201,7 @@ export async function generateCoachPlan(
     instructions,
     [{ role: "user", content: [{ type: "input_text", text: "Create the program as JSON." }] }],
     2500,
-    { json: true, model: config.models.chatSmart, provider: "openai" },
+    { json: true, model: config.models.chatSmart },
   );
 
   try {

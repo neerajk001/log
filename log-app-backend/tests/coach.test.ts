@@ -74,6 +74,7 @@ import {
   AGENTS,
   buildAthleteContext,
   executeCoachTool,
+  generateCoachPlan,
   maybeUpdateMemory,
   parseOpenAIDelta,
   parseOpenAIEvent,
@@ -936,6 +937,61 @@ describe("long-term memory", () => {
     await maybeUpdateMemory("user-1");
 
     expect(mocks.upsertMemory).not.toHaveBeenCalled();
+  });
+});
+
+describe("generateCoachPlan", () => {
+  const REAL = { baseUrl: config.ai.baseUrl, apiKey: config.ai.apiKey };
+
+  afterEach(() => {
+    config.ai.baseUrl = REAL.baseUrl;
+    config.ai.apiKey = REAL.apiKey;
+    vi.unstubAllGlobals();
+  });
+
+  it("runs on the coach provider rather than being pinned to OpenAI", async () => {
+    // The bug this covers: the "smart" model is a non-OpenAI name in production, and
+    // this call was hard-pinned to api.openai.com — a 404 on every plan generation.
+    config.ai.baseUrl = "https://ai.test/v1";
+    config.ai.apiKey = "test-key";
+    let url = "";
+    let body: { model?: string } = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (target: unknown, init?: RequestInit) => {
+        url = String(target);
+        body = JSON.parse(String(init?.body ?? "{}"));
+        return new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify({
+                      days: [
+                        {
+                          day_name: "Push",
+                          exercises: [{ name: "Bench Press", sets: 3, reps: "8" }],
+                        },
+                      ],
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const plan = await generateCoachPlan("user-1");
+
+    expect(url).toBe("https://ai.test/v1/responses");
+    expect(url).not.toContain("api.openai.com");
+    expect(body.model).toBe(config.models.chatSmart);
+    expect(plan.days).toHaveLength(1);
   });
 });
 
