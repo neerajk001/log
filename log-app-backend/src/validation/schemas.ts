@@ -142,8 +142,24 @@ export const planIdParamSchema = z.object({
   id: z.string().uuid(),
 });
 
+/** `/api/plans/:id/today` — the athlete's local date, since the server runs on UTC. */
+export const planTodayQuerySchema = z.object({
+  date: dateString.optional(),
+});
+
+/** `GET /api/plans?active=1` — only the active plan (lighter payload). */
+export const planListQuerySchema = z.object({
+  active: z.enum(["1"]).optional(),
+});
+
 export const idParamSchema = z.object({
   id: z.string().uuid(),
+});
+
+/** `/api/logs/lift/summary` — recent exercise names + each one's last session. */
+export const liftSummaryQuerySchema = z.object({
+  days: z.coerce.number().int().positive().max(730).optional(),
+  before: dateString.optional(),
 });
 
 export const trendsQuerySchema = z.object({

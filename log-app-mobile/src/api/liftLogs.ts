@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useApiClient } from "./client";
-import type { LiftLog, LiftLogCreate } from "./types";
+import type { LiftLog, LiftLogCreate, LiftSummary } from "./types";
 
 export function useLiftLogsApi() {
   const client = useApiClient();
@@ -11,6 +11,9 @@ export function useLiftLogsApi() {
       /** The Next.js API accepts `exercise`, or a `from`/`to` range. */
       getLiftLogsRange: (from: string, to: string) =>
         client.get<LiftLog[]>(`/api/logs/lift?from=${from}&to=${to}`),
+      /** Recent exercise names + each one's last session — one small read. */
+      getLiftSummary: (days: number, before: string) =>
+        client.get<LiftSummary>(`/api/logs/lift/summary?days=${days}&before=${before}`),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
       updateLiftLog: (id: string, data: { weight_kg: number; reps: number }) =>
         client.put<LiftLog>(`/api/logs/lift/${id}`, data),

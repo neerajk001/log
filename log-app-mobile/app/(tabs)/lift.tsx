@@ -11,14 +11,15 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, type ErrorBoundaryProps } from "expo-router";
+import * as Crypto from "expo-crypto";
 import { useClerk } from "@clerk/clerk-expo";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DayBanner } from "../../src/components/DayBanner";
 import { ExerciseRow } from "../../src/components/ExerciseRow";
-import { Banner, Button, Card, EmptyState, LoadingState, ErrorState } from "../../src/components/ui/primitives";
+import { Banner, Button, Card, EmptyState, LoadingState, ErrorState, IconBadge } from "../../src/components/ui/primitives";
 import { Chip, ChipRow, IconButton, OverflowMenu, TextField } from "../../src/components/ui/controls";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
@@ -31,6 +32,8 @@ import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
 interface QuickSet {
   key: string;
+  /** Stable per draft, so retrying a partial failure can't log the set twice. */
+  requestId: string;
   weight: string;
   reps: string;
 }
@@ -38,7 +41,7 @@ interface QuickSet {
 let quickKey = 0;
 function blankQuickSet(): QuickSet {
   quickKey += 1;
-  return { key: `q${quickKey}`, weight: "", reps: "" };
+  return { key: `q${quickKey}`, requestId: Crypto.randomUUID(), weight: "", reps: "" };
 }
 
 export default function LiftScreen() {
@@ -48,7 +51,7 @@ export default function LiftScreen() {
   const styles = useStyles();
 
   const { planId, day: rotatedDay, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(today);
-  const { days } = usePlans();
+  const { days, error: plansError, refetch: refetchPlans } = usePlans();
   const {
     entries,
     addEntry,
@@ -107,6 +110,7 @@ export default function LiftScreen() {
     const valid = quickSets
       .map((q) => ({
         key: q.key,
+        requestId: q.requestId,
         weight: parseFloat(q.weight),
         reps: parseInt(q.reps, 10),
       }))
@@ -118,18 +122,38 @@ export default function LiftScreen() {
       return;
     }
     setQuickSaving(true);
-    try {
-      for (const q of valid) {
-        await addEntry({ date: today, exercise_name: name, weight_kg: q.weight, reps: q.reps, plan_day_id: null });
-      }
-      setQuickName("");
-      setQuickSets([blankQuickSet()]);
+    // Each row carries a stable id, so a retry replays the same request and the
+    // server recognises it instead of logging the set again.
+    const results = await Promise.all(
+      valid.map(async (q) => {
+        try {
+          await addEntry({
+            id: q.requestId,
+            date: today,
+            exercise_name: name,
+            weight_kg: q.weight,
+            reps: q.reps,
+            plan_day_id: null,
+          });
+          return { key: q.key, ok: true };
+        } catch {
+          // The hook surfaces the message; keep the draft so nothing is lost.
+          return { key: q.key, ok: false };
+        }
+      }),
+    );
+
+    const saved = new Set(results.filter((r) => r.ok).map((r) => r.key));
+    setQuickSets((prev) => {
+      const remaining = prev.filter((q) => !saved.has(q.key));
+      return remaining.length > 0 ? remaining : [blankQuickSet()];
+    });
+    if (saved.size > 0) {
       successTick();
-    } catch {
-      // hook surfaces the error; keep drafts so nothing is lost
-    } finally {
-      setQuickSaving(false);
+      // Clear the exercise only once nothing is left to retry.
+      if (results.every((r) => r.ok)) setQuickName("");
     }
+    setQuickSaving(false);
   }, [quickName, quickSets, addEntry, today]);
 
   const completedExercises = useMemo(() => {
@@ -140,7 +164,12 @@ export default function LiftScreen() {
   const refetch = useCallback(() => {
     refetchPlan();
     refetchLifts();
-  }, [refetchPlan, refetchLifts]);
+    refetchPlans();
+  }, [refetchPlan, refetchLifts, refetchPlans]);
+
+  // A plan that couldn't be fetched is not the same as having no plan: status errors
+  // win, and the "no plan yet" empty state only shows when nothing failed.
+  const planFailure = planError ?? plansError;
 
   if (planLoading && !planId && days.length === 0) {
     return (
@@ -178,7 +207,7 @@ export default function LiftScreen() {
           }
         />
 
-        {planError ? <ErrorState message={planError} onRetry={refetchPlan} /> : null}
+        {planFailure ? <ErrorState message={planFailure} onRetry={refetch} /> : null}
         {liftsLoadError ? <ErrorState message={liftsLoadError} onRetry={refetchLifts} /> : null}
         {liftsMutationError ? (
           <Banner
@@ -256,7 +285,7 @@ export default function LiftScreen() {
               />
             </View>
           </>
-        ) : (
+        ) : planFailure ? null : (
           <View style={styles.emptyWrap}>
             <EmptyState
               icon="barbell-outline"
@@ -361,5 +390,31 @@ const useStyles = makeUseStyles((t) =>
     quickNum: { fontSize: 13, fontWeight: "700", color: t.colors.textDim, width: 16, textAlign: "center" },
     quickSmall: { flex: 1 },
     quickRemove: { padding: 4 },
+
+    errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
+    errorTitle: { textAlign: "center" },
+    errorText: { textAlign: "center", color: t.colors.textDim },
   }),
 );
+
+/**
+ * Route-level fallback (expo-router picks this up): a render crash on Lift becomes a
+ * friendly, retryable card instead of a red box.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.errorWrap}>
+        <IconBadge name="alert-circle-outline" bg={colors.surface} color={colors.danger} size={56} rounded={false} />
+        <Text style={[typography.h3, styles.errorTitle]}>Lift couldn&apos;t load</Text>
+        <Text style={[typography.small, styles.errorText]}>
+          {error?.message ?? "Something went wrong on this screen."}
+        </Text>
+        <Button label="Try again" icon="refresh" onPress={() => void retry()} />
+      </View>
+    </View>
+  );
+}

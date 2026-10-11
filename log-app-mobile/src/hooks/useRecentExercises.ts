@@ -2,46 +2,36 @@ import { useCallback, useState } from "react";
 import { useLiftLogsApi } from "../api/liftLogs";
 import { useDataSyncOnFocus } from "./useDataSync";
 import type { LiftLog } from "../api/types";
-import { addDays, todayLocal } from "../utils/date";
+import { todayLocal } from "../utils/date";
 
 /**
- * Distinct exercises logged in the recent window (for quick re-entry), plus
- * the most recent prior set for each exercise — the "Last:" cue on the Lift
- * screen. Today's own sets are excluded, so "Last" always means the previous
- * session.
+ * Distinct exercises logged in the recent window (for quick re-entry), plus the top
+ * set from each one's last session — the "Last:" cue on the Lift screen. Today's own
+ * sets are excluded, so "Last" always means the previous session.
+ *
+ * Computed server-side: this used to download every set of the last four months.
  */
 export function useRecentExercises(days = 120) {
   const api = useLiftLogsApi();
   const [names, setNames] = useState<string[]>([]);
   const [lastByExercise, setLastByExercise] = useState<Map<string, LiftLog>>(new Map());
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const to = todayLocal();
-      const logs = await api.getLiftLogsRange(addDays(to, -days), to);
-      const seen: string[] = [];
-      const latest = new Map<string, LiftLog>();
-      for (const log of logs) {
-        if (!seen.includes(log.exercise_name)) seen.push(log.exercise_name);
-        if (log.date >= to) continue;
-        const current = latest.get(log.exercise_name);
-        if (
-          !current ||
-          log.date > current.date ||
-          (log.date === current.date && Number(log.weight_kg) > Number(current.weight_kg))
-        ) {
-          latest.set(log.exercise_name, log);
-        }
-      }
-      setNames(seen.slice(0, 12));
-      setLastByExercise(latest);
-    } catch {
-      setNames([]);
-      setLastByExercise(new Map());
+      const summary = await api.getLiftSummary(days, todayLocal());
+      setNames(summary.names);
+      setLastByExercise(
+        new Map(summary.last_by_exercise.map((log) => [log.exercise_name, log])),
+      );
+      setError(null);
+    } catch (err) {
+      // Keep the last good names and "Last:" cues — a blip shouldn't wipe them.
+      setError(err instanceof Error ? err.message : "Failed to load recent exercises");
     }
   }, [api, days]);
 
   useDataSyncOnFocus(["lift"], load);
 
-  return { names, lastByExercise, refetch: load };
+  return { names, lastByExercise, error, refetch: load };
 }

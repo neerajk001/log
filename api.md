@@ -83,11 +83,22 @@ identical weight and reps.
 
 ## `GET /api/logs/lift?exercise=<name>&weeks=4`
 
-Returns lift history for one exercise, used by Trends deltas.
+Returns lift history for one exercise, used by Trends deltas. Also accepts
+`from`/`to`, or `days`.
+
+## `GET /api/logs/lift/summary?days=120&before=YYYY-MM-DD`
+
+The Lift screen's "recent exercises" chips and its `Last:` cue, computed server-side:
+`{ names: string[], last_by_exercise: LiftLog[] }` — up to 12 distinct exercise names
+ordered by most recently used, plus one row per exercise (newest session, heaviest set
+of it). `before` is the athlete's local date; the "last" rows are strictly before it, so
+today's own sets never count as "last". This replaced a client-side download of every
+set in the window.
 
 ## `GET /api/plans`
 
-Returns the user's plans (MVP: typically zero or one active plan).
+Returns the user's plans. `?active=1` returns only the active one — the Lift screen uses
+it instead of pulling every plan's days and exercises to find the active plan's id.
 
 Response:
 ```json
@@ -112,9 +123,13 @@ Response:
 ]
 ```
 
-## `GET /api/plans/:id/today`
+## `GET /api/plans/:id/today?date=YYYY-MM-DD`
 
-Resolves which `plan_day` applies to today based on day rotation logic
+The Lift screen sends the athlete's **local** date — the server's UTC day can be behind it
+(IST is UTC+5:30), and that date decides both the rotation and which sets count as already
+logged. Defaults to the server's today when omitted.
+
+Resolves which `plan_day` applies to that date based on day rotation logic
 (see `backend.md`), and returns its exercises plus whether each has
 already been logged today.
 

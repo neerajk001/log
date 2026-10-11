@@ -133,3 +133,55 @@ export async function updateLiftLog(
   if (result.count === 0) return null;
   return findExisting(client, id);
 }
+
+/** Recent exercise names plus the top set from each one's previous session. */
+export interface LiftSummary {
+  names: string[];
+  lastByExercise: LiftLogRecord[];
+}
+
+const MAX_RECENT_EXERCISES = 12;
+
+function daysBefore(isoDate: string, days: number): Date {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d;
+}
+
+/**
+ * The Lift screen's "recent exercises" and "Last:" cue, computed in SQL.
+ *
+ * The client used to download every set of the last four months and reduce them in
+ * JS — and that refetched on each logged set. This returns 12 names and one row
+ * per exercise instead.
+ */
+export async function getLiftSummary(
+  userId: string,
+  opts: { days: number; before: string },
+  client: Pick<PrismaClient, "liftLog"> = prisma,
+): Promise<LiftSummary> {
+  const days = Math.max(1, Math.min(730, Math.round(opts.days)));
+  const before = new Date(`${opts.before}T00:00:00Z`);
+  const from = daysBefore(opts.before, days);
+
+  const grouped = await client.liftLog.groupBy({
+    by: ["exerciseName"],
+    where: { userId, date: { gte: from, lte: before } },
+    _max: { createdAt: true },
+    orderBy: { _max: { createdAt: "desc" } },
+    take: MAX_RECENT_EXERCISES,
+  });
+  const names = grouped.map((row) => row.exerciseName);
+  if (names.length === 0) return { names: [], lastByExercise: [] };
+
+  // One row per exercise: newest session, heaviest set of that session — the same
+  // rule the client applied in JS, and strictly before the athlete's today.
+  const lastByExercise = await client.liftLog.findMany({
+    where: { userId, exerciseName: { in: names }, date: { lt: before } },
+    orderBy: [{ date: "desc" }, { weightKg: "desc" }],
+    distinct: ["exerciseName"],
+    select: liftLogSelect,
+  });
+
+  return { names, lastByExercise };
+}

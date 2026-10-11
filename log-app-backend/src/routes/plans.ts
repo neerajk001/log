@@ -15,7 +15,9 @@ import { resolvePlanDayForDate } from "../services/planRotation";
 import {
     createPlanSchema,
     planIdParamSchema,
+    planListQuerySchema,
     planParseBodySchema,
+    planTodayQuerySchema,
     type CreatePlanInput,
 } from "../validation/schemas";
 
@@ -173,10 +175,14 @@ router.post(
 router.get(
   "/",
   requireAuth,
+  validate(planListQuerySchema, "query"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      // The Lift screen only needs the active plan, and doesn't need every other
+      // plan's days and exercises on the wire to find it.
+      const { active } = req.query as unknown as { active?: string };
       const plans = await prisma.workoutPlan.findMany({
-        where: { userId: req.userId },
+        where: { userId: req.userId, ...(active === "1" ? { isActive: true } : {}) },
         orderBy: { createdAt: "desc" },
         include: { planDays: { orderBy: { dayOrder: "asc" } } },
       });
@@ -192,9 +198,14 @@ router.get(
   "/:id/today",
   requireAuth,
   validate(planIdParamSchema, "params"),
+  validate(planTodayQuerySchema, "query"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const planId = req.params.id as string;
+      // The athlete's local date: the server runs on UTC, and their "today" decides
+      // both which day the plan rotates to and which sets already count as logged.
+      const { date } = req.query as unknown as { date?: string };
+      const scopeDate = date ?? today();
       const plan = await prisma.workoutPlan.findFirst({
         where: { id: planId, userId: req.userId },
         include: { planDays: { orderBy: { dayOrder: "asc" } } },
@@ -208,7 +219,7 @@ router.get(
       const day = resolvePlanDayForDate(
         plan.createdAt,
         plan.planDays,
-        new Date(),
+        new Date(`${scopeDate}T00:00:00Z`),
       );
       if (!day) {
         res.json({ plan_id: plan.id, plan_name: plan.name, day: null });
@@ -221,7 +232,7 @@ router.get(
       const logged = await prisma.liftLog.findMany({
         where: {
           userId: req.userId,
-          date: new Date(today()),
+          date: new Date(scopeDate),
           exerciseName: { in: exerciseNames },
         },
         orderBy: { createdAt: "asc" },

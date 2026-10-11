@@ -3,9 +3,14 @@ import * as Sentry from "@sentry/node";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema } from "../validation/schemas";
+import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema, liftSummaryQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
-import { createLiftLogIdempotent, serializeLiftLog, updateLiftLog } from "../services/liftLogs";
+import {
+  createLiftLogIdempotent,
+  getLiftSummary,
+  serializeLiftLog,
+  updateLiftLog,
+} from "../services/liftLogs";
 import { assertRangeSize } from "../utils/range";
 
 const router = Router();
@@ -100,6 +105,23 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
     logs.map(serializeLiftLog),
   );
 });
+
+router.get(
+  "/lift/summary",
+  requireAuth,
+  validate(liftSummaryQuerySchema, "query"),
+  async (req, res: Response) => {
+    const { days, before } = req.query as unknown as { days?: number; before?: string };
+    const summary = await getLiftSummary(req.userId, {
+      days: days ?? 120,
+      before: before ?? new Date().toISOString().slice(0, 10),
+    });
+    res.json({
+      names: summary.names,
+      last_by_exercise: summary.lastByExercise.map(serializeLiftLog),
+    });
+  },
+);
 
 router.put(
   "/lift/:id",

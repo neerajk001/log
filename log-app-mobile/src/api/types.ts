@@ -389,3 +389,9 @@ export interface DismissedMeal {
   protein_g: number;
   date?: string;
 }
+
+/** Recent exercise names, plus the top set from each one's previous session. */
+export interface LiftSummary {
+  names: string[];
+  last_by_exercise: LiftLog[];
+}

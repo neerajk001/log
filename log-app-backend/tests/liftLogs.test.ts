@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../src/middleware/errorHandler";
 import {
   createLiftLogIdempotent,
+  getLiftSummary,
   serializeLiftLog,
   updateLiftLog,
   type LiftLogInput,
@@ -60,6 +61,65 @@ function expectConflict(error: unknown): boolean {
   expect(error).toMatchObject({ statusCode: 409, code: "IDEMPOTENCY_CONFLICT" });
   return true;
 }
+
+/**
+ * The Lift screen's "recent exercises" + "Last:" cue used to be built in the client
+ * from every set of the last four months.
+ */
+describe("getLiftSummary", () => {
+  function summaryClient(
+    options: { names?: { exerciseName: string }[]; last?: unknown[] } = {},
+  ) {
+    const groupBy = vi.fn().mockResolvedValue(options.names ?? []);
+    const findMany = vi.fn().mockResolvedValue(options.last ?? []);
+    return { liftLog: { groupBy, findMany } };
+  }
+
+  it("returns the newest-used names and each one's last session", async () => {
+    const mock = summaryClient({
+      names: [{ exerciseName: "Bench Press" }, { exerciseName: "Squat" }],
+      last: [record({ id: "last-1", exerciseName: "Bench Press" })],
+    });
+
+    const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
+
+    expect(summary.names).toEqual(["Bench Press", "Squat"]);
+    expect(summary.lastByExercise).toEqual([
+      record({ id: "last-1", exerciseName: "Bench Press" }),
+    ]);
+
+    const groupArgs = mock.liftLog.groupBy.mock.calls[0][0];
+    expect(groupArgs.take).toBe(12);
+    expect(groupArgs.orderBy).toEqual({ _max: { createdAt: "desc" } });
+    // The window ends on the athlete's date and is inclusive of it.
+    expect(groupArgs.where.date.gte).toEqual(new Date("2026-06-10T00:00:00Z"));
+    expect(groupArgs.where.date.lte).toEqual(new Date("2026-10-08T00:00:00Z"));
+
+    // "Last" means strictly before that date, one row per exercise, heaviest first.
+    const lastArgs = mock.liftLog.findMany.mock.calls[0][0];
+    expect(lastArgs.where.date).toEqual({ lt: new Date("2026-10-08T00:00:00Z") });
+    expect(lastArgs.distinct).toEqual(["exerciseName"]);
+    expect(lastArgs.orderBy).toEqual([{ date: "desc" }, { weightKg: "desc" }]);
+  });
+
+  it("skips the last-session query when nothing was logged in the window", async () => {
+    const mock = summaryClient({ names: [] });
+
+    const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
+
+    expect(summary).toEqual({ names: [], lastByExercise: [] });
+    expect(mock.liftLog.findMany).not.toHaveBeenCalled();
+  });
+
+  it("clamps an absurd window", async () => {
+    const mock = summaryClient();
+
+    await getLiftSummary(userId, { days: 99999, before: "2026-10-08" }, mock as never);
+
+    const groupArgs = mock.liftLog.groupBy.mock.calls[0][0];
+    expect(groupArgs.where.date.gte).toEqual(new Date("2024-10-08T00:00:00Z"));
+  });
+});
 
 describe("liftLogSchema", () => {
   it("accepts omitted and valid client request IDs", () => {

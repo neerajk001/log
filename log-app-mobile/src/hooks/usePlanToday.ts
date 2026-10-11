@@ -21,7 +21,7 @@ export function usePlanToday(scopeDate?: string) {
     setLoading(true);
     setError(null);
     try {
-      const plans = await api.getPlans();
+      const plans = await api.getActivePlan();
       const active = plans.find((p) => p.is_active) ?? null;
       if (!active) {
         setPlanId(null);
@@ -31,14 +31,20 @@ export function usePlanToday(scopeDate?: string) {
       }
       setPlanId(active.id);
       setPlanName(active.name);
-      const today = await api.getPlanToday(active.id, force ? { force: true } : undefined);
+      // Send the athlete's local date: the server's UTC "today" can be a day behind.
+      const today = await api.getPlanToday(active.id, {
+        ...(force ? { force: true } : {}),
+        ...(scopeDate ? { date: scopeDate } : {}),
+      });
       setDay(today.day);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load plan");
     } finally {
       setLoading(false);
     }
-  }, [api]);
+    // `scopeDate` is read inside, so a date change must rebuild this closure —
+    // otherwise a midnight rollover would refetch the old day.
+  }, [api, scopeDate]);
 
   useDataSyncOnFocus(["plans"], fetch);
 
