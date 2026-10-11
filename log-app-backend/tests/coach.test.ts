@@ -940,6 +940,38 @@ describe("long-term memory", () => {
   });
 });
 
+describe("buildAthleteContext meal scope", () => {
+  it("gives a meal turn only what it needs — and only fetches that", async () => {
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 110, calorieTarget: 1600 });
+    mocks.findUniqueDaily.mockResolvedValue({ calories: 900, proteinG: 60 });
+    mocks.findUniqueMemory.mockResolvedValue({ summary: "Prefers simple food." });
+
+    const context = await buildAthleteContext("user-1", "2026-10-11", "meal");
+
+    expect(context).toContain("TODAY: 2026-10-11");
+    expect(context).toContain("TARGETS: 1600 kcal/day, 110 g protein/day");
+    expect(context).toContain("TODAY'S INTAKE (2026-10-11): 900 kcal, 60 g protein so far");
+    expect(context).toContain("Prefers simple food");
+
+    // None of the dossier a meal estimate never reads…
+    expect(context).not.toContain("WEIGHT");
+    expect(context).not.toContain("TRAINING:");
+    expect(context).not.toContain("TODAY'S SESSION");
+    // …and none of the queries behind it, which is where the saving is.
+    expect(mocks.findManyDaily).not.toHaveBeenCalled();
+    expect(mocks.findManyLift).not.toHaveBeenCalled();
+    expect(mocks.findManyPlans).not.toHaveBeenCalled();
+    expect(mocks.findManyDecisions).not.toHaveBeenCalled();
+  });
+
+  it("still builds the full dossier by default", async () => {
+    await buildAthleteContext("user-1", "2026-10-11");
+
+    expect(mocks.findManyDaily).toHaveBeenCalled();
+    expect(mocks.findManyLift).toHaveBeenCalled();
+  });
+});
+
 describe("generateCoachPlan", () => {
   const REAL = { baseUrl: config.ai.baseUrl, apiKey: config.ai.apiKey };
 

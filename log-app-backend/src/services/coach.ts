@@ -162,7 +162,12 @@ function topSetByWindow(
 export async function buildAthleteContext(
   userId: string,
   today: string = fmtDate(new Date()),
+  scope: "full" | "meal" = "full",
 ): Promise<string> {
+  // A meal turn only needs targets, today's intake and memory — the rest of the dossier
+  // (weights, PRs, plan, adherence) is not just unused, it costs tokens on every turn.
+  if (scope === "meal") return buildMealContext(userId, today);
+
   const now = new Date(`${today}T00:00:00Z`);
   const since = new Date(now);
   since.setUTCDate(since.getUTCDate() - CONTEXT_WINDOW_DAYS);
@@ -1995,8 +2000,10 @@ export async function runCoachChatStream(
   }
   handlers.onSession?.(session.id);
 
+  // Route first, so the context can be built for the agent that will actually run.
+  const agentId = routeAgent(message, agent);
   const [context, recent] = await Promise.all([
-    buildAthleteContext(userId, today),
+    buildAthleteContext(userId, today, agentId === "meal" ? "meal" : "full"),
     prisma.coachMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: "desc" },
@@ -2030,7 +2037,6 @@ export async function runCoachChatStream(
       ] as InputPart[],
     }));
 
-  const agentId = routeAgent(message, agent);
   const activeAgent = AGENTS[agentId];
   const instructions = `${activeAgent.system}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
   const model = activeAgent.model(message);
@@ -2187,6 +2193,53 @@ export async function runCoachChatStream(
   void maybeUpdateMemory(userId, dismissedMeal ? { force: true } : undefined);
 
   return answer;
+}
+
+/**
+ * The meal agent's slice of the athlete context: what it takes to estimate and advise on
+ * food, in three queries instead of a dozen. Detail it needs beyond this — what was
+ * already logged, a day's totals — is one tool call away (get_meals, get_day_logs).
+ */
+async function buildMealContext(userId: string, today: string): Promise<string> {
+  const [targets, todayLog, memory] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { proteinTargetG: true, calorieTarget: true },
+    }),
+    prisma.dailyLog.findUnique({
+      where: { userId_date: { userId, date: new Date(`${today}T00:00:00Z`) } },
+      select: { calories: true, proteinG: true },
+    }),
+    prisma.coachMemory.findUnique({ where: { userId }, select: { summary: true } }),
+  ]);
+
+  const lines = [`TODAY: ${today} (the athlete's local date; units: kg, kcal, g, hours)`];
+
+  const targetBits = [
+    targets?.calorieTarget != null && `${targets.calorieTarget} kcal/day`,
+    targets?.proteinTargetG != null && `${targets.proteinTargetG} g protein/day`,
+  ].filter(Boolean) as string[];
+  if (targetBits.length > 0) {
+    lines.push(`TARGETS: ${targetBits.join(", ")}`);
+  }
+
+  const todayBits = [
+    todayLog?.calories != null && `${todayLog.calories} kcal`,
+    todayLog?.proteinG != null && `${todayLog.proteinG} g protein`,
+  ].filter(Boolean) as string[];
+  if (todayBits.length > 0) {
+    lines.push(
+      `TODAY'S INTAKE (${today}): ${todayBits.join(", ")} so far${
+        targetBits.length > 0 ? " — say what is left against TARGETS when advising" : ""
+      }`,
+    );
+  }
+
+  if (memory?.summary) {
+    lines.push(`LONG-TERM MEMORY (what you remember about this athlete): ${memory.summary}`);
+  }
+
+  return lines.join("\n");
 }
 
 /** Generates a structured program from the athlete's profile + recent data. */
