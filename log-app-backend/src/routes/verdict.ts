@@ -4,6 +4,7 @@ import { prisma } from "../db/client";
 import { recordDecision } from "../services/coachDecisions";
 import {
   computeVerdict,
+  verdictIsUnchanged,
   type PerExerciseDelta,
   type PreviousVerdict,
 } from "../services/verdictEngine";
@@ -51,15 +52,51 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
     const trailing7Start = addDays(todayUtcMidnight, -6);
     const fourWeeksAgoStart = addDays(currentWeekStart, -28);
 
-    const dailyLogs = await prisma.dailyLog.findMany({
-      where: {
-        userId: req.userId,
-        // Four weeks, so a once-a-week weigher can still be read a trend from.
-        date: { gte: addDays(currentWeekStart, -28), lte: todayUtcMidnight },
-      },
-      select: { date: true, weightKg: true, proteinG: true, calories: true },
-      orderBy: { date: "asc" },
-    });
+    // One round of independent reads instead of four sequential awaits.
+    const [dailyLogs, liftLogs, user, prevRow, currentRow] = await Promise.all([
+      prisma.dailyLog.findMany({
+        where: {
+          userId: req.userId,
+          // Four weeks, so a once-a-week weigher can still be read a trend from.
+          date: { gte: addDays(currentWeekStart, -28), lte: todayUtcMidnight },
+        },
+        select: { date: true, weightKg: true, proteinG: true, calories: true },
+        orderBy: { date: "asc" },
+      }),
+      prisma.liftLog.findMany({
+        where: {
+          userId: req.userId,
+          date: { gte: fourWeeksAgoStart, lte: todayUtcMidnight },
+        },
+        select: { date: true, exerciseName: true, weightKg: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: req.userId },
+        select: { proteinTargetG: true, calorieTarget: true, trackWeight: true },
+      }),
+      prisma.weeklyVerdict.findFirst({
+        where: {
+          userId: req.userId,
+          weekStartDate: { lt: currentWeekStart },
+        },
+        orderBy: { weekStartDate: "desc" },
+        select: { verdict: true, strengthTrend: true, weightTrendKgPerWeek: true },
+      }),
+      // This week's row, so a recomputation that changes nothing stays a read.
+      prisma.weeklyVerdict.findUnique({
+        where: {
+          userId_weekStartDate: { userId: req.userId, weekStartDate: currentWeekStart },
+        },
+        select: {
+          weekStartDate: true,
+          verdict: true,
+          weightTrendKgPerWeek: true,
+          strengthTrend: true,
+          adherencePct: true,
+          reasoning: true,
+        },
+      }),
+    ]);
 
     const collectWeights = (start: Date, days: number): { day: number; kg: number }[] => {
       const points: { day: number; kg: number }[] = [];
@@ -78,25 +115,12 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
     const weightSeriesKg =
       weeklyPoints.length >= 4 ? weeklyPoints : collectWeights(addDays(todayUtcMidnight, -27), 28);
 
-    const liftLogs = await prisma.liftLog.findMany({
-      where: {
-        userId: req.userId,
-        date: { gte: fourWeeksAgoStart, lte: todayUtcMidnight },
-      },
-      select: { date: true, exerciseName: true, weightKg: true },
-    });
-
     const exerciseNames = Array.from(new Set(liftLogs.map((l) => l.exerciseName))).slice(0, 200);
     const perExercise: PerExerciseDelta[] = exerciseNames.map((name) => ({
       name,
       thisWeekKg: topSetByWeek(liftLogs, currentWeekStart, addDays(currentWeekStart, 7)),
       lastWeekKg: topSetByWeek(liftLogs, previousWeekStart, currentWeekStart),
     }));
-
-    const user = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { proteinTargetG: true, calorieTarget: true, trackWeight: true },
-    });
 
     const elapsedDays = Math.max(
       1,
@@ -119,15 +143,6 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
 
     const adherencePct = adherenceFor(user?.proteinTargetG, (l) => l.proteinG);
     const calorieAdherencePct = adherenceFor(user?.calorieTarget, (l) => l.calories);
-
-    const prevRow = await prisma.weeklyVerdict.findFirst({
-      where: {
-        userId: req.userId,
-        weekStartDate: { lt: currentWeekStart },
-      },
-      orderBy: { weekStartDate: "desc" },
-      select: { verdict: true, strengthTrend: true, weightTrendKgPerWeek: true },
-    });
 
     const previousVerdict: PreviousVerdict | null =
       prevRow && prevRow.strengthTrend && (prevRow.strengthTrend === "up" || prevRow.strengthTrend === "flat" || prevRow.strengthTrend === "down")
@@ -165,30 +180,35 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       ),
     };
 
-    const verdictRow = await prisma.weeklyVerdict.upsert({
-      where: {
-        userId_weekStartDate: {
-          userId: req.userId,
-          weekStartDate: currentWeekStart,
-        },
-      },
-      create: {
-        userId: req.userId,
-        weekStartDate: currentWeekStart,
-        verdict: result.verdict,
-        weightTrendKgPerWeek: result.weightTrendKgPerWeek,
-        strengthTrend: result.strengthTrend,
-        adherencePct: result.adherencePct,
-        reasoning: result.reasoning,
-      },
-      update: {
-        verdict: result.verdict,
-        weightTrendKgPerWeek: result.weightTrendKgPerWeek,
-        strengthTrend: result.strengthTrend,
-        adherencePct: result.adherencePct,
-        reasoning: result.reasoning,
-      },
-    });
+    // This is a GET: recomputing is the point, but writing is only needed when the
+    // week's picture actually moved (a new weigh-in, session or target change).
+    const verdictRow =
+      currentRow && verdictIsUnchanged(currentRow, result)
+        ? currentRow
+        : await prisma.weeklyVerdict.upsert({
+            where: {
+              userId_weekStartDate: {
+                userId: req.userId,
+                weekStartDate: currentWeekStart,
+              },
+            },
+            create: {
+              userId: req.userId,
+              weekStartDate: currentWeekStart,
+              verdict: result.verdict,
+              weightTrendKgPerWeek: result.weightTrendKgPerWeek,
+              strengthTrend: result.strengthTrend,
+              adherencePct: result.adherencePct,
+              reasoning: result.reasoning,
+            },
+            update: {
+              verdict: result.verdict,
+              weightTrendKgPerWeek: result.weightTrendKgPerWeek,
+              strengthTrend: result.strengthTrend,
+              adherencePct: result.adherencePct,
+              reasoning: result.reasoning,
+            },
+          });
 
     // One ledger entry per week, so the coach can follow its own advice up later.
     try {

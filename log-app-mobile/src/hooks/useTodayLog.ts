@@ -8,10 +8,14 @@ function emptyLog(date: string): DailyLog {
   return { date, weight_kg: null, calories: null, protein_g: null, sleep_hours: null };
 }
 
+type DailyPatch = Partial<Record<DailyField, number | null>>;
+
 /**
  * Daily log for a given date, with the previous day's values as placeholders.
- * Saves optimistically on blur and keeps a retry affordance on failure
- * (Next.js R2.4).
+ * Saves optimistically on blur and keeps a retry affordance on failure (Next.js R2.4).
+ *
+ * Several fields can be saved as one queued PUT, so repeating three locked
+ * defaults costs one request instead of three.
  */
 export function useTodayLog(activeDate: string) {
   const api = useDailyLogsApi();
@@ -35,67 +39,83 @@ export function useTodayLog(activeDate: string) {
     const myDate = dateRef.current;
     setLoading(true);
     setError(null);
-    const controller = new AbortController();
     try {
-      const [current, previous] = await Promise.all([
-        api.getDailyLog(activeDate),
-        api.getDailyLog(addDays(activeDate, -1)),
-      ]);
-      if (controller.signal.aborted || dateRef.current !== myDate) return;
-      setData(current ?? emptyLog(activeDate));
-      setPlaceholder(previous);
+      // One range read covers the day and the day before it.
+      const rows = await api.getDailyLogsRange(addDays(activeDate, -1), activeDate);
+      if (dateRef.current !== myDate) return;
+      setData(rows.find((row) => row.date === activeDate) ?? emptyLog(activeDate));
+      setPlaceholder(rows.find((row) => row.date === addDays(activeDate, -1)) ?? null);
     } catch (err) {
       if (dateRef.current !== myDate) return;
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       if (dateRef.current === myDate) setLoading(false);
     }
-    return () => controller.abort();
   }, [api, activeDate]);
 
   useDataSyncOnFocus(["daily"], load);
 
-  const save = useCallback(
-    async (field: DailyField, value: number | null) => {
+  const saveMany = useCallback(
+    async (patch: DailyPatch) => {
+      const entries = Object.entries(patch) as [DailyField, number | null][];
+      if (entries.length === 0) return;
+
       const run = saveQueueRef.current.then(async () => {
         if (dateRef.current !== activeDate) return;
-        setFieldErrors((prev) => {
-          const next = { ...prev };
-          delete next[field];
+        const clearFields = <T,>(record: Record<string, T>): Record<string, T> => {
+          const next = { ...record };
+          for (const [field] of entries) delete next[field];
+          return next;
+        };
+
+        setFieldErrors(clearFields);
+        setData((cur) => {
+          const next = { ...(cur ?? emptyLog(activeDate)) };
+          for (const [field, value] of entries) next[field] = value;
           return next;
         });
-        setData((cur) => ({ ...(cur ?? emptyLog(activeDate)), [field]: value }));
 
         try {
-          const saved = await api.upsertDailyLog(activeDate, { [field]: value });
+          const saved = await api.upsertDailyLog(activeDate, patch);
           if (dateRef.current !== activeDate) return;
-          setData((cur) => ({ ...(cur ?? emptyLog(activeDate)), [field]: saved[field] }));
-          setRetries((prev) => {
-            const next = { ...prev };
-            delete next[field];
-            return next;
-          });
+          setData((cur) => ({ ...(cur ?? emptyLog(activeDate)), ...saved }));
+          setRetries(clearFields);
         } catch (err) {
           if (dateRef.current !== activeDate) return;
           const message = err instanceof Error ? err.message : "Save failed";
-          setFieldErrors((prev) => ({ ...prev, [field]: message }));
-          setRetries((prev) => ({ ...prev, [field]: value }));
+          setFieldErrors((prev) => ({
+            ...prev,
+            ...Object.fromEntries(entries.map(([field]) => [field, message])),
+          }));
+          setRetries((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
           try {
             const fresh = await api.getDailyLog(activeDate);
-            if (dateRef.current === activeDate && fresh) setData(fresh);
-          } catch {}
+            if (dateRef.current === activeDate && fresh) {
+              // Re-apply what was typed on top of the server read, so the screen
+              // matches "your entry is kept" and the retry above.
+              const restored = { ...fresh };
+              for (const [field, value] of entries) restored[field] = value;
+              setData(restored);
+            }
+          } catch {
+            // the pending values are already on screen and queued for retry
+          }
         }
       });
+
       saveQueueRef.current = run.catch(() => {});
       await run;
     },
     [api, activeDate],
   );
 
+  const save = useCallback((field: DailyField, value: number | null) => saveMany({ [field]: value }), [
+    saveMany,
+  ]);
+
   const retrySave = useCallback(
     async (field?: DailyField) => {
-      const target =
-        field ?? (Object.keys(retries)[0] as DailyField | undefined);
+      const target = field ?? (Object.keys(retries)[0] as DailyField | undefined);
       if (!target) return;
       const value = retries[target];
       if (value !== undefined) await save(target, value);
@@ -103,9 +123,11 @@ export function useTodayLog(activeDate: string) {
     [retries, save],
   );
 
-  const retry = (
-    Object.entries(retries) as [DailyField, number | null][]
-  ).map(([field, value]) => ({ field, value }))[0] ?? null;
+  const retry =
+    (Object.entries(retries) as [DailyField, number | null][]).map(([field, value]) => ({
+      field,
+      value,
+    }))[0] ?? null;
 
   return {
     data,
@@ -115,6 +137,7 @@ export function useTodayLog(activeDate: string) {
     fieldErrors,
     retry,
     save,
+    saveMany,
     retrySave,
     refetch: load,
     today: todayLocal(),

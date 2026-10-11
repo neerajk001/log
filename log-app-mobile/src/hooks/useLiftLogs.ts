@@ -35,6 +35,9 @@ export function useLiftLogs(date: string) {
     const sequence = ++loadSequenceRef.current;
     setLoading(true);
     setLoadError(null);
+    // A reload (or retry) clears a stale mutation failure, so a banner can never
+    // outlive the problem it reported.
+    setMutationError(null);
     try {
       const fetched = await api.getLiftLogsRange(date, date);
       if (sequence !== loadSequenceRef.current) return;

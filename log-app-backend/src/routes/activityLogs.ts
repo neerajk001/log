@@ -54,6 +54,16 @@ router.get(
       },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 5000,
+      select: {
+        id: true,
+        date: true,
+        activityType: true,
+        name: true,
+        durationMin: true,
+        distanceKm: true,
+        caloriesBurned: true,
+        notes: true,
+      },
     });
 
     res.json(logs.map(serializeLog));

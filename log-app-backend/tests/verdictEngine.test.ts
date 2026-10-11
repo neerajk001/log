@@ -3,10 +3,59 @@ import {
   computeVerdict,
   computeStrengthTrend,
   linearRegressionSlopePerDay,
+  verdictIsUnchanged,
+  type VerdictOutput,
   type VerdictInput,
 } from "../src/services/verdictEngine";
 
 const previousNone = null;
+
+/**
+ * `GET /api/verdict/weekly` recomputes on every read; this is what decides whether
+ * the recomputation is worth a database write.
+ */
+describe("verdictIsUnchanged", () => {
+  const computed: VerdictOutput = {
+    verdict: "hold",
+    reasoning: ["Weight steady", "Protein on target"],
+    weightTrendKgPerWeek: -0.4444,
+    strengthTrend: "flat",
+    adherencePct: 80,
+  };
+  // Decimal(4,2) in the database, so the stored trend comes back rounded.
+  const stored = {
+    verdict: "hold",
+    weightTrendKgPerWeek: "-0.44",
+    strengthTrend: "flat",
+    adherencePct: 80,
+    reasoning: ["Weight steady", "Protein on target"],
+  };
+
+  it("treats a rounded stored trend as unchanged", () => {
+    expect(verdictIsUnchanged(stored, computed)).toBe(true);
+  });
+
+  it("reports a change when the call moves", () => {
+    expect(verdictIsUnchanged(stored, { ...computed, verdict: "adjust_calories" })).toBe(false);
+  });
+
+  it("reports a change when a signal or the reasoning moves", () => {
+    expect(verdictIsUnchanged(stored, { ...computed, weightTrendKgPerWeek: -0.71 })).toBe(false);
+    expect(verdictIsUnchanged(stored, { ...computed, adherencePct: 60 })).toBe(false);
+    expect(verdictIsUnchanged(stored, { ...computed, strengthTrend: "up" })).toBe(false);
+    expect(verdictIsUnchanged(stored, { ...computed, reasoning: ["Weight steady"] })).toBe(false);
+  });
+
+  it("matches when neither side has a weight trend", () => {
+    const noWeight = { ...computed, weightTrendKgPerWeek: null };
+    expect(
+      verdictIsUnchanged({ ...stored, weightTrendKgPerWeek: null }, noWeight),
+    ).toBe(true);
+    // A stored trend (or a new one) is a change.
+    expect(verdictIsUnchanged(stored, noWeight)).toBe(false);
+    expect(verdictIsUnchanged({ ...stored, weightTrendKgPerWeek: null }, computed)).toBe(false);
+  });
+});
 
 function buildWeightSeries(start: number, slopePerDay: number, days = 7): number[] {
   return Array.from({ length: days }, (_, i) => +(start + slopePerDay * i).toFixed(2));

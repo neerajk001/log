@@ -38,6 +38,43 @@ export interface VerdictOutput {
   adherencePct: number | null;
 }
 
+/** A stored `weekly_verdicts` row, as read back from the database. */
+export interface StoredVerdict {
+  verdict: string;
+  weightTrendKgPerWeek: unknown;
+  strengthTrend: string | null;
+  adherencePct: number | null;
+  reasoning: unknown;
+}
+
+/**
+ * Whether a freshly computed verdict says the same thing as the row already stored
+ * for the week. `GET /api/verdict/weekly` computes on read, but it only needs to
+ * write when the picture actually changed — otherwise merely opening the app is a
+ * database write.
+ */
+export function verdictIsUnchanged(stored: StoredVerdict, computed: VerdictOutput): boolean {
+  const storedWeight =
+    stored.weightTrendKgPerWeek == null ? null : Number(stored.weightTrendKgPerWeek);
+  const computedWeight = computed.weightTrendKgPerWeek ?? null;
+  // `weight_trend_kg_per_week` is Decimal(4,2), so the stored value is rounded —
+  // compare with slack rather than demanding float equality.
+  const sameWeight =
+    storedWeight == null || computedWeight == null
+      ? storedWeight === computedWeight
+      : Math.abs(storedWeight - computedWeight) < 0.005;
+
+  const storedReasoning = Array.isArray(stored.reasoning) ? (stored.reasoning as unknown[]) : [];
+
+  return (
+    sameWeight &&
+    stored.verdict === computed.verdict &&
+    stored.strengthTrend === computed.strengthTrend &&
+    stored.adherencePct === computed.adherencePct &&
+    storedReasoning.join("\n") === computed.reasoning.join("\n")
+  );
+}
+
 const STRENGTH_DELTA_THRESHOLD = 0.025;
 /**
  * Sparse weighers are normal — plenty of people weigh once a week. Two weigh-ins

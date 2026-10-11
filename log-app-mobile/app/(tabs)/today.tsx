@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, type ErrorBoundaryProps } from "expo-router";
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
@@ -21,8 +21,14 @@ import { useActivity } from "../../src/hooks/useActivity";
 import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { useMeals } from "../../src/hooks/useMeals";
 import { MealSheet } from "../../src/components/MealSheet";
-import type { DailyField, MealLog } from "../../src/api/types";
+import type { DailyField, MealLog, VerdictResponse } from "../../src/api/types";
 import { formatMediumDate } from "../../src/utils/date";
+
+const VERDICT_LABELS: Record<VerdictResponse["verdict"], string> = {
+  hold: "Hold Steady",
+  adjust_calories: "Adjust Calories",
+  check_recovery: "Check Recovery",
+};
 
 interface FieldConfig {
   field: DailyField;
@@ -69,16 +75,24 @@ export default function TodayScreen() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
 
-  const { data, placeholder, loading, error, fieldErrors, retry, save, retrySave, refetch } =
-    useTodayLog(activeDate);
-  const { profile, defaults, update: updateMe } = useMe();
+  const {
+    data,
+    placeholder,
+    loading,
+    error,
+    fieldErrors,
+    retry,
+    save,
+    saveMany,
+    retrySave,
+    refetch,
+  } = useTodayLog(activeDate);
+  const { profile, defaults, update: updateMe, error: meError, refetch: refetchMe } = useMe();
+  const tracksWeight = profile?.track_weight !== false;
   // Weigh-ins only appear when the athlete tracks them (Settings → Track bodyweight).
   const fields = useMemo(
-    () =>
-      fieldConfigs(colors).filter(
-        (f) => f.field !== "weight_kg" || profile?.track_weight !== false,
-      ),
-    [colors, profile?.track_weight],
+    () => fieldConfigs(colors).filter((f) => f.field !== "weight_kg" || tracksWeight),
+    [colors, tracksWeight],
   );
   const { entries: lifts, deleteEntry: deleteLift, loading: liftsLoading, error: liftsError, refetch: refetchLifts } = useLiftLogs(activeDate);
   const {
@@ -89,7 +103,12 @@ export default function TodayScreen() {
     error: activitiesError,
     refetch: refetchActivities,
   } = useActivity(activeDate);
-  const { data: verdict } = useWeeklyVerdict();
+  const {
+    data: verdict,
+    loading: verdictLoading,
+    error: verdictError,
+    refetch: refetchVerdict,
+  } = useWeeklyVerdict();
   const { meals, loading: mealsLoading, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
   const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
 
@@ -120,17 +139,18 @@ export default function TodayScreen() {
 
   useEffect(() => {
     if (loading || !data) return;
+    // One PUT for every locked field this day is missing.
+    const patch: Partial<Record<DailyField, number>> = {};
     for (const f of fields) {
       const locked = defaults[f.field];
-      if (locked != null && (data[f.field] ?? null) == null) {
-        const key = `${activeDate}:${f.field}`;
-        if (appliedRef.current.has(key)) continue;
+      const key = `${activeDate}:${f.field}`;
+      if (locked != null && (data[f.field] ?? null) == null && !appliedRef.current.has(key)) {
         appliedRef.current.add(key);
-        save(f.field, locked);
+        patch[f.field] = locked;
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, defaults, loading, activeDate]);
+    if (Object.keys(patch).length > 0) void saveMany(patch);
+  }, [data, defaults, loading, activeDate, fields, saveMany]);
 
   const toggleLock = useCallback(
     async (field: DailyField) => {
@@ -155,8 +175,13 @@ export default function TodayScreen() {
   );
 
   const applyAllDefaults = useCallback(async () => {
-    for (const f of missingDefaults) await save(f.field, defaults[f.field] ?? null);
-  }, [missingDefaults, defaults, save]);
+    const patch: Partial<Record<DailyField, number>> = {};
+    for (const f of missingDefaults) {
+      const value = defaults[f.field];
+      if (value != null) patch[f.field] = value;
+    }
+    await saveMany(patch);
+  }, [missingDefaults, defaults, saveMany]);
 
   const groupedLifts = useMemo(() => {
     const map = new Map<string, typeof lifts>();
@@ -192,17 +217,28 @@ export default function TodayScreen() {
     router.navigate("/(tabs)/lift" as never);
   }, []);
 
-  const refreshing = loading || liftsLoading || activitiesLoading;
+  const refreshing = loading || liftsLoading || activitiesLoading || mealsLoading || verdictLoading;
   const refetchAll = useCallback(() => {
     refetch();
     refetchLifts();
     refetchActivities();
-  }, [refetch, refetchLifts, refetchActivities]);
+    refetchMeals();
+    refetchVerdict();
+  }, [refetch, refetchLifts, refetchActivities, refetchMeals, refetchVerdict]);
 
-  const verdictLabel =
-    verdict && verdict.weight_trend_kg_per_week != null
-      ? { hold: "Hold Steady", adjust_calories: "Adjust Calories", check_recovery: "Check Recovery" }[verdict.verdict]
-      : null;
+  // Mirrors the verdict screen: a call the engine derived from strength + adherence is
+  // usable without weigh-ins, but a weight-tracker with no trend yet shouldn't be told
+  // to "hold" — that's the "not enough data" case, explained on the verdict screen.
+  const verdictUsable =
+    verdict != null && (!tracksWeight || verdict.weight_trend_kg_per_week != null);
+  const verdictLabel = verdictUsable ? VERDICT_LABELS[verdict.verdict] : null;
+  // A call the engine derived from strength and adherence has no kg/week to show.
+  const verdictNote =
+    verdictUsable && verdict.weight_trend_kg_per_week != null
+      ? `${verdict.weight_trend_kg_per_week > 0 ? "+" : ""}${verdict.weight_trend_kg_per_week.toFixed(2)} kg/week`
+      : verdictUsable
+        ? "From your strength and consistency"
+        : null;
 
   return (
     <View style={styles.container}>
@@ -266,6 +302,10 @@ export default function TodayScreen() {
         />
 
         {error ? <Banner tone="danger" message={error} actionLabel="Retry" onAction={refetch} style={styles.block} /> : null}
+        {/* Only worth showing when we truly don't know their settings yet. */}
+        {meError && !profile ? (
+          <Banner tone="danger" message={meError} actionLabel="Retry" onAction={refetchMe} style={styles.block} />
+        ) : null}
         {retry ? (
           <Banner
             tone="warning"
@@ -325,12 +365,23 @@ export default function TodayScreen() {
 
         {segment === "log" ? (
           <>
+            {verdictError ? (
+              <Banner
+                tone="danger"
+                message={verdictError}
+                actionLabel="Retry"
+                onAction={refetchVerdict}
+                style={styles.block}
+              />
+            ) : null}
+
             {verdictLabel ? (
               <Pressable style={styles.verdictCard} onPress={() => router.navigate("/verdict" as never)}>
                 <IconBadge name="ribbon-outline" bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
                 <View style={styles.verdictText}>
                   <Text style={typography.caption}>Weekly Verdict</Text>
                   <Text style={styles.verdictLabel}>{verdictLabel}</Text>
+                  {verdictNote ? <Text style={typography.small}>{verdictNote}</Text> : null}
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </Pressable>
@@ -647,5 +698,31 @@ const useStyles = makeUseStyles((t) =>
       borderColor: t.colors.border,
       padding: spacing.md,
     },
+
+    errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
+    errorTitle: { textAlign: "center" },
+    errorText: { textAlign: "center", color: t.colors.textDim },
   }),
 );
+
+/**
+ * Route-level fallback (expo-router picks this up): a render crash on Today becomes
+ * a friendly, retryable card instead of a red box.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.errorWrap}>
+        <IconBadge name="alert-circle-outline" bg={colors.surface} color={colors.danger} size={56} rounded={false} />
+        <Text style={[typography.h3, styles.errorTitle]}>Today couldn&apos;t load</Text>
+        <Text style={[typography.small, styles.errorText]}>
+          {error?.message ?? "Something went wrong on this screen."}
+        </Text>
+        <Button label="Try again" icon="refresh" onPress={() => void retry()} />
+      </View>
+    </View>
+  );
+}
