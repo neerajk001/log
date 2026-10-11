@@ -12,6 +12,7 @@ import { setPendingPlan } from "../../state/parsedPlan";
 import { formatMediumDate } from "../../utils/date";
 import type { IoniconName } from "../ui/primitives";
 import type { ChatProposal } from "../../hooks/useCoachChat";
+import type { MealItem } from "../../api/types";
 
 const TITLES: Record<ChatProposal["proposal"]["kind"], string> = {
   plan_update: "Plan update",
@@ -34,6 +35,16 @@ const ICONS: Record<ChatProposal["proposal"]["kind"], IoniconName> = {
   meal_update: "create-outline",
   meal_delete: "trash-outline",
 };
+
+/** One line per item, with that item's own numbers — not just the meal's total. */
+function itemLines(items: MealItem[]): string {
+  return items
+    .map(
+      (i) =>
+        `• ${i.name}${i.quantity ? ` (${i.quantity})` : ""} — ${i.calories} kcal · ${i.protein_g} g protein`,
+    )
+    .join("\n");
+}
 
 /** A coach-proposed change, applied only when the user confirms. */
 export function ProposalCard({
@@ -250,11 +261,12 @@ export function ProposalCard({
       case "set_delete":
         return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${proposal.weight_kg} kg × ${proposal.reps}`;
       case "meal_log":
-        return `${proposal.title} · ${proposal.calories} kcal · ${proposal.protein_g} g protein\n${proposal.items
-          .map((i) => `${i.name}${i.quantity ? ` (${i.quantity})` : ""}`)
-          .join(", ")}`;
+        return [`${proposal.title} · ${proposal.calories} kcal · ${proposal.protein_g} g protein`, itemLines(proposal.items)].join("\n");
       case "meal_update":
-        return `Update "${proposal.title}" · ${proposal.calories} kcal · ${proposal.protein_g} g protein`;
+        return [
+          `Update "${proposal.title}" · ${proposal.calories} kcal · ${proposal.protein_g} g protein`,
+          itemLines(proposal.items),
+        ].join("\n");
       case "meal_delete":
         return `Remove "${proposal.title}" · ${proposal.calories} kcal · ${proposal.protein_g} g?`;
     }
