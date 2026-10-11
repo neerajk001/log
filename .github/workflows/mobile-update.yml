@@ -63,6 +63,16 @@ jobs:
       - name: Typecheck
         run: pnpm exec tsc --noEmit
 
+      # Fail with the fix, rather than a cryptic auth error from the publish step.
+      - name: Check the Expo token
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::EXPO_TOKEN is not set. Create an Expo access token (expo.dev → Account settings → Access tokens) and add it as a repository secret named EXPO_TOKEN, then re-run this workflow."
+            exit 1
+          fi
+
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
