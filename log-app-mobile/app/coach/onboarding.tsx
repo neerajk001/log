@@ -2,7 +2,6 @@ import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
-import * as DocumentPicker from "expo-document-picker";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
@@ -15,7 +14,7 @@ import { useCoachProfile } from "../../src/hooks/useCoachProfile";
 import { useCoachApi } from "../../src/api/coach";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
-import { preparePhoto } from "../../src/utils/image";
+import { pickPhoto, preparePhoto, type PhotoSource } from "../../src/utils/image";
 import { formatMediumDate } from "../../src/utils/date";
 import type { CoachProfile, CoachProfileInput, PhysiqueReading } from "../../src/api/types";
 import type { EditableDay } from "../../src/components/PlanDaysEditor";
@@ -176,28 +175,52 @@ function PlanBuilderWizard({
     }
   }, [onSave, payload, coachApi, goals, notes]);
 
-  const onPickPhoto = useCallback(async () => {
-    setError(null);
-    try {
-      const res = await DocumentPicker.getDocumentAsync({ type: "image/*", copyToCacheDirectory: true });
-      if (res.canceled || !res.assets?.length) return;
-      // Shrink before upload: the vision cost scales with pixels.
-      const photo = await preparePhoto(res.assets[0]);
-      const form = new FormData();
-      form.append("file", {
-        uri: photo.uri,
-        name: photo.name,
-        type: photo.type,
-      } as unknown as Blob);
-      if (notes.trim()) form.append("description", notes.trim());
-      setBusy("photo");
-      setReading(await coachApi.analyzePhoto(form));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't analyze that photo.");
-    } finally {
-      setBusy(null);
-    }
-  }, [coachApi, notes]);
+  const onPickPhoto = useCallback(
+    async (source: PhotoSource) => {
+      setError(null);
+      try {
+        const picked = await pickPhoto(source);
+        if (!picked) return;
+        if ("error" in picked) {
+          setError(picked.error);
+          return;
+        }
+        // Shrink before upload: the vision cost scales with pixels.
+        const photo = await preparePhoto({
+          uri: picked.asset.uri,
+          width: picked.asset.width,
+          height: picked.asset.height,
+          name: picked.asset.fileName ?? null,
+          mimeType: picked.asset.mimeType ?? null,
+        });
+        const form = new FormData();
+        form.append("file", {
+          uri: photo.uri,
+          name: photo.name,
+          type: photo.type,
+        } as unknown as Blob);
+        if (notes.trim()) form.append("description", notes.trim());
+        setBusy("photo");
+        setReading(await coachApi.analyzePhoto(form));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't analyze that photo.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [coachApi, notes],
+  );
+
+  /** Snap it or pick one — the camera is offered first. */
+  const choosePhoto = useCallback(
+    () =>
+      Alert.alert("Add a check-in photo", "Snap it now, or choose one you already have.", [
+        { text: "Take photo", onPress: () => void onPickPhoto("camera") },
+        { text: "Choose photo", onPress: () => void onPickPhoto("library") },
+        { text: "Cancel", style: "cancel" },
+      ]),
+    [onPickPhoto],
+  );
 
   return (
     <StepScaffold
@@ -343,7 +366,7 @@ function PlanBuilderWizard({
             label="Add a body photo (optional)"
             icon="camera-outline"
             variant="outline"
-            onPress={onPickPhoto}
+            onPress={choosePhoto}
             loading={busy === "photo"}
             disabled={busy != null}
           />

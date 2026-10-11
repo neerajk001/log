@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Pressable,
@@ -13,7 +14,6 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import * as DocumentPicker from "expo-document-picker";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
@@ -23,7 +23,7 @@ import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
 import { useMealsApi } from "../../api/meals";
-import { preparePhoto } from "../../utils/image";
+import { pickPhoto, preparePhoto, type PhotoSource } from "../../utils/image";
 import { todayLocal } from "../../utils/date";
 import type { AgentId, CoachProposal } from "../../api/types";
 
@@ -86,15 +86,22 @@ export function CoachChat({
     send(text);
   };
 
-  const pickMealPhoto = async () => {
+  const addMealPhoto = async (source: PhotoSource) => {
     try {
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "image/*",
-        copyToCacheDirectory: true,
-      });
-      if (res.canceled || !res.assets?.length) return;
+      const picked = await pickPhoto(source);
+      if (!picked) return;
+      if ("error" in picked) {
+        injectAssistant(picked.error);
+        return;
+      }
       // Shrink before upload: the vision cost scales with pixels.
-      const photo = await preparePhoto(res.assets[0]);
+      const photo = await preparePhoto({
+        uri: picked.asset.uri,
+        width: picked.asset.width,
+        height: picked.asset.height,
+        name: picked.asset.fileName ?? null,
+        mimeType: picked.asset.mimeType ?? null,
+      });
       const form = new FormData();
       form.append("file", {
         uri: photo.uri,
@@ -134,6 +141,14 @@ export function CoachChat({
       setPhotoBusy(false);
     }
   };
+
+  /** Snap it or pick one — the camera is the point, so it's offered first. */
+  const pickMealPhoto = () =>
+    Alert.alert("Add a meal photo", "Snap it now, or choose one you already have.", [
+      { text: "Take photo", onPress: () => void addMealPhoto("camera") },
+      { text: "Choose photo", onPress: () => void addMealPhoto("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior="padding">

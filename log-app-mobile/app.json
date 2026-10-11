@@ -41,7 +41,14 @@
         }
       ],
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Log uses your photos so you can add a meal or a check-in picture.",
+          "cameraPermission": "Log uses the camera so you can snap a meal or a check-in photo."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

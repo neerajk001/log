@@ -1,4 +1,5 @@
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
 
 /** Longest edge sent to the vision models — plenty to read a plate or a physique. */
 const MAX_EDGE = 1280;
@@ -8,6 +9,39 @@ export interface UploadPhoto {
   uri: string;
   name: string;
   type: string;
+}
+
+export type PhotoSource = "camera" | "library";
+
+/** A picked image, a plain-language reason we can't get one, or null if cancelled. */
+export type PhotoPick = { asset: ImagePicker.ImagePickerAsset } | { error: string } | null;
+
+/**
+ * Snaps a photo or opens the library. Compression is left to `preparePhoto`, so the
+ * picker returns the full-quality original rather than compressing twice.
+ */
+export async function pickPhoto(source: PhotoSource): Promise<PhotoPick> {
+  const permission =
+    source === "camera"
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+  if (!permission.granted) {
+    return {
+      error:
+        source === "camera"
+          ? "Camera access is off. Turn it on in your phone settings to snap a photo."
+          : "Photo access is off. Turn it on in your phone settings to choose one.",
+    };
+  }
+
+  const result =
+    source === "camera"
+      ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 })
+      : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality: 1 });
+
+  if (result.canceled || result.assets.length === 0) return null;
+  return { asset: result.assets[0] };
 }
 
 /**
