@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocalSearchParams } from "expo-router";
 import { CoachChat } from "../../src/components/coach/CoachChat";
 import { LoadingState } from "../../src/components/ui/primitives";
@@ -34,14 +34,31 @@ export default function NewCoachChatScreen() {
     [isDaily, sessions, today],
   );
 
-  // Resolve today's chat before mounting: otherwise the first message would create
-  // a second session while the lookup is still in flight.
+  /**
+   * Resolve today's thread once, then hold on to it.
+   *
+   * The sessions list refetches whenever the screen regains focus — and opening the camera
+   * or photo library takes focus away and gives it back. Letting the resolved id move would
+   * remount the chat mid-visit, taking an estimate awaiting confirmation (and its
+   * Log it / Dismiss buttons) with it. The key rotates on the date instead, so a midnight
+   * rollover still starts the next day's thread.
+   */
+  const [resolvedSessionId, setResolvedSessionId] = useState<string | undefined>(undefined);
+  const resolvedRef = useRef(false);
+  useEffect(() => {
+    if (resolvedRef.current || (isDaily && loading)) return;
+    resolvedRef.current = true;
+    setResolvedSessionId(dailySession?.id);
+  }, [isDaily, loading, dailySession?.id]);
+
+  // Resolve today's chat before mounting: otherwise the first message would create a
+  // second session while the lookup is still in flight.
   if (isDaily && loading) return <LoadingState label="Opening today's food log…" />;
 
   return (
     <CoachChat
-      key={dailySession?.id ?? "new"}
-      sessionId={dailySession?.id}
+      key={isDaily ? `meal-${today}` : "new"}
+      sessionId={resolvedSessionId}
       initialAgent={initialAgent}
       initialMessage={q}
     />
