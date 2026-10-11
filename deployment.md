@@ -50,17 +50,28 @@ never in source control.
 
 ## Mobile app — Expo
 
-- Development: `npx expo start`, tested via Expo Go or a dev build during
-  Phase 1-2.
-- Distribution build: **EAS Build** (`eas build --platform ios|android`)
-  once the core loop is stable — targeted for Phase 3, per the open
-  decision in `AGENTS.md` on exact timing.
-- `EXPO_PUBLIC_API_BASE_URL` must point at the production
-  `https://api.<domain>` URL for release builds, and can point at a local
-  IP/tunnel during development.
-- App Store / Play Store submission is explicitly out of scope for the
-  phases defined in `tasks/` — those are internal-testing builds only
-  unless the product owner requests store submission as a later phase.
+- Development: `npx expo start`, tested via Expo Go or a dev build.
+- **Release APK** (internal testing):
+  `eas build --platform android --profile preview`. That profile sets
+  `channel: "preview"`, `distribution: "internal"`, `android.buildType: "apk"`, and bakes
+  in the production API URL and Clerk publishable key. A local dev build or Expo Go has no
+  update channel, so OTA updates never apply there.
+- **Over-the-air updates**: `expo-updates` is installed and `app.json` points at the EAS
+  project (`updates.url`) with `runtimeVersion.policy: "appVersion"`. A push to `main`
+  touching `log-app-mobile/**` publishes a JS/asset update to the **preview** channel via
+  `.github/workflows/mobile-update.yml`, which requires the repository secret
+  `EXPO_TOKEN` (Expo → account settings → access tokens); the workflow can also be run
+  manually from the Actions tab to target `preview` or `production`. Locally:
+  `npx eas-cli@latest update --channel preview`. The installed app downloads on launch and
+  applies the update on the **next** launch.
+- **Bump `version` in `app.json` whenever a native module or native config changes** — the
+  runtimeVersion follows appVersion, so bumping keeps a JS update from landing on a build
+  that lacks the new native side. Rebuild and reinstall after such a change; JS-only changes
+  still ship by OTA.
+- `EXPO_PUBLIC_API_BASE_URL` is the production `https://api.…` URL in both build profiles,
+  and can point at a local LAN IP during development.
+- App Store / Play Store submission is explicitly out of scope for the phases in `tasks/` —
+  internal-testing builds only unless the product owner asks for store submission later.
 
 ## Database — Neon
 
