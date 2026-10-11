@@ -72,14 +72,14 @@ const MEAL_RULES = `- The athlete can log what they ate right here in chat. Esti
   common portion and put the assumed portion in the item's "quantity" (e.g. "1 cup cooked"). Keep
   estimates close to accurate and conservative; use the common home preparation for regional dishes.
   When a portion or dish is genuinely ambiguous, ask ONE short clarifying question instead of guessing
-  and wait for the answer. Use get_meals to see what's already logged (avoid duplicates), then call
-  log_meal to propose it — update_meal / delete_meal to correct one. Never say a meal is logged before
-  the athlete confirms.
-- Logging always goes ON TOP of the day's total, and the day's total can already include numbers the
-  athlete typed straight in (not from a meal). So before proposing: call get_meals, compare its
-  day_total / entered_directly with what they just described, and if the day already looks like it
-  covers this food, ask whether this is an extra or the same thing already counted — never silently
-  add a duplicate.
+  and wait for the answer. Today's meal rows are listed in your context, so call get_meals only when you
+  need their items or another day's meals — then call log_meal to propose it. update_meal / delete_meal
+  correct one. Never say a meal is logged before the athlete confirms.
+- Logging always goes ON TOP of the day's total, and that total can already include numbers the
+  athlete typed straight in (not from a meal). So compare the day's total in your context with the
+  meal rows listed (and with what they just described): if the day already looks like it covers this
+  food, ask whether this is an extra or the same thing already counted — never silently add a
+  duplicate. Only call get_meals when you need the items behind a row.
 - Branded or packaged food (or anything you're unsure about): call lookup_food first and base the estimate
   on its per-100 g figures times the portion you assume — say where the numbers came from and the portion.
   If nothing is found, ask for the label or quantity, or estimate and say it's an estimate.
@@ -1280,8 +1280,10 @@ async function lookupFood(query: string): Promise<unknown> {
     const data = (await fetchJson(
       offUrl,
       { headers: { "User-Agent": config.food.offUserAgent, Accept: "application/json" } },
-      6000,
-      1,
+      // A tight budget: this call sits inside a turn the athlete is waiting on, so a slow or
+      // flaky Open Food Facts must give up quickly and let the model estimate instead.
+      3000,
+      0,
     )) as {
       products?: {
         product_name?: string;
@@ -1321,7 +1323,7 @@ async function lookupFood(query: string): Promise<unknown> {
           query: `${query} calories protein per 100g`,
           max_results: 3,
         }),
-        signal: AbortSignal.timeout(6000),
+        signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
         const data = (await res.json()) as {
@@ -2125,12 +2127,20 @@ export async function runCoachChatStream(
 
     if (!allowTools || result.calls.length === 0) break;
 
+    handlers.onStatus?.(TOOL_LABELS[result.calls[0].name] ?? "Looking that up…");
+
+    // Independent lookups run together: a turn that wants the day's meals *and* a food
+    // lookup shouldn't pay for them one after the other.
+    const settled = await Promise.all(
+      result.calls.map(async (call) => {
+        const output = await executeCoachTool(userId, call.name, call.args, today);
+        return { call, output, proposal: extractProposal(output) };
+      }),
+    );
+
     const outputs: unknown[] = [];
-    for (const call of result.calls) {
-      handlers.onStatus?.(TOOL_LABELS[call.name] ?? "Looking that up…");
+    for (const { call, output, proposal } of settled) {
       usedTools.push(call.name);
-      const output = await executeCoachTool(userId, call.name, call.args, today);
-      const proposal = extractProposal(output);
       if (proposal) handlers.onProposal?.(proposal);
       outputs.push({
         type: "function_call_output",
@@ -2197,11 +2207,11 @@ export async function runCoachChatStream(
 
 /**
  * The meal agent's slice of the athlete context: what it takes to estimate and advise on
- * food, in three queries instead of a dozen. Detail it needs beyond this — what was
- * already logged, a day's totals — is one tool call away (get_meals, get_day_logs).
+ * food, in four small queries. Detail beyond this — a day's items, an older day — is one tool
+ * call away (get_meals, get_day_logs).
  */
 async function buildMealContext(userId: string, today: string): Promise<string> {
-  const [targets, todayLog, memory] = await Promise.all([
+  const [targets, todayLog, memory, todayMeals] = await Promise.all([
     prisma.user.findUnique({
       where: { id: userId },
       select: { proteinTargetG: true, calorieTarget: true },
@@ -2211,6 +2221,13 @@ async function buildMealContext(userId: string, today: string): Promise<string> 
       select: { calories: true, proteinG: true },
     }),
     prisma.coachMemory.findUnique({ where: { userId }, select: { summary: true } }),
+    // The day's meal rows, so the agent doesn't have to spend a whole model round calling
+    // get_meals just to notice what's already there.
+    prisma.mealLog.findMany({
+      where: { userId, date: new Date(`${today}T00:00:00Z`) },
+      orderBy: { createdAt: "asc" },
+      select: { title: true, calories: true, proteinG: true },
+    }),
   ]);
 
   const lines = [`TODAY: ${today} (the athlete's local date; units: kg, kcal, g, hours)`];
@@ -2237,6 +2254,14 @@ async function buildMealContext(userId: string, today: string): Promise<string> 
 
   if (memory?.summary) {
     lines.push(`LONG-TERM MEMORY (what you remember about this athlete): ${memory.summary}`);
+  }
+
+  if (todayMeals.length > 0) {
+    lines.push(
+      `TODAY'S MEALS SO FAR: ${todayMeals
+        .map((meal) => `${meal.title} (${meal.calories} kcal, ${meal.proteinG} g protein)`)
+        .join("; ")}`,
+    );
   }
 
   return lines.join("\n");

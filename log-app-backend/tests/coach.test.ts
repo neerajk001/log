@@ -946,6 +946,10 @@ describe("buildAthleteContext meal scope", () => {
     mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 110, calorieTarget: 1600 });
     mocks.findUniqueDaily.mockResolvedValue({ calories: 900, proteinG: 60 });
     mocks.findUniqueMemory.mockResolvedValue({ summary: "Prefers simple food." });
+    mocks.findManyMeals.mockResolvedValue([
+      { title: "Breakfast", calories: 320, proteinG: 18 },
+      { title: "Lunch", calories: 480, proteinG: 25 },
+    ]);
 
     const context = await buildAthleteContext("user-1", "2026-10-11", "meal");
 
@@ -953,6 +957,9 @@ describe("buildAthleteContext meal scope", () => {
     expect(context).toContain("TARGETS: 1600 kcal/day, 110 g protein/day");
     expect(context).toContain("TODAY'S INTAKE (2026-10-11): 900 kcal, 60 g protein so far");
     expect(context).toContain("Prefers simple food");
+    // The day's rows travel with the context, so the agent doesn't spend a model round on
+    // get_meals just to see what is already there.
+    expect(context).toContain("TODAY'S MEALS SO FAR: Breakfast (320 kcal, 18 g protein); Lunch (480 kcal, 25 g protein)");
 
     // None of the dossier a meal estimate never reads…
     expect(context).not.toContain("WEIGHT");
@@ -963,6 +970,14 @@ describe("buildAthleteContext meal scope", () => {
     expect(mocks.findManyLift).not.toHaveBeenCalled();
     expect(mocks.findManyPlans).not.toHaveBeenCalled();
     expect(mocks.findManyDecisions).not.toHaveBeenCalled();
+  });
+
+  it("omits the meals line when nothing is logged yet", async () => {
+    mocks.findManyMeals.mockResolvedValue([]);
+
+    const context = await buildAthleteContext("user-1", "2026-10-11", "meal");
+
+    expect(context).not.toContain("TODAY'S MEALS SO FAR");
   });
 
   it("still builds the full dossier by default", async () => {
