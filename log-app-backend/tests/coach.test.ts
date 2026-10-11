@@ -9,8 +9,12 @@ import {
 
 const mocks = vi.hoisted(() => ({
   findUniqueProfile: vi.fn(),
+  findUniqueUser: vi.fn(),
   findManyDaily: vi.fn(),
+  findUniqueDaily: vi.fn(),
   findManyLift: vi.fn(),
+  groupByLift: vi.fn(),
+  findManyDecisions: vi.fn(),
   findManyVerdicts: vi.fn(),
   findFirstPlan: vi.fn(),
   findManyPlans: vi.fn(),
@@ -19,7 +23,9 @@ const mocks = vi.hoisted(() => ({
   findFirstLift: vi.fn(),
   findManyMeals: vi.fn(),
   findFirstMeal: vi.fn(),
+  aggregateMeals: vi.fn(),
   findManyCoachMessages: vi.fn(),
+  createCoachMessage: vi.fn(),
   findFirstSession: vi.fn(),
   createSession: vi.fn(),
   findUniqueMemory: vi.fn(),
@@ -29,13 +35,32 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/db/client", () => ({
   prisma: {
     coachProfile: { findUnique: mocks.findUniqueProfile },
-    dailyLog: { findMany: mocks.findManyDaily, findFirst: mocks.findFirstDaily },
-    liftLog: { findMany: mocks.findManyLift, findFirst: mocks.findFirstLift },
+    user: { findUnique: mocks.findUniqueUser },
+    dailyLog: {
+      findMany: mocks.findManyDaily,
+      findFirst: mocks.findFirstDaily,
+      findUnique: mocks.findUniqueDaily,
+    },
+    liftLog: {
+      findMany: mocks.findManyLift,
+      findFirst: mocks.findFirstLift,
+      groupBy: mocks.groupByLift,
+    },
+    coachDecision: {
+      findMany: mocks.findManyDecisions,
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({}),
+    },
     weeklyVerdict: { findMany: mocks.findManyVerdicts },
     workoutPlan: { findFirst: mocks.findFirstPlan, findMany: mocks.findManyPlans },
-    mealLog: { findMany: mocks.findManyMeals, findFirst: mocks.findFirstMeal },
+    mealLog: {
+      findMany: mocks.findManyMeals,
+      findFirst: mocks.findFirstMeal,
+      aggregate: mocks.aggregateMeals,
+    },
     activityLog: { findMany: mocks.findManyActivity },
-    coachMessage: { findMany: mocks.findManyCoachMessages, create: vi.fn().mockResolvedValue({}) },
+    coachMessage: { findMany: mocks.findManyCoachMessages, create: mocks.createCoachMessage },
     coachSession: {
       findFirst: mocks.findFirstSession,
       create: mocks.createSession,
@@ -63,17 +88,23 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
   mocks.findUniqueProfile.mockReset().mockResolvedValue(null);
+  mocks.findUniqueUser.mockReset().mockResolvedValue(null);
+  mocks.findUniqueDaily.mockReset().mockResolvedValue(null);
   mocks.findManyDaily.mockReset().mockResolvedValue([]);
   mocks.findManyLift.mockReset().mockResolvedValue([]);
+  mocks.groupByLift.mockReset().mockResolvedValue([]);
+  mocks.findManyDecisions.mockReset().mockResolvedValue([]);
   mocks.findManyVerdicts.mockReset().mockResolvedValue([]);
   mocks.findFirstPlan.mockReset().mockResolvedValue(null);
   mocks.findManyPlans.mockReset().mockResolvedValue([]);
   mocks.findFirstLift.mockReset().mockResolvedValue(null);
   mocks.findManyMeals.mockReset().mockResolvedValue([]);
   mocks.findFirstMeal.mockReset().mockResolvedValue(null);
+  mocks.aggregateMeals.mockReset().mockResolvedValue({ _sum: { calories: 0, proteinG: 0 } });
   mocks.findManyActivity.mockReset().mockResolvedValue([]);
   mocks.findFirstDaily.mockReset().mockResolvedValue(null);
   mocks.findManyCoachMessages.mockReset().mockResolvedValue([]);
+  mocks.createCoachMessage.mockReset().mockResolvedValue({});
   mocks.findFirstSession.mockReset().mockResolvedValue(null);
   mocks.createSession.mockReset().mockResolvedValue({ id: "sess-1" });
   mocks.findUniqueMemory.mockReset().mockResolvedValue(null);
@@ -129,8 +160,33 @@ describe("buildAthleteContext", () => {
     ]);
     mocks.findFirstPlan.mockResolvedValue({
       name: "My Plan",
-      planDays: [{ dayName: "Push" }, { dayName: "Pull" }, { dayName: "Legs" }],
+      createdAt: new Date("2026-09-25"),
+      planDays: [
+        {
+          id: "day-1",
+          dayName: "Push",
+          dayOrder: 1,
+          exercises: [{ name: "Bench Press", sets: 4, reps: "8", weight_kg: 60 }],
+        },
+        { id: "day-2", dayName: "Pull", dayOrder: 2, exercises: [] },
+        {
+          id: "day-3",
+          dayName: "Legs",
+          dayOrder: 3,
+          exercises: [{ name: "Squat", sets: 3, reps: "5" }],
+        },
+      ],
     });
+    mocks.groupByLift.mockResolvedValue([{ exerciseName: "Deadlift", _max: { weightKg: 120 } }]);
+    mocks.findManyDecisions.mockResolvedValue([
+      {
+        summary: "Add ~200 kcal/day",
+        topic: "diet",
+        reviewOn: new Date("2026-10-02"),
+        outcome: null,
+        createdAt: new Date("2026-09-25"),
+      },
+    ]);
 
     const context = await buildAthleteContext("user-1");
 
@@ -149,7 +205,13 @@ describe("buildAthleteContext", () => {
     expect(context).toContain("WEEKLY VERDICT");
     expect(context).toContain("hold");
     expect(context).toContain("VERDICT HISTORY (newest first):");
-    expect(context).toContain("ACTIVE PLAN \"My Plan\": Push, Pull, Legs");
+    expect(context).toContain("PRS (all time): Deadlift 120kg");
+    expect(context).toContain("DECISIONS (most recent first): 2026-09-25 — Add ~200 kcal/day");
+    expect(context).toContain("TRAINING:");
+    expect(context).toContain('PLAN "My Plan": 3 days');
+    // 2026-10-09 is 14 days after the plan started, so the rotation lands on day 3.
+    expect(context).toContain("TODAY = Legs");
+    expect(context).toContain("TODAY'S SESSION (Legs): Squat 3x5");
   });
 
   it("caps the exercise list at 12 by volume", async () => {
@@ -164,6 +226,29 @@ describe("buildAthleteContext", () => {
     const context = await buildAthleteContext("user-1");
     const liftLine = context.split("\n").find((l) => l.startsWith("LIFTS")) ?? "";
     expect(liftLine.split(";")).toHaveLength(12);
+  });
+
+  it("includes the nutrition targets and today's intake", async () => {
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 160, calorieTarget: 2200 });
+    mocks.findManyDaily.mockResolvedValue([
+      { date: new Date("2026-10-09"), weightKg: 81, calories: 1450, proteinG: 95, sleepHours: null },
+    ]);
+
+    const context = await buildAthleteContext("user-1", "2026-10-09");
+
+    expect(context).toContain("TARGETS: 2200 kcal/day, 160 g protein/day");
+    expect(context).toContain("TODAY'S INTAKE (2026-10-09): 1450 kcal, 95 g protein so far");
+  });
+
+  it("omits the targets line when none are set", async () => {
+    mocks.findManyDaily.mockResolvedValue([
+      { date: new Date("2026-10-09"), weightKg: 81, calories: 1450, proteinG: 95, sleepHours: null },
+    ]);
+
+    const context = await buildAthleteContext("user-1", "2026-10-09");
+
+    expect(context).not.toContain("TARGETS:");
+    expect(context).toContain("TODAY'S INTAKE (2026-10-09): 1450 kcal, 95 g protein so far");
   });
 });
 
@@ -255,6 +340,34 @@ describe("coachChatSchema", () => {
     expect(coachChatSchema.safeParse({ message: "" }).success).toBe(false);
     expect(coachChatSchema.safeParse({ message: "hi" }).success).toBe(true);
   });
+
+  it("accepts a dismissed meal estimate", () => {
+    const parsed = coachChatSchema.safeParse({
+      message: "rotis are bigger and I didn't count the ghee",
+      dismissedMeal: {
+        title: "Breakfast",
+        items: [{ name: "Roti", quantity: "2 medium", calories: 240, protein_g: 6 }],
+        calories: 520,
+        protein_g: 38,
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects a dismissed meal with out-of-range numbers", () => {
+    const parsed = coachChatSchema.safeParse({
+      message: "x",
+      dismissedMeal: {
+        title: "Breakfast",
+        items: [{ name: "Roti", calories: 9000, protein_g: 6 }],
+        calories: 520,
+        protein_g: 38,
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
 });
 
 describe("parseOpenAIDelta", () => {
@@ -330,6 +443,7 @@ describe("agents", () => {
       "get_meals",
       "log_meal",
       "lookup_food",
+      "record_decision",
       "update_meal",
     ]);
   });
@@ -753,6 +867,39 @@ describe("coach proposals", () => {
     expect(result.totals).toEqual({ calories: 960, protein_g: 54 });
   });
 
+  it("separates the meals it can see from numbers typed straight onto the day", async () => {
+    mocks.findManyMeals.mockResolvedValue([
+      { id: "m1", title: "Breakfast", items: [], calories: 360, proteinG: 14 },
+    ]);
+    // The athlete also typed 600 kcal / 40 g in by hand, so the day's total is
+    // higher than the meal rows account for.
+    mocks.findUniqueDaily.mockResolvedValue({ calories: 960, proteinG: 54 });
+
+    const result = (await executeCoachTool("user-1", "get_meals", "{}", "2026-10-10")) as {
+      totals: { calories: number; protein_g: number };
+      day_total: { calories: number; protein_g: number };
+      entered_directly: { calories: number; protein_g: number };
+    };
+
+    expect(result.totals).toEqual({ calories: 360, protein_g: 14 });
+    expect(result.day_total).toEqual({ calories: 960, protein_g: 54 });
+    expect(result.entered_directly).toEqual({ calories: 600, protein_g: 40 });
+  });
+
+  it("never reports a negative manual remainder", async () => {
+    mocks.findManyMeals.mockResolvedValue([
+      { id: "m1", title: "Breakfast", items: [], calories: 500, proteinG: 20 },
+    ]);
+    // The day was edited down below what the meal rows add up to.
+    mocks.findUniqueDaily.mockResolvedValue({ calories: 300, proteinG: 10 });
+
+    const result = (await executeCoachTool("user-1", "get_meals", "{}", "2026-10-10")) as {
+      entered_directly: { calories: number; protein_g: number };
+    };
+
+    expect(result.entered_directly).toEqual({ calories: 0, protein_g: 0 });
+  });
+
   it("errors when the meal to delete isn't the caller's", async () => {
     mocks.findFirstMeal.mockResolvedValue(null);
     expect(await executeCoachTool("user-1", "delete_meal", JSON.stringify({ meal_id: "x" }))).toHaveProperty(
@@ -801,6 +948,112 @@ describe("runCoachChatStream sessions", () => {
         onDelta: () => {},
       }),
     ).rejects.toMatchObject({ statusCode: 404, code: "NOT_FOUND" });
+  });
+});
+
+describe("dismissed meal feedback", () => {
+  const REAL_KEY = config.ai.apiKey;
+
+  const sse = (...events: unknown[]) =>
+    new Response(
+      `${events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("")}data: [DONE]\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+
+  afterEach(() => {
+    config.ai.apiKey = REAL_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  it("carries the estimate and the reason to the model but stores only the reason", async () => {
+    config.ai.apiKey = "test-key";
+    let sent: { input?: { content?: { text?: string }[] }[] } = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body ?? "{}"));
+        return sse(
+          { type: "response.output_text.delta", delta: "Corrected." },
+          { type: "response.completed", response: { id: "resp_1" } },
+        );
+      }),
+    );
+
+    await runCoachChatStream(
+      "user-1",
+      null,
+      "rotis are bigger and I didn't count the ghee",
+      "2026-10-09",
+      { onDelta: () => {} },
+      undefined,
+      undefined,
+      {
+        title: "Breakfast",
+        items: [{ name: "Roti", quantity: "2 medium", calories: 240, protein_g: 6 }],
+        calories: 520,
+        protein_g: 38,
+      },
+    );
+
+    const modelText = sent.input?.[sent.input.length - 1]?.content?.[0]?.text ?? "";
+    expect(modelText).toContain("DISMISSED ESTIMATE");
+    expect(modelText).toContain("Roti (2 medium) 240 kcal");
+    expect(modelText).toContain("520 kcal");
+    expect(modelText).toContain("rotis are bigger and I didn't count the ghee");
+
+    // The transcript keeps the athlete's own words — no synthetic tool context.
+    expect(mocks.createCoachMessage).toHaveBeenCalledWith({
+      data: {
+        userId: "user-1",
+        sessionId: "sess-1",
+        role: "user",
+        content: "rotis are bigger and I didn't count the ghee",
+      },
+    });
+  });
+
+  it("forces the memory refresh so a correction sticks", async () => {
+    config.ai.apiKey = "test-key";
+    // Fresh memory is normally skipped — a correction must not wait a week.
+    mocks.findUniqueMemory.mockResolvedValue({ summary: "old", updatedAt: new Date() });
+    mocks.findManyCoachMessages.mockResolvedValue([
+      { role: "user", content: "rotis are bigger, I don't count the ghee" },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              output: [
+                {
+                  content: [
+                    { type: "output_text", text: "Rotis are ~60 g each; no ghee counted." },
+                  ],
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    await maybeUpdateMemory("user-1", { force: true });
+
+    expect(mocks.upsertMemory).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+      create: { userId: "user-1", summary: "Rotis are ~60 g each; no ghee counted." },
+      update: { summary: "Rotis are ~60 g each; no ghee counted." },
+    });
+  });
+
+  it("still skips a fresh memory when it is not forced", async () => {
+    mocks.findUniqueMemory.mockResolvedValue({ summary: "x", updatedAt: new Date() });
+
+    await maybeUpdateMemory("user-1");
+
+    expect(mocks.findManyCoachMessages).not.toHaveBeenCalled();
+    expect(mocks.upsertMemory).not.toHaveBeenCalled();
   });
 });
 

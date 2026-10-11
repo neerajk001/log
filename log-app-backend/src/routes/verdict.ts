@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction, Request } from "express";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../db/client";
+import { recordDecision } from "../services/coachDecisions";
 import {
   computeVerdict,
   type PerExerciseDelta,
@@ -53,20 +54,29 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
     const dailyLogs = await prisma.dailyLog.findMany({
       where: {
         userId: req.userId,
-        date: { gte: trailing7Start, lte: todayUtcMidnight },
+        // Four weeks, so a once-a-week weigher can still be read a trend from.
+        date: { gte: addDays(currentWeekStart, -28), lte: todayUtcMidnight },
       },
-      select: { date: true, weightKg: true, proteinG: true },
+      select: { date: true, weightKg: true, proteinG: true, calories: true },
       orderBy: { date: "asc" },
     });
 
-    const weightSeriesKg: { day: number; kg: number }[] = [];
-    for (let i = 0; i < 7; i++) {
-      const day = addDays(trailing7Start, i);
-      const log = dailyLogs.find((l) => toUtcDateString(l.date) === toUtcDateString(day));
-      if (log?.weightKg != null) {
-        weightSeriesKg.push({ day: i, kg: Number(log.weightKg) });
+    const collectWeights = (start: Date, days: number): { day: number; kg: number }[] => {
+      const points: { day: number; kg: number }[] = [];
+      for (let i = 0; i < days; i++) {
+        const day = addDays(start, i);
+        const log = dailyLogs.find((l) => toUtcDateString(l.date) === toUtcDateString(day));
+        if (log?.weightKg != null) points.push({ day: i, kg: Number(log.weightKg) });
       }
-    }
+      return points;
+    };
+
+    // Daily weighers keep the responsive 7-day read; if that's too thin (weekly
+    // weigh-ins), fall back to the last 28 days *ending today*. The engine uses the
+    // real day offsets, so two weigh-ins a week apart still give kg/week.
+    const weeklyPoints = collectWeights(trailing7Start, 7);
+    const weightSeriesKg =
+      weeklyPoints.length >= 4 ? weeklyPoints : collectWeights(addDays(todayUtcMidnight, -27), 28);
 
     const liftLogs = await prisma.liftLog.findMany({
       where: {
@@ -85,23 +95,30 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
 
     const user = await prisma.user.findUnique({
       where: { id: req.userId },
-      select: { proteinTargetG: true },
+      select: { proteinTargetG: true, calorieTarget: true, trackWeight: true },
     });
 
-    let adherencePct: number | null = null;
-    if (user?.proteinTargetG != null && user.proteinTargetG > 0) {
-      const target = user.proteinTargetG;
+    const elapsedDays = Math.max(
+      1,
+      Math.min(7, Math.floor((now.getTime() - currentWeekStart.getTime()) / 86400000) + 1),
+    );
+    /** Days elapsed this week that met the target, as a percentage. */
+    const adherenceFor = (
+      target: number | null | undefined,
+      pick: (log: { proteinG: number | null; calories: number | null }) => number | null,
+    ): number | null => {
+      if (target == null || target <= 0) return null;
       const weekLogs = dailyLogs.filter((l) => l.date >= currentWeekStart);
       let hits = 0;
       for (const l of weekLogs) {
-        if (l.proteinG != null && l.proteinG >= target) hits++;
+        const value = pick(l);
+        if (value != null && value >= target) hits++;
       }
-      const elapsedDays = Math.max(
-        1,
-        Math.min(7, Math.floor((now.getTime() - currentWeekStart.getTime()) / 86400000) + 1),
-      );
-      adherencePct = Math.max(0, Math.min(100, Math.round((hits / elapsedDays) * 100)));
-    }
+      return Math.max(0, Math.min(100, Math.round((hits / elapsedDays) * 100)));
+    };
+
+    const adherencePct = adherenceFor(user?.proteinTargetG, (l) => l.proteinG);
+    const calorieAdherencePct = adherenceFor(user?.calorieTarget, (l) => l.calories);
 
     const prevRow = await prisma.weeklyVerdict.findFirst({
       where: {
@@ -109,7 +126,7 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
         weekStartDate: { lt: currentWeekStart },
       },
       orderBy: { weekStartDate: "desc" },
-      select: { strengthTrend: true, weightTrendKgPerWeek: true },
+      select: { verdict: true, strengthTrend: true, weightTrendKgPerWeek: true },
     });
 
     const previousVerdict: PreviousVerdict | null =
@@ -125,7 +142,28 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       perExercise,
       adherencePct,
       previousVerdict,
+      // No weigh-ins: the verdict still runs, on strength and adherence.
+      allowNoWeight: user?.trackWeight === false,
     });
+
+    // "This week" context: how much was actually logged, from the rows already fetched.
+    const weekDailyLogs = dailyLogs.filter((l) => l.date >= currentWeekStart);
+    const weekLiftLogs = liftLogs.filter((l) => l.date >= currentWeekStart);
+    const mean = (values: number[]): number | null =>
+      values.length === 0
+        ? null
+        : Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+    const week = {
+      workouts: new Set(weekLiftLogs.map((l) => toUtcDateString(l.date))).size,
+      sets: weekLiftLogs.length,
+      days_logged: weekDailyLogs.length,
+      avg_calories: mean(
+        weekDailyLogs.map((l) => l.calories).filter((c): c is number => c != null),
+      ),
+      avg_protein_g: mean(
+        weekDailyLogs.map((l) => l.proteinG).filter((p): p is number => p != null),
+      ),
+    };
 
     const verdictRow = await prisma.weeklyVerdict.upsert({
       where: {
@@ -152,6 +190,45 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       },
     });
 
+    // One ledger entry per week, so the coach can follow its own advice up later.
+    try {
+      const alreadyLogged = await prisma.coachDecision.findFirst({
+        where: {
+          userId: req.userId,
+          kind: "verdict",
+          createdAt: { gte: currentWeekStart },
+        },
+        select: { id: true },
+      });
+      if (!alreadyLogged) {
+        const labels: Record<string, string> = {
+          hold: "hold",
+          adjust_calories: "adjust calories",
+          check_recovery: "check recovery",
+        };
+        await recordDecision(
+          req.userId,
+          {
+            kind: "verdict",
+            summary: `Verdict: ${labels[result.verdict] ?? result.verdict} — ${
+              result.reasoning[0] ?? "weekly call"
+            }`,
+            detail: {
+              verdict: result.verdict,
+              weight_trend_kg_per_week: result.weightTrendKgPerWeek,
+              strength_trend: result.strengthTrend,
+              adherence_pct: result.adherencePct,
+            },
+            topic: "diet",
+            reviewInDays: 7,
+          },
+          toUtcDateString(todayUtcMidnight),
+        );
+      }
+    } catch {
+      // Best-effort: never fail the verdict because the ledger couldn't be written.
+    }
+
     res.json({
       verdict: verdictRow.verdict,
       week_start_date: toUtcDateString(verdictRow.weekStartDate),
@@ -161,6 +238,9 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
           : Number(verdictRow.weightTrendKgPerWeek),
       strength_trend: verdictRow.strengthTrend,
       adherence_pct: verdictRow.adherencePct,
+      calorie_adherence_pct: calorieAdherencePct,
+      previous_verdict: prevRow?.verdict ?? null,
+      week,
       reasoning: verdictRow.reasoning as unknown as string[],
     });
   } catch (err) {

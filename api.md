@@ -270,20 +270,32 @@ verdict, active plan), asks the coach model, persists both turns and returns
 
 ## `POST /api/coach/chat/stream`
 
-Body `{ message, sessionId?, localDate? }`. With no `sessionId` the server creates a
+Body `{ message, sessionId?, localDate?, agent? }`. With no `sessionId` the server creates a
 chat and emits `data: {"sessionId":"…"}` as the first event; with one, it must
 belong to the caller. `localDate` (YYYY-MM-DD) is the athlete's local date — the
-server runs on UTC, so it is used for "today" and the tool date windows. Streams the
-reply as Server-Sent Events: `data: {"delta":"…"}` per token,
-`data: {"status":"…"}` while the coach looks something up, then
+server runs on UTC, so it is used for "today" and the tool date windows. `agent`
+(`general` | `meal` | `training`) is the explicit UI pick; without it the server
+routes by the message's content. Streams the reply as Server-Sent Events:
+`data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
+something up, `data: {"proposal":{…}}` for a change awaiting confirmation, then
 `data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
 
+`dismissedMeal` (optional) is a meal estimate the athlete just dismissed —
+`{ title, items[], calories, protein_g, date? }`. The server puts it in front of
+the model together with `message` (their reason), so the coach **re-estimates from
+the correction** instead of repeating itself; it is not stored as a chat message
+(the athlete's own words are), and it forces an immediate long-term-memory refresh
+so the correction applies to later meals — including photo estimates, which get
+the memory summary in their prompt.
+
 The coach can call read-only tools (`get_day_logs`, `get_lift_history`, `get_daily_logs`,
-`get_weekly_verdicts`, `get_plan_vs_actual`, `get_activity_logs`) — all scoped to
-the authenticated user, in a bounded loop (max 4 rounds). The user message is
-stored up front, and the assistant message is stored with whatever text was
-produced — so a client Stop (which aborts the request and the upstream model call)
-keeps the partial answer.
+`get_weekly_verdicts`, `get_plan_vs_actual`, `get_meals`, `lookup_food`) plus the
+proposal tools (`log_meal`, `update_meal`, `delete_meal`, `update_plan`,
+`activate_plan`, `delete_plan`, `update_logged_set`, `delete_logged_set`,
+`record_decision`) — all scoped to the authenticated user, in a bounded loop (max 4
+rounds). Proposals never apply themselves. The user message is stored up front, and
+the assistant message is stored with whatever text was produced — so a client Stop
+(which aborts the request and the upstream model call) keeps the partial answer.
 
 Deployment note: this route needs nginx `proxy_buffering off;` (the route already
 sets `X-Accel-Buffering: no`), or the VPS proxy buffers the whole response and

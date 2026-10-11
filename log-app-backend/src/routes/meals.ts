@@ -122,7 +122,14 @@ router.post(
       }
       const description =
         typeof req.body?.description === "string" ? req.body.description : undefined;
-      const result = await analyzeMeal(req.file.buffer, req.file.mimetype, description);
+      const localDate = typeof req.body?.date === "string" ? req.body.date : undefined;
+      const result = await analyzeMeal(
+        req.userId,
+        req.file.buffer,
+        req.file.mimetype,
+        description,
+        localDate,
+      );
       res.json(result);
     } catch (err) {
       next(err);

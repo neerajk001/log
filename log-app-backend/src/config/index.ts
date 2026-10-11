@@ -25,11 +25,20 @@ export const config = {
     parsing: process.env.OPENAI_PARSE_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
     // Short, simple chat turns.
     chatFast: process.env.COACH_FAST_MODEL || "gpt-4.1-mini",
-    // Reasoning-heavy chat, program generation and physique analysis.
+    // Reasoning-heavy chat, program generation and plan parsing stay on OpenAI.
     chatSmart: process.env.COACH_MODEL || "gpt-4.1",
-    vision: process.env.COACH_VISION_MODEL || process.env.COACH_MODEL || "gpt-4.1",
+    // Physique photo analysis runs on the cheap vision model (Command Code by
+    // default, same family as meal photos) — no longer OpenAI.
+    physique:
+      process.env.COACH_PHYSIQUE_MODEL ||
+      process.env.COACH_MEAL_VISION_MODEL ||
+      "deepseek/deepseek-v4-flash-vision-exp",
     // Meal photo/description estimation (needs vision + accuracy).
     meal: process.env.COACH_MEAL_MODEL || process.env.COACH_VISION_MODEL || process.env.COACH_MODEL || "gpt-4.1",
+    // Meal photos only. Kept separate from `meal` because a text model accepts an
+    // image request and silently returns nothing: the photo path needs a model
+    // that actually reads images (e.g. deepseek/deepseek-v4-flash-vision-exp).
+    mealVision: process.env.COACH_MEAL_VISION_MODEL || process.env.COACH_VISION_MODEL || "gpt-4.1",
   },
   // Coach chat + meal provider. Defaults to OpenAI; point AI_BASE_URL at any
   // OpenAI-Responses-compatible endpoint (e.g. Command Code) for other models.
@@ -45,6 +54,9 @@ export const config = {
     thinking: process.env.AI_THINKING || "",
     replyTokens: parseInt(process.env.AI_REPLY_TOKENS || "400", 10),
     toolTokens: parseInt(process.env.AI_TOOL_TOKENS || "1600", 10),
+    // Previous messages replayed each turn. Lower = cheaper, shorter memory —
+    // with response chaining off, every one of these is re-sent on every round.
+    historyTurns: Math.max(2, Math.min(24, parseInt(process.env.AI_HISTORY_TURNS || "8", 10) || 8)),
   },
   // Food lookup: Open Food Facts first (free), optional web-search fallback.
   food: {

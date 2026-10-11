@@ -6,7 +6,7 @@ initSentry();
 validateRuntimeConfig();
 
 console.log(
-  `AI provider: ${config.ai.baseUrl} (chat=${config.models.chatFast}, meal=${config.models.meal}, chaining=${config.ai.chaining})`,
+  `AI provider: ${config.ai.baseUrl} (chat=${config.models.chatFast}, meal=${config.models.meal}, mealPhoto=${config.models.mealVision}, chaining=${config.ai.chaining})`,
 );
 
 app.listen(config.port, () => {

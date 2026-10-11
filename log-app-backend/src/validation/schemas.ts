@@ -67,6 +67,8 @@ export const dailyDefaultsSchema = z
 export const updateMeSchema = z.object({
   protein_target_g: z.number().int().positive().optional().nullable(),
   calorie_target: z.number().int().positive().optional().nullable(),
+  /** Off = doesn't weigh themselves; the verdict judges strength and adherence instead. */
+  track_weight: z.boolean().optional(),
   daily_defaults: dailyDefaultsSchema.optional(),
   /** Weekdays the athlete doesn't train (0 = Sun … 6 = Sat) — they don't break the streak. */
   rest_days: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
@@ -145,7 +147,10 @@ export const idParamSchema = z.object({
 });
 
 export const trendsQuerySchema = z.object({
-  range: z.enum(["4w"]).optional(),
+  /** Bucket width follows the range: day (7d), week (30d/90d), month (1y). */
+  range: z.enum(["7d", "30d", "90d", "1y"]).optional(),
+  /** Weekly nutrient window for the nutrition card (1–52 weeks). */
+  weeks: z.coerce.number().int().min(1).max(52).optional(),
 });
 
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;
@@ -192,6 +197,30 @@ export const coachChatSchema = z.object({
   localDate: dateString.optional(),
   /** Explicit agent pick (UI chips). Omit to let the router decide. */
   agent: z.enum(["general", "meal", "training"]).optional(),
+  /**
+   * A meal estimate the athlete just dismissed. Carries the estimate back to the
+   * model (photo estimates are never stored server-side, so the client has to send
+   * it) while `message` holds their reason — so it can re-estimate from the
+   * correction instead of repeating itself.
+   */
+  dismissedMeal: z
+    .object({
+      title: z.string().max(120),
+      items: z
+        .array(
+          z.object({
+            name: z.string().max(120),
+            quantity: z.string().max(60).optional(),
+            calories: z.number().min(0).max(5000),
+            protein_g: z.number().min(0).max(500),
+          }),
+        )
+        .max(30),
+      calories: z.number().min(0).max(20000),
+      protein_g: z.number().min(0).max(1000),
+      date: dateString.optional(),
+    })
+    .optional(),
 });
 
 export const coachPlanSchema = z.object({

@@ -3,10 +3,13 @@ import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
 import { parsePlanOutput, PlanParseError } from "./planParser";
 import { resolvePlanDayForDate } from "./planRotation";
+import { decisionsContext, physiqueContext, recordDecision } from "./coachDecisions";
 import { parsedPlanSchema, type ParsedPlan } from "../validation/schemas";
 
 const CONTEXT_WINDOW_DAYS = 28;
-const HISTORY_TURNS = 12;
+/** Whole-history awareness: a year of weekly weight averages, not just the window. */
+const CONTEXT_YEAR_DAYS = 365;
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const PROMPT_CACHE_KEY = "log-coach-v1";
 
 /** Messages about eating food → the meal agent. */
@@ -25,17 +28,23 @@ You are given TODAY's date, the units in use, and a bounded summary of the athle
 Facts and honesty:
 - Ground every claim in the given data and quote the values you cite; say plainly when there is not
   enough data instead of guessing.
-- What you CAN see: profile/goal, ~4 weeks of weight and nutrition (averages plus recent daily
-  weights), top sets and weekly volume per exercise, this-vs-last-week lift trend, activity minutes,
-  recent weekly verdicts, and the active plan's days.
-- What you CANNOT see: individual sets beyond the top set, individual meals, or anything older than
-  ~4 weeks. If asked about those, say so.
+- The ATHLETE CONTEXT below lists what you know (goals, targets, recent and 12-month history, PRs,
+  whether they trained, their plan and today's session, and DECISIONS you have advised). Read it
+  before answering. What is NOT there: individual sets beyond each exercise's top set, individual
+  meals, and anything older than a year — use the tools for those, and say so if it isn't available.
 - You have tools to look up the athlete's data on demand; prefer calling a tool over guessing, and
   don't call one for facts already in the context above.
 - "What did I log" questions: call get_day_logs and report exactly what it returns — including
   off-plan exercises. Use get_plan_vs_actual ONLY for plan-adherence questions (it compares against
   the prescription and exercise names may differ), never to state what was logged, and never say a
   planned exercise "wasn't logged" unless that day's logs actually show it missing.
+- Close the loop on yourself: when a DECISIONS entry is past its review date, open by following it up
+  — what you advised, what the data shows now, and whether to continue or change it. Don't re-advise
+  from scratch and don't pretend you never said it.
+- Record your firm recommendations so you can follow them up: when you give a time-bound directive (a
+  calorie or protein change, a deload, a plan swap), call record_decision with a one-line summary, a
+  topic and a review window. Don't record questions, one-off answers, or throwaway suggestions. When
+  a past decision has played out, call record_decision again with resolves + outcome.
 - You are not a doctor: never diagnose or give medical advice. For injuries or medical concerns, tell
   the user to consult a professional.`;
 
@@ -66,9 +75,16 @@ const MEAL_RULES = `- The athlete can log what they ate right here in chat. Esti
   and wait for the answer. Use get_meals to see what's already logged (avoid duplicates), then call
   log_meal to propose it — update_meal / delete_meal to correct one. Never say a meal is logged before
   the athlete confirms.
+- Logging always goes ON TOP of the day's total, and the day's total can already include numbers the
+  athlete typed straight in (not from a meal). So before proposing: call get_meals, compare its
+  day_total / entered_directly with what they just described, and if the day already looks like it
+  covers this food, ask whether this is an extra or the same thing already counted — never silently
+  add a duplicate.
 - Branded or packaged food (or anything you're unsure about): call lookup_food first and base the estimate
   on its per-100 g figures times the portion you assume — say where the numbers came from and the portion.
-  If nothing is found, ask for the label or quantity, or estimate and say it's an estimate.`;
+  If nothing is found, ask for the label or quantity, or estimate and say it's an estimate.
+- If the athlete says an estimate was off, re-estimate from their correction and propose the corrected
+  version again — never argue with their portion, and keep that convention for their later meals.`;
 
 const FOCUS_GENERAL = `Your job: answer anything about the athlete's training, nutrition and progress — you have every tool.
 ${PLAN_PROPOSAL_RULES}
@@ -150,8 +166,10 @@ export async function buildAthleteContext(
   const now = new Date(`${today}T00:00:00Z`);
   const since = new Date(now);
   since.setUTCDate(since.getUTCDate() - CONTEXT_WINDOW_DAYS);
+  const yearAgo = new Date(now);
+  yearAgo.setUTCDate(yearAgo.getUTCDate() - (CONTEXT_YEAR_DAYS - 1));
 
-  const [profile, daily, lifts, verdicts, plan, activities, memory] = await Promise.all([
+  const [profile, daily, lifts, verdicts, plan, activities, memory, targets, prs, yearDaily, decisions, physique] = await Promise.all([
     prisma.coachProfile.findUnique({ where: { userId } }),
     prisma.dailyLog.findMany({
       where: { userId, date: { gte: since } },
@@ -160,7 +178,7 @@ export async function buildAthleteContext(
     }),
     prisma.liftLog.findMany({
       where: { userId, date: { gte: since } },
-      select: { date: true, exerciseName: true, weightKg: true, reps: true },
+      select: { date: true, exerciseName: true, weightKg: true, reps: true, planDayId: true },
     }),
     prisma.weeklyVerdict.findMany({
       where: { userId },
@@ -176,6 +194,24 @@ export async function buildAthleteContext(
       select: { durationMin: true, activityType: true },
     }),
     prisma.coachMemory.findUnique({ where: { userId } }),
+    // Nutrition targets live on the user row, not the coach profile.
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { proteinTargetG: true, calorieTarget: true, restDays: true, trackWeight: true },
+    }),
+    // Lifetime bests, so the coach isn't blind to anything older than the window.
+    prisma.liftLog.groupBy({
+      by: ["exerciseName"],
+      where: { userId },
+      _max: { weightKg: true },
+    }),
+    prisma.dailyLog.findMany({
+      where: { userId, date: { gte: yearAgo } },
+      select: { date: true, weightKg: true },
+      orderBy: { date: "asc" },
+    }),
+    decisionsContext(userId, today),
+    physiqueContext(userId),
   ]);
 
   const lines: string[] = [];
@@ -201,7 +237,9 @@ export async function buildAthleteContext(
   }
 
   const weights = daily.filter((d) => d.weightKg != null).map((d) => Number(d.weightKg));
-  if (weights.length > 0) {
+  // Don't present weigh-ins to an athlete who has told us they don't track them.
+  const tracksWeight = targets?.trackWeight !== false;
+  if (tracksWeight && weights.length > 0) {
     const avg = weights.reduce((a, b) => a + b, 0) / weights.length;
     lines.push(
       `WEIGHT (last ${CONTEXT_WINDOW_DAYS}d): ${weights.length} entries, first ${weights[0]}kg, latest ${weights[weights.length - 1]}kg, avg ${avg.toFixed(1)}kg`,
@@ -209,7 +247,7 @@ export async function buildAthleteContext(
   }
 
   const recentWeights = daily.filter((d) => d.weightKg != null).slice(-7);
-  if (recentWeights.length > 0) {
+  if (tracksWeight && recentWeights.length > 0) {
     lines.push(
       `WEIGHT (recent days): ${recentWeights
         .map((d) => `${fmtDate(d.date)}=${Number(d.weightKg)}`)
@@ -217,10 +255,39 @@ export async function buildAthleteContext(
     );
   }
 
+  // Whole history: weekly averages across the last year, not just the 28-day window.
+  const yearWeights = yearDaily.filter((d) => d.weightKg != null);
+  if (tracksWeight && yearWeights.length > 0) {
+    const weeks = new Map<string, number[]>();
+    for (const row of yearWeights) {
+      const key = fmtDate(startOfIsoWeekUtc(row.date));
+      const arr = weeks.get(key) ?? [];
+      arr.push(Number(row.weightKg));
+      weeks.set(key, arr);
+    }
+    const points = Array.from(weeks.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-6)
+      .map(([, values]) => Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1)));
+    const first = points[0];
+    const last = points[points.length - 1];
+    const delta = last - first;
+    lines.push(
+      `WEIGHT (12 months, weekly avg): ${first}kg -> ${last}kg (${delta > 0 ? "+" : ""}${delta.toFixed(1)}kg) ${points.join(", ")}; logged ${yearDaily.length} days`,
+    );
+  }
+
   const avgOf = (values: number[]): number | null =>
     values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
-  const calories = avgOf(daily.filter((d) => d.calories != null).map((d) => d.calories as number));
-  const protein = avgOf(daily.filter((d) => d.proteinG != null).map((d) => d.proteinG as number));
+  // Today is still in progress, so it stays out of the averages; the coach gets
+  // today's running totals separately in the TODAY'S INTAKE line.
+  const completedDaily = daily.filter((d) => d.date < now);
+  const calories = avgOf(
+    completedDaily.filter((d) => d.calories != null).map((d) => d.calories as number),
+  );
+  const protein = avgOf(
+    completedDaily.filter((d) => d.proteinG != null).map((d) => d.proteinG as number),
+  );
   const sleep = avgOf(daily.filter((d) => d.sleepHours != null).map((d) => Number(d.sleepHours)));
   const nutrition = [
     calories != null && `calories=${Math.round(calories)}`,
@@ -229,6 +296,27 @@ export async function buildAthleteContext(
   ].filter(Boolean);
   if (nutrition.length > 0) {
     lines.push(`NUTRITION (avg/day, last ${CONTEXT_WINDOW_DAYS}d): ${nutrition.join(", ")}`);
+  }
+
+  const targetBits = [
+    targets?.calorieTarget != null && `${targets.calorieTarget} kcal/day`,
+    targets?.proteinTargetG != null && `${targets.proteinTargetG} g protein/day`,
+  ].filter(Boolean) as string[];
+  if (targetBits.length > 0) {
+    lines.push(`TARGETS: ${targetBits.join(", ")}`);
+  }
+
+  const todayLog = daily.find((d) => fmtDate(d.date) === today);
+  const todayBits = [
+    todayLog?.calories != null && `${todayLog.calories} kcal`,
+    todayLog?.proteinG != null && `${todayLog.proteinG} g protein`,
+  ].filter(Boolean) as string[];
+  if (todayBits.length > 0) {
+    lines.push(
+      `TODAY'S INTAKE (${today}): ${todayBits.join(", ")} so far${
+        targetBits.length > 0 ? " — say what is left against TARGETS when advising" : ""
+      }`,
+    );
   }
 
   const byExercise = new Map<string, { top: number; volume: number }>();
@@ -245,6 +333,19 @@ export async function buildAthleteContext(
       .slice(0, 12)
       .map(([name, e]) => `${name}: ${e.top}kg top / ${Math.round(e.volume)}kg vol`);
     lines.push(`LIFTS (last ${CONTEXT_WINDOW_DAYS}d): ${ranked.join("; ")}`);
+  }
+
+  // Lifetime bests — the window above only covers 28 days.
+  const allTimeBests = prs
+    .map((row) => ({
+      name: row.exerciseName,
+      kg: row._max.weightKg == null ? null : Number(row._max.weightKg),
+    }))
+    .filter((row): row is { name: string; kg: number } => row.kg != null)
+    .sort((a, b) => b.kg - a.kg)
+    .slice(0, 5);
+  if (allTimeBests.length > 0) {
+    lines.push(`PRS (all time): ${allTimeBests.map((p) => `${p.name} ${p.kg}kg`).join(", ")}`);
   }
 
   // This week's top set vs last week's, per exercise (ISO weeks).
@@ -277,6 +378,56 @@ export async function buildAthleteContext(
     );
   }
 
+  // Did they actually train? Adherence, plan-day coverage, streak, configured rest days.
+  const restDayList = Array.isArray(targets?.restDays)
+    ? (targets.restDays as unknown[]).filter((d): d is number => typeof d === "number")
+    : [];
+  const trainingDates = new Set(
+    lifts.filter((l) => l.date instanceof Date).map((l) => fmtDate(l.date)),
+  );
+  let trainingStreak = 0;
+  const streakCursor = new Date(now);
+  for (let i = 0; i < 90; i++) {
+    const iso = fmtDate(streakCursor);
+    const isRest = restDayList.includes(streakCursor.getUTCDay());
+    if (trainingDates.has(iso)) trainingStreak++;
+    // An untrained *today* doesn't break it; an untrained non-rest day before that does.
+    else if (!isRest && i > 0) break;
+    streakCursor.setUTCDate(streakCursor.getUTCDate() - 1);
+  }
+
+  const weekTrainingDays = new Set(
+    lifts.filter((l) => l.date instanceof Date && l.date >= thisWeekStart).map((l) => fmtDate(l.date)),
+  );
+  const trainedPlanDays = new Set<string>();
+  for (const l of lifts) {
+    if (l.date < thisWeekStart || !l.planDayId) continue;
+    const day = plan?.planDays.find((d) => d.id === l.planDayId);
+    if (day) trainedPlanDays.add(day.dayName);
+  }
+  const plannedPerWeek = profile?.daysPerWeek ?? plan?.planDays.length ?? null;
+  if (weekTrainingDays.size > 0 || restDayList.length > 0 || plannedPerWeek != null) {
+    const bits = [
+      plannedPerWeek != null
+        ? `${weekTrainingDays.size} of ${plannedPerWeek} planned sessions this week`
+        : `${weekTrainingDays.size} sessions this week`,
+      `${trainingStreak} day streak`,
+    ];
+    if (plan && trainedPlanDays.size > 0) {
+      bits.push(`plan days done: ${Array.from(trainedPlanDays).join(", ")}`);
+      const notYet = plan.planDays
+        .map((d) => d.dayName)
+        .filter((name) => !trainedPlanDays.has(name));
+      if (notYet.length > 0) bits.push(`not yet this week: ${notYet.join(", ")}`);
+    }
+    if (restDayList.length > 0) {
+      bits.push(
+        `rest days: ${[...restDayList].sort((a, b) => a - b).map((d) => WEEKDAY_NAMES[d]).join(", ")}`,
+      );
+    }
+    lines.push(`TRAINING: ${bits.join("; ")}`);
+  }
+
   const latestVerdict = verdicts[0] ?? null;
   if (latestVerdict) {
     const trend =
@@ -296,8 +447,35 @@ export async function buildAthleteContext(
     );
   }
 
+  if (decisions) lines.push(decisions);
+  if (physique) lines.push(physique);
+
   if (plan) {
-    lines.push(`ACTIVE PLAN "${plan.name}": ${plan.planDays.map((d) => d.dayName).join(", ")}`);
+    const weeksIn = Math.max(
+      1,
+      Math.floor((now.getTime() - plan.createdAt.getTime()) / (7 * 86400000)) + 1,
+    );
+    const todayDay = resolvePlanDayForDate(plan.createdAt, plan.planDays, now);
+    lines.push(
+      `PLAN "${plan.name}": ${plan.planDays.length} days, started ${fmtDate(plan.createdAt)} (week ${weeksIn}); ${plan.planDays
+        .map((d) => `${d.dayName} (${(d.exercises as unknown[]).length} ex)`)
+        .join(", ")}; TODAY = ${todayDay?.dayName ?? "rest"}`,
+    );
+    if (todayDay) {
+      const prescribed = (
+        todayDay.exercises as {
+          name: string;
+          sets: number;
+          reps: string;
+          weight_kg?: number | null;
+        }[]
+      )
+        .slice(0, 8)
+        .map((e) => `${e.name} ${e.sets}x${e.reps}${e.weight_kg != null ? ` @${e.weight_kg}kg` : ""}`);
+      if (prescribed.length > 0) {
+        lines.push(`TODAY'S SESSION (${todayDay.dayName}): ${prescribed.join("; ")}`);
+      }
+    }
   }
 
   if (lines.length === 0) return "No logged data yet.";
@@ -408,45 +586,6 @@ async function callModel(
   return text.trim();
 }
 
-/** One chat turn: builds context, calls the model, persists both messages. */
-export async function runCoachChat(userId: string, message: string): Promise<string> {
-  const [context, recent] = await Promise.all([
-    buildAthleteContext(userId),
-    prisma.coachMessage.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: HISTORY_TURNS,
-      select: { role: true, content: true },
-    }),
-  ]);
-
-  const history: InputMessage[] = recent
-    .reverse()
-    .map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: [
-        {
-          type: m.role === "assistant" ? "output_text" : "input_text",
-          text: m.content,
-        },
-      ] as InputPart[],
-    }));
-
-  const reply = await callModel(
-    `${COACH_SYSTEM}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`,
-    [...history, { role: "user", content: [{ type: "input_text", text: message }] }],
-    400,
-    { model: routeChatModel(message), thinking: false },
-  );
-
-  await prisma.$transaction([
-    prisma.coachMessage.create({ data: { userId, role: "user", content: message } }),
-    prisma.coachMessage.create({ data: { userId, role: "assistant", content: reply } }),
-  ]);
-
-  return reply;
-}
-
 export interface CoachUsage {
   inputTokens: number;
   outputTokens: number;
@@ -540,7 +679,7 @@ const COACH_TOOLS = [
     type: "function",
     name: "get_lift_history",
     description:
-      "Look up the athlete's logged sets for an exercise (or all exercises) over the last N days.",
+      "The athlete's logged sets for an exercise (or all) over the last N days.",
     parameters: {
       type: "object",
       properties: {
@@ -553,7 +692,7 @@ const COACH_TOOLS = [
     type: "function",
     name: "get_day_logs",
     description:
-      "Everything the athlete ACTUALLY logged on one day (defaults to today): lifts grouped by exercise with set counts and top set, plus daily values and activities. Use this to answer 'what did I log' questions.",
+      "Exactly what the athlete logged on one day (default today): lifts by exercise with top set, daily values, activities. Use for any 'what did I log' question.",
     parameters: {
       type: "object",
       properties: { date: { type: "string", description: "YYYY-MM-DD; defaults to today." } },
@@ -562,7 +701,7 @@ const COACH_TOOLS = [
   {
     type: "function",
     name: "get_daily_logs",
-    description: "Look up daily body-weight, calories, protein and sleep over the last N days.",
+    description: "Body weight, calories, protein and sleep over the last N days.",
     parameters: {
       type: "object",
       properties: { days: { type: "number", description: "How many days back, 1-90 (default 28)." } },
@@ -571,7 +710,7 @@ const COACH_TOOLS = [
   {
     type: "function",
     name: "get_weekly_verdicts",
-    description: "Look up the athlete's recent weekly verdicts and their reasoning.",
+    description: "Recent weekly verdicts with their reasoning.",
     parameters: {
       type: "object",
       properties: { count: { type: "number", description: "How many recent weeks, 1-12 (default 6)." } },
@@ -580,8 +719,7 @@ const COACH_TOOLS = [
   {
     type: "function",
     name: "get_plan_vs_actual",
-    description:
-      "Compare the active plan's prescribed exercises for a date with what was actually logged.",
+    description: "The active plan's prescribed exercises for a date vs what was logged.",
     parameters: {
       type: "object",
       properties: {
@@ -591,33 +729,23 @@ const COACH_TOOLS = [
   },
   {
     type: "function",
-    name: "get_activity_logs",
-    description: "Look up cardio/other activity sessions (type, duration, distance) over the last N days.",
-    parameters: {
-      type: "object",
-      properties: { days: { type: "number", description: "How many days back, 1-90 (default 28)." } },
-    },
-  },
-  {
-    type: "function",
     name: "get_plans",
-    description:
-      "List the athlete's saved workout plans with their days and exercises (id, name, is_active).",
+    description: "The athlete's saved plans with days and exercises (id, name, is_active).",
     parameters: { type: "object", properties: {} },
   },
   {
     type: "function",
     name: "update_plan",
     description:
-      "PROPOSE a change to a plan. To change ONE day, pass day_name + exercises (that day's new exercises) — prefer this. To replace the whole plan, pass days. Optionally rename with name. Does not apply — creates a proposal the athlete confirms.",
+      "PROPOSE a plan change: day_name + exercises to change ONE day (prefer this), or days to replace the whole plan, or name to rename. Does not apply — creates a proposal.",
     parameters: {
       type: "object",
       properties: {
-        plan: { type: "string", description: "Plan name or id to update; omit to use the active plan." },
-        day_name: { type: "string", description: "The single day to change (e.g. 'Lower'). Use with exercises." },
+        plan: { type: "string", description: "Plan name or id; omit for the active plan." },
+        day_name: { type: "string", description: "The one day to change, e.g. 'Lower'." },
         exercises: {
           type: "array",
-          description: "New exercises for day_name (replaces just that day's exercises).",
+          description: "New exercises for day_name.",
           items: {
             type: "object",
             properties: {
@@ -630,7 +758,7 @@ const COACH_TOOLS = [
         },
         days: {
           type: "array",
-          description: "The COMPLETE new set of workout days (replaces all of the plan's days).",
+          description: "The complete new day list (replaces all days).",
           items: {
             type: "object",
             properties: {
@@ -651,16 +779,15 @@ const COACH_TOOLS = [
             required: ["day_name", "exercises"],
           },
         },
-        name: { type: "string", description: "New plan name (optional)." },
-        summary: { type: "string", description: "One short sentence describing the change." },
+        name: { type: "string", description: "New plan name." },
+        summary: { type: "string", description: "One short sentence for the athlete." },
       },
     },
   },
   {
     type: "function",
     name: "activate_plan",
-    description:
-      "PROPOSE making a plan the active one (only one plan is active at a time). Does not apply — creates a proposal.",
+    description: "PROPOSE making a plan the active one. Does not apply — creates a proposal.",
     parameters: {
       type: "object",
       properties: { plan: { type: "string", description: "Plan name or id." } },
@@ -681,11 +808,11 @@ const COACH_TOOLS = [
     type: "function",
     name: "update_logged_set",
     description:
-      "PROPOSE a correction to one already-logged set (weight and/or reps). Does not apply — creates a proposal.",
+      "PROPOSE fixing one logged set (weight and/or reps). Does not apply — creates a proposal.",
     parameters: {
       type: "object",
       properties: {
-        set_id: { type: "string", description: "The set's id, from get_lift_history." },
+        set_id: { type: "string", description: "Id from get_lift_history." },
         weight_kg: { type: "number" },
         reps: { type: "number" },
       },
@@ -695,10 +822,10 @@ const COACH_TOOLS = [
   {
     type: "function",
     name: "delete_logged_set",
-    description: "PROPOSE deleting one already-logged set. Does not apply — creates a proposal.",
+    description: "PROPOSE deleting one logged set. Does not apply — creates a proposal.",
     parameters: {
       type: "object",
-      properties: { set_id: { type: "string", description: "The set's id, from get_lift_history." } },
+      properties: { set_id: { type: "string", description: "Id from get_lift_history." } },
       required: ["set_id"],
     },
   },
@@ -706,7 +833,7 @@ const COACH_TOOLS = [
     type: "function",
     name: "get_meals",
     description:
-      "List the meals the athlete has logged for a day (defaults to today), with per-item calories/protein and totals.",
+      "The meals logged for a day (default today) with per-item calories/protein and totals.",
     parameters: {
       type: "object",
       properties: { date: { type: "string", description: "YYYY-MM-DD; defaults to today." } },
@@ -716,7 +843,7 @@ const COACH_TOOLS = [
     type: "function",
     name: "log_meal",
     description:
-      "PROPOSE logging a meal the athlete described (or a photo). Estimate each item's calories and protein from a common portion and state the assumed portion in `quantity`. Does not apply — creates a proposal the athlete confirms.",
+      "PROPOSE logging a described meal. Estimate each item from a common portion and put the assumed portion in quantity. Does not apply — creates a proposal.",
     parameters: {
       type: "object",
       properties: {
@@ -743,8 +870,7 @@ const COACH_TOOLS = [
   {
     type: "function",
     name: "update_meal",
-    description:
-      "PROPOSE correcting a previously logged meal (fix items/portions). Does not apply — creates a proposal.",
+    description: "PROPOSE correcting a logged meal (fix items/portions). Does not apply.",
     parameters: {
       type: "object",
       properties: {
@@ -781,7 +907,7 @@ const COACH_TOOLS = [
     type: "function",
     name: "lookup_food",
     description:
-      "Look up a branded/packaged food or a dish to get real calories and protein (Open Food Facts, then web). Prefer this over guessing for brands or anything you're unsure about.",
+      "Real calories/protein for a branded food or dish (Open Food Facts, then web). Prefer over guessing.",
     parameters: {
       type: "object",
       properties: {
@@ -791,6 +917,29 @@ const COACH_TOOLS = [
         },
       },
       required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "record_decision",
+    description:
+      "Save a firm, time-bound recommendation so you can follow it up later; or close one with resolves + outcome. Not for questions or one-off answers.",
+    parameters: {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description: 'One line, e.g. "Add ~200 kcal/day for two weeks".',
+        },
+        topic: { type: "string", enum: ["diet", "training", "recovery", "other"] },
+        review_in_days: {
+          type: "number",
+          description: "Days until review, 1-56 (default 14; 0 = none).",
+        },
+        resolves: { type: "string", description: "Id of a past decision this closes." },
+        outcome: { type: "string", description: "What happened, when closing one." },
+      },
+      required: ["summary"],
     },
   },
 ];
@@ -806,6 +955,7 @@ const MEAL_TOOL_NAMES = [
   "delete_meal",
   "get_day_logs",
   "lookup_food",
+  "record_decision",
 ];
 const TRAINING_TOOL_NAMES = [
   "get_plans",
@@ -816,6 +966,7 @@ const TRAINING_TOOL_NAMES = [
   "delete_plan",
   "update_logged_set",
   "delete_logged_set",
+  "record_decision",
 ];
 
 function toolsNamed(names: string[]) {
@@ -886,7 +1037,6 @@ const TOOL_LABELS: Record<string, string> = {
   get_daily_logs: "Reading your daily logs…",
   get_weekly_verdicts: "Reviewing your weekly verdicts…",
   get_plan_vs_actual: "Comparing your plan with what you logged…",
-  get_activity_logs: "Checking your activities…",
   get_plans: "Reading your plans…",
   update_plan: "Putting together a plan update…",
   activate_plan: "Preparing to switch plans…",
@@ -1364,30 +1514,6 @@ export async function executeCoachTool(
         };
       }
 
-      case "get_activity_logs": {
-        const rows = await prisma.activityLog.findMany({
-          where: { userId, date: { gte: daysAgo(clampDays(args.days, 28), today) } },
-          orderBy: { date: "desc" },
-          take: 90,
-          select: {
-            date: true,
-            activityType: true,
-            name: true,
-            durationMin: true,
-            distanceKm: true,
-            caloriesBurned: true,
-          },
-        });
-        return rows.map((a) => ({
-          date: fmtDate(a.date),
-          activity_type: a.activityType,
-          name: a.name,
-          duration_min: a.durationMin,
-          distance_km: a.distanceKm,
-          calories_burned: a.caloriesBurned,
-        }));
-      }
-
       case "get_plans": {
         const plans = await prisma.workoutPlan.findMany({
           where: { userId },
@@ -1515,11 +1641,33 @@ export async function executeCoachTool(
 
       case "get_meals": {
         const dateStr = typeof args.date === "string" ? args.date : today;
-        const meals = await prisma.mealLog.findMany({
-          where: { userId, date: new Date(`${dateStr}T00:00:00Z`) },
-          orderBy: { createdAt: "asc" },
-          select: { id: true, title: true, items: true, calories: true, proteinG: true },
-        });
+        const [meals, dayLog] = await Promise.all([
+          prisma.mealLog.findMany({
+            where: { userId, date: new Date(`${dateStr}T00:00:00Z`) },
+            orderBy: { createdAt: "asc" },
+            select: { id: true, title: true, items: true, calories: true, proteinG: true },
+          }),
+          // The day's total also carries numbers typed straight onto the day, which
+          // no meal row accounts for. Without this split the coach can't tell a
+          // manually logged lunch from an empty day and would double-count it.
+          prisma.dailyLog.findUnique({
+            where: { userId_date: { userId, date: new Date(`${dateStr}T00:00:00Z`) } },
+            select: { calories: true, proteinG: true },
+          }),
+        ]);
+
+        const fromMeals = meals.reduce(
+          (acc, m) => ({
+            calories: acc.calories + m.calories,
+            protein_g: acc.protein_g + m.proteinG,
+          }),
+          { calories: 0, protein_g: 0 },
+        );
+        const dayTotal = {
+          calories: dayLog?.calories ?? fromMeals.calories,
+          protein_g: dayLog?.proteinG ?? fromMeals.protein_g,
+        };
+
         return {
           date: dateStr,
           meals: meals.map((m) => ({
@@ -1529,13 +1677,13 @@ export async function executeCoachTool(
             calories: m.calories,
             protein_g: m.proteinG,
           })),
-          totals: meals.reduce(
-            (acc, m) => ({
-              calories: acc.calories + m.calories,
-              protein_g: acc.protein_g + m.proteinG,
-            }),
-            { calories: 0, protein_g: 0 },
-          ),
+          totals: fromMeals,
+          day_total: dayTotal,
+          /** day_total minus the meal rows above — typed directly, so never negative. */
+          entered_directly: {
+            calories: Math.max(0, dayTotal.calories - fromMeals.calories),
+            protein_g: Math.max(0, dayTotal.protein_g - fromMeals.protein_g),
+          },
         };
       }
 
@@ -1610,6 +1758,30 @@ export async function executeCoachTool(
         return lookupFood(query);
       }
 
+      case "record_decision": {
+        const summary = typeof args.summary === "string" ? args.summary.trim() : "";
+        if (!summary) return { error: "Provide a one-line summary of the decision." };
+        const reviewRaw = args.review_in_days == null ? undefined : Number(args.review_in_days);
+        const saved = await recordDecision(
+          userId,
+          {
+            kind: "advice",
+            summary,
+            topic: typeof args.topic === "string" ? args.topic : null,
+            reviewInDays:
+              reviewRaw === 0
+                ? null
+                : Number.isFinite(reviewRaw)
+                  ? (reviewRaw as number)
+                  : undefined,
+            resolves: typeof args.resolves === "string" ? args.resolves : null,
+            outcome: typeof args.outcome === "string" ? args.outcome : null,
+          },
+          today,
+        );
+        return { ok: true, decision_id: saved.id, review_on: saved.review_on };
+      }
+
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -1622,22 +1794,30 @@ export async function executeCoachTool(
 
 const MEMORY_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // refresh when older than ~7 days
 
-const MEMORY_SYSTEM = `You maintain a concise long-term memory of an athlete for a coaching app.
+const MEMORY_SYSTEM = `You keep a short note of an athlete's PREFERENCES for a coaching app.
 
-Given the previous memory and the recent conversation, write an UPDATED memory of at most 180 words.
-Capture only durable facts worth remembering across future chats: their goal, training setup,
-dietary approach, injuries or limitations, stated preferences, and what has or hasn't worked.
-Exclude transient numbers, greetings, and anything already obvious from their logs. Plain prose only —
-no headings, no bullet lists, no preamble.`;
+Given the previous note and the recent conversation, write an UPDATED note of at most 80 words.
+Keep only what their logged data and profile cannot already tell the coach: training time of day,
+foods they avoid or love, how they prefer feedback, travel and schedule disruptions, equipment
+quirks, constraints and dislikes. Also keep how their food really is: portions they corrected,
+foods they don't count, dishes that differ from the usual default.
+
+Never restate goals, targets, plan details, adherence, injuries or any numbers from their logs —
+the coach is given all of that every turn. Plain prose only: no headings, no bullet lists, no preamble.`;
 
 /**
  * Refreshes the rolling memory summary when it is missing or stale. Cheap model,
  * bounded output, and never throws — memory failing must not affect the chat.
  */
-export async function maybeUpdateMemory(userId: string): Promise<void> {
+export async function maybeUpdateMemory(
+  userId: string,
+  opts?: { force?: boolean },
+): Promise<void> {
   try {
     const existing = await prisma.coachMemory.findUnique({ where: { userId } });
-    if (existing && Date.now() - existing.updatedAt.getTime() < MEMORY_MAX_AGE_MS) return;
+    if (!opts?.force && existing && Date.now() - existing.updatedAt.getTime() < MEMORY_MAX_AGE_MS) {
+      return;
+    }
 
     const recent = await prisma.coachMessage.findMany({
       where: { userId },
@@ -1785,6 +1965,7 @@ export async function runCoachChatStream(
   },
   agent?: AgentId,
   signal?: AbortSignal,
+  dismissedMeal?: DismissedMeal,
 ): Promise<string> {
   let session = sessionId
     ? await prisma.coachSession.findFirst({ where: { id: sessionId, userId } })
@@ -1807,7 +1988,7 @@ export async function runCoachChatStream(
     prisma.coachMessage.findMany({
       where: { sessionId: session.id },
       orderBy: { createdAt: "desc" },
-      take: HISTORY_TURNS,
+      take: config.ai.historyTurns,
       select: { role: true, content: true, responseId: true },
     }),
   ]);
@@ -1841,7 +2022,13 @@ export async function runCoachChatStream(
   const activeAgent = AGENTS[agentId];
   const instructions = `${activeAgent.system}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;
   const model = activeAgent.model(message);
-  const userMessage = { role: "user", content: [{ type: "input_text", text: message }] };
+  // A dismissal carries the estimate + the athlete's reason to the model, but the
+  // stored message stays their own words, so history and memory read naturally.
+  const modelText = dismissedMeal
+    ? `${dismissedMealPrompt(dismissedMeal)}\n\nTHE ATHLETE SAYS: ${message}`
+    : message;
+
+  const userMessage = { role: "user", content: [{ type: "input_text", text: modelText }] };
 
   const chaining = config.ai.chaining;
   const storedResponseId = chaining
@@ -1964,6 +2151,7 @@ export async function runCoachChatStream(
       ms: Date.now() - startedAt,
       chained: Boolean(storedResponseId),
       tools: usedTools,
+      contextChars: context.length,
       inputTokens: totalInput,
       outputTokens: totalOutput,
     }),
@@ -1982,8 +2170,9 @@ export async function runCoachChatStream(
     });
   }
 
-  // Refresh long-term memory in the background (at most every ~7 days).
-  void maybeUpdateMemory(userId);
+  // Refresh long-term memory in the background (at most every ~7 days) — or right
+  // away when the athlete just corrected an estimate, so it sticks.
+  void maybeUpdateMemory(userId, dismissedMeal ? { force: true } : undefined);
 
   return answer;
 }
@@ -2021,36 +2210,70 @@ export async function generateCoachPlan(
   }
 }
 
+const PHYSIQUE_PROMPT = `Look at this physique photo and return ONLY a JSON object, no prose and no markdown fences:
+{
+  "headline": "one short line summarising the read",
+  "assessment": "the read itself"
+}
+
+Rules:
+- Respectful and constructive: current build, what is going well, and 2-3 concrete training or nutrition priorities.
+- Judge only what the photo shows, and say so when the angle or lighting limits the read.
+- Never comment on attractiveness or make medical claims.
+- "assessment" must be under 120 words.`;
+
+export interface PhysiqueReading {
+  headline: string;
+  assessment: string;
+}
+
 /**
- * Transient physique-photo analysis. The image is sent to the model and the
- * buffer is discarded — it is never written to disk or the database.
+ * Physique-photo reading on the cheap vision model. The image is sent to the
+ * model and the buffer is discarded — never written to disk or the database.
+ * The caller stores only the returned text.
  */
 export async function analyzePhysique(
   imageBuffer: Buffer,
   mimeType: string,
   description?: string,
-): Promise<string> {
+): Promise<PhysiqueReading> {
   const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
-  const prompt =
-    "Look at this physique photo and give a brief, respectful, constructive assessment: " +
-    "current build, what's going well, and 2-3 concrete training/nutrition priorities. " +
-    "Do not comment on attractiveness or make medical claims. Keep it under 120 words." +
-    (description ? `\n\nThe user adds: ${description}` : "");
-
-  return callModel(
-    COACH_SYSTEM,
+  const raw = await callModel(
+    PHYSIQUE_PROMPT,
     [
       {
         role: "user",
         content: [
-          { type: "input_text", text: prompt },
+          {
+            type: "input_text",
+            text: description ? `The athlete adds: ${description}` : "Read this physique photo.",
+          },
           { type: "input_image", image_url: dataUrl },
         ],
       },
     ],
-    400,
-    { model: config.models.vision, provider: "openai" },
+    600,
+    { json: true, model: config.models.physique },
   );
+
+  let parsed: { headline?: unknown; assessment?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new AppError(502, "PHYSIQUE_FAILED", "Couldn't read that photo. Try again.");
+  }
+
+  const assessment =
+    typeof parsed.assessment === "string" ? parsed.assessment.trim().slice(0, 1200) : "";
+  if (!assessment) {
+    throw new AppError(422, "PHYSIQUE_FAILED", "Couldn't read that photo. Try a clearer one.");
+  }
+  const headline =
+    typeof parsed.headline === "string" && parsed.headline.trim()
+      ? parsed.headline.trim().slice(0, 200)
+      : assessment.slice(0, 120);
+
+  return { headline, assessment };
 }
 
 const MEAL_SYSTEM = `You estimate the calories and protein of a meal from a photo and/or a short description.
@@ -2074,6 +2297,47 @@ Accuracy rules:
 - If the portion or the dish itself is genuinely ambiguous, lower the confidence and put ONE short
   clarifying question in "question" (omit it when confident).`;
 
+// Photo-specific addendum to MEAL_SYSTEM. Same JSON contract, extra rules for
+// reading an image — the text/chat path keeps using MEAL_SYSTEM unchanged.
+const MEAL_PHOTO_RULES = `
+
+When estimating from a photo:
+- List every distinct food and drink you can see, including sides, sauces and drinks.
+- Size each portion from visual cues (plate or bowl size, cutlery, glass, hands, packaging) and say
+  which cue you used in "quantity" (e.g. "1 cup cooked rice (side bowl)").
+- Allow for cooking fat and dressings that are visible or typical for the dish.
+- If a brand or nutrition label is legible, use that product's real values instead of estimating.
+- Do not invent items you cannot see; if the photo is too unclear to name the dish, lower the
+  confidence and ask ONE short question instead of guessing.
+- This is an estimate the athlete still has to confirm, and confirming it adds to the day's total. If
+  today's intake already looks like it covers this meal (see what's already logged), put that in
+  "question" so they can decide, instead of assuming it is extra.`;
+
+const MEAL_PHOTO_SYSTEM = MEAL_SYSTEM + MEAL_PHOTO_RULES;
+
+/** A meal estimate the athlete dismissed, sent back to the model with their reason. */
+export interface DismissedMeal {
+  title: string;
+  items: { name: string; quantity?: string; calories: number; protein_g: number }[];
+  calories: number;
+  protein_g: number;
+  date?: string;
+}
+
+/**
+ * The model-facing preamble for a dismissed estimate. The athlete's own words
+ * (why it was off) are appended by the caller as the user turn.
+ */
+function dismissedMealPrompt(meal: DismissedMeal): string {
+  const items = meal.items
+    .map((i) => `${i.name}${i.quantity ? ` (${i.quantity})` : ""} ${i.calories} kcal`)
+    .join("; ");
+  return [
+    "[The athlete dismissed your last meal estimate. Re-estimate from their correction and propose the corrected meal with log_meal — do not repeat the same numbers.]",
+    `DISMISSED ESTIMATE: "${meal.title}" — ${meal.calories} kcal, ${meal.protein_g} g protein (${items}).`,
+  ].join("\n");
+}
+
 export interface MealAnalysis {
   title: string;
   items: MealItemDraft[];
@@ -2081,6 +2345,83 @@ export interface MealAnalysis {
   protein_g: number;
   confidence: "low" | "medium" | "high";
   question?: string;
+  /** Targets + what was already logged today, so the app can show what's left. */
+  day?: MealDayContext | null;
+}
+
+export interface MealDayContext {
+  calorie_target: number | null;
+  protein_target_g: number | null;
+  calories: number | null;
+  protein_g: number | null;
+}
+
+/** Targets (+ what's logged today, and what the coach remembers about their food). */
+async function loadMealDayContext(
+  userId: string,
+  today: string,
+): Promise<{ day: MealDayContext; promptLine: string | null; memoryLine: string | null }> {
+  const [targets, log, memory, mealTotals] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { proteinTargetG: true, calorieTarget: true },
+    }),
+    prisma.dailyLog.findUnique({
+      where: { userId_date: { userId, date: new Date(`${today}T00:00:00Z`) } },
+      select: { calories: true, proteinG: true },
+    }),
+    prisma.coachMemory.findUnique({ where: { userId }, select: { summary: true } }),
+    prisma.mealLog.aggregate({
+      where: { userId, date: new Date(`${today}T00:00:00Z`) },
+      _sum: { calories: true, proteinG: true },
+    }),
+  ]);
+
+  const day: MealDayContext = {
+    calorie_target: targets?.calorieTarget ?? null,
+    protein_target_g: targets?.proteinTargetG ?? null,
+    calories: log?.calories ?? null,
+    protein_g: log?.proteinG ?? null,
+  };
+
+  const memoryLine = memory?.summary?.trim()
+    ? `WHAT YOU REMEMBER ABOUT THEIR FOOD: ${memory.summary.trim().slice(0, 200)}`
+    : null;
+
+  const targetBits = [
+    day.calorie_target != null && `${day.calorie_target} kcal/day`,
+    day.protein_target_g != null && `${day.protein_target_g} g protein/day`,
+  ].filter(Boolean) as string[];
+  if (targetBits.length === 0) return { day, promptLine: null, memoryLine };
+
+  const todayBits = [
+    day.calories != null && `${day.calories} kcal`,
+    day.protein_g != null && `${day.protein_g} g protein`,
+  ].filter(Boolean) as string[];
+
+  // Split the day's total so the estimate can tell an already-logged meal from
+  // numbers typed straight onto the day (which no meal row accounts for) and ask
+  // instead of double-counting.
+  const fromMeals = {
+    calories: mealTotals._sum.calories ?? 0,
+    protein_g: mealTotals._sum.proteinG ?? 0,
+  };
+  const typedIn = {
+    calories: Math.max(0, (day.calories ?? 0) - fromMeals.calories),
+    protein_g: Math.max(0, (day.protein_g ?? 0) - fromMeals.protein_g),
+  };
+  const split =
+    fromMeals.calories > 0 || typedIn.calories > 0
+      ? ` (from meals: ${fromMeals.calories} kcal, ${fromMeals.protein_g} g; typed in directly: ${typedIn.calories} kcal, ${typedIn.protein_g} g)`
+      : "";
+
+  return {
+    day,
+    memoryLine,
+    promptLine: `ATHLETE TARGETS: ${targetBits.join(", ")}.${
+      todayBits.length > 0 ? ` Already logged today: ${todayBits.join(", ")}${split}.` : ""
+    }`,
+  };
 }
 
 /**
@@ -2088,28 +2429,44 @@ export interface MealAnalysis {
  * the model and the buffer is discarded — never stored.
  */
 export async function analyzeMeal(
+  userId: string,
   imageBuffer: Buffer,
   mimeType: string,
   description?: string,
+  localDate?: string,
 ): Promise<MealAnalysis> {
+  const today = localDate && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : fmtDate(new Date());
+  const { day, promptLine: mealContext, memoryLine } = await loadMealDayContext(userId, today);
   const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
   const raw = await callModel(
-    MEAL_SYSTEM,
+    MEAL_PHOTO_SYSTEM,
     [
       {
         role: "user",
         content: [
           {
             type: "input_text",
-            text: description ? `The athlete says: ${description}` : "Estimate this meal.",
+            text: [
+              description ? `The athlete says: ${description}` : "Estimate this meal.",
+              mealContext,
+              memoryLine,
+            ]
+              .filter(Boolean)
+              .join("\n"),
           },
           { type: "input_image", image_url: dataUrl },
         ],
       },
     ],
     700,
-    { json: true, model: config.models.meal },
+    { json: true, model: config.models.mealVision },
   );
+
+  if (!raw.trim()) {
+    console.warn(
+      "[meal] photo analysis returned nothing — check that COACH_MEAL_VISION_MODEL is a vision-capable model",
+    );
+  }
 
   let parsed: {
     title?: unknown;
@@ -2141,5 +2498,13 @@ export async function analyzeMeal(
   const title =
     typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 120) : "Meal";
 
-  return { title, items, calories, protein_g, confidence, ...(question ? { question } : {}) };
+  return {
+    title,
+    items,
+    calories,
+    protein_g,
+    confidence,
+    ...(question ? { question } : {}),
+    day,
+  };
 }

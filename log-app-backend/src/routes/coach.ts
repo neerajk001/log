@@ -2,11 +2,12 @@ import { NextFunction, Request, Response, Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db/client";
+import { clearDecisions, listDecisions, recordDecision } from "../services/coachDecisions";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
-import { analyzePhysique, generateCoachPlan, runCoachChat, runCoachChatStream } from "../services/coach";
+import { analyzePhysique, generateCoachPlan, runCoachChatStream } from "../services/coach";
 import { coachChatSchema, coachPlanSchema, coachProfileSchema, idParamSchema } from "../validation/schemas";
 
 const router = Router();
@@ -205,21 +206,24 @@ router.delete("/memory", requireAuth, async (req: Request, res: Response, next: 
   }
 });
 
-router.post(
-  "/chat",
-  requireAuth,
-  chatRateLimit,
-  validate(coachChatSchema),
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { message } = req.body as z.infer<typeof coachChatSchema>;
-      const reply = await runCoachChat(req.userId, message);
-      res.json({ reply });
-    } catch (err) {
-      next(err);
-    }
-  },
-);
+router.get("/decisions", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const requested = Number((req.query as { limit?: string }).limit ?? 20);
+    const limit = Number.isFinite(requested) ? requested : 20;
+    res.json(await listDecisions(req.userId, limit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/decisions", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await clearDecisions(req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.post(
   "/chat/stream",
@@ -227,7 +231,9 @@ router.post(
   chatRateLimit,
   validate(coachChatSchema),
   async (req: Request, res: Response) => {
-    const { message, sessionId, localDate, agent } = req.body as z.infer<typeof coachChatSchema>;
+    const { message, sessionId, localDate, agent, dismissedMeal } = req.body as z.infer<
+      typeof coachChatSchema
+    >;
     const today = localDate ?? new Date().toISOString().slice(0, 10);
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -262,6 +268,7 @@ router.post(
         },
         agent,
         controller.signal,
+        dismissedMeal,
       );
       send({ done: true });
     } catch (err) {
@@ -301,9 +308,21 @@ router.post(
         return;
       }
       const description = typeof req.body?.description === "string" ? req.body.description : undefined;
-      // Transient: the buffer is discarded after this call, never persisted.
-      const analysis = await analyzePhysique(req.file.buffer, req.file.mimetype, description);
-      res.json({ analysis });
+      // The image itself is transient (buffer discarded, never persisted). Only the
+      // written read is kept, so the coach can compare check-ins later.
+      const { headline, assessment } = await analyzePhysique(
+        req.file.buffer,
+        req.file.mimetype,
+        description,
+      );
+      const saved = await recordDecision(req.userId, {
+        kind: "physique",
+        topic: "other",
+        summary: headline,
+        detail: { assessment },
+        reviewInDays: 56,
+      });
+      res.json({ analysis: assessment, headline, review_on: saved.review_on });
     } catch (err) {
       next(err);
     }

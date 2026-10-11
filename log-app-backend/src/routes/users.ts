@@ -15,6 +15,7 @@ const userSelect = {
   restDays: true,
   mealTrackingEnabled: true,
   aiCoachEnabled: true,
+  trackWeight: true,
   onboardedAt: true,
 } satisfies Prisma.UserSelect;
 
@@ -29,6 +30,7 @@ function serializeUser(user: SelectedUser) {
     rest_days: (user.restDays as number[] | null) ?? null,
     meal_tracking_enabled: user.mealTrackingEnabled,
     ai_coach_enabled: user.aiCoachEnabled,
+    track_weight: user.trackWeight,
     onboarded_at: user.onboardedAt ? user.onboardedAt.toISOString() : null,
   };
 }
@@ -57,6 +59,7 @@ router.put("/me", requireAuth, validate(updateMeSchema), async (req, res: Respon
     rest_days,
     meal_tracking_enabled,
     ai_coach_enabled,
+    track_weight,
     onboarded,
   } = req.body;
 
@@ -75,6 +78,7 @@ router.put("/me", requireAuth, validate(updateMeSchema), async (req, res: Respon
         rest_days === undefined ? undefined : rest_days === null ? Prisma.JsonNull : rest_days,
       mealTrackingEnabled: meal_tracking_enabled,
       aiCoachEnabled: ai_coach_enabled,
+      trackWeight: track_weight,
       onboardedAt: onboarded === undefined ? undefined : onboarded ? new Date() : null,
     },
     select: userSelect,

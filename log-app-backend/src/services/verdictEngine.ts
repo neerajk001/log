@@ -23,6 +23,11 @@ export interface VerdictInput {
   perExercise: PerExerciseDelta[];
   adherencePct: number | null;
   previousVerdict: PreviousVerdict | null;
+  /**
+   * The athlete doesn't weigh themselves. We skip the weight-data gate and judge
+   * on strength and adherence alone, rather than leaving them without a verdict.
+   */
+  allowNoWeight?: boolean;
 }
 
 export interface VerdictOutput {
@@ -34,7 +39,12 @@ export interface VerdictOutput {
 }
 
 const STRENGTH_DELTA_THRESHOLD = 0.025;
-const MIN_DAYS_FOR_VERDICT = 4;
+/**
+ * Sparse weighers are normal — plenty of people weigh once a week. Two weigh-ins
+ * spanning at least this many days are enough to read a weekly rate, so we don't
+ * demand a 4-of-7-days diary.
+ */
+const MIN_WEIGH_IN_SPAN_DAYS = 5;
 
 export function linearRegressionSlopePerDay(values: number[]): number | null {
   return linearRegressionSlope(values.map((y, i) => ({ x: i, y })));
@@ -83,13 +93,27 @@ export function computeStrengthTrend(
   return "flat";
 }
 
+/** Spread of the weight samples in days (0 when there's nothing to spread). */
+export function weighInSpanDays(series: (number | WeightPoint)[]): number {
+  const xs = series.map((p, i) => (typeof p === "number" ? i : p.day));
+  return xs.length < 2 ? 0 : Math.max(...xs) - Math.min(...xs);
+}
+
 export function computeVerdict(input: VerdictInput): VerdictOutput {
   const reasoning: string[] = [];
 
-  if (input.weightSeriesKg.length < MIN_DAYS_FOR_VERDICT) {
+  const spanDays = weighInSpanDays(input.weightSeriesKg);
+  const enoughWeight = input.weightSeriesKg.length >= 2 && spanDays >= MIN_WEIGH_IN_SPAN_DAYS;
+  // How sparse the weigh-ins are, so a two-point reading says so out loud.
+  const basis =
+    input.weightSeriesKg.length >= 4
+      ? ""
+      : ` (from ${input.weightSeriesKg.length} weigh-ins over ${spanDays} days)`;
+
+  if (!input.allowNoWeight && !enoughWeight) {
     return {
       verdict: "hold",
-      reasoning: ["Need at least 4 days of weight data for a verdict"],
+      reasoning: ["Log two weigh-ins a few days apart and I can read your trend"],
       weightTrendKgPerWeek: null,
       strengthTrend: null,
       adherencePct: input.adherencePct,
@@ -132,7 +156,7 @@ export function computeVerdict(input: VerdictInput): VerdictOutput {
 
   if (weightTrendKgPerWeek != null && weightTrendKgPerWeek < -0.8 && strengthTrend !== "up") {
     reasoning.push(
-      `Weight dropping ${weightTrendKgPerWeek.toFixed(2)} kg/wk — faster than the 0.4–0.8 target`,
+      `Weight dropping ${weightTrendKgPerWeek.toFixed(2)} kg/wk${basis} — faster than the 0.4–0.8 target`,
       "Deficit is too aggressive for current strength — increase calories slightly",
     );
     if (strengthTrend === "down") {
@@ -169,13 +193,13 @@ export function computeVerdict(input: VerdictInput): VerdictOutput {
   if (weightTrendKgPerWeek != null) {
     if (weightTrendKgPerWeek >= -0.8 && weightTrendKgPerWeek <= -0.3) {
       reasoning.push(
-        `Weight trending ${weightTrendKgPerWeek.toFixed(2)} kg/wk — in the 0.3–0.8 target range`,
+        `Weight trending ${weightTrendKgPerWeek.toFixed(2)} kg/wk${basis} — in the 0.3–0.8 target range`,
       );
     } else if (weightTrendKgPerWeek > -0.2) {
-      reasoning.push("Weight stalled this week");
+      reasoning.push(`Weight stalled this week${basis}`);
     } else {
       reasoning.push(
-        `Weight trending ${weightTrendKgPerWeek.toFixed(2)} kg/wk — slightly outside target`,
+        `Weight trending ${weightTrendKgPerWeek.toFixed(2)} kg/wk${basis} — slightly outside target`,
       );
     }
   }

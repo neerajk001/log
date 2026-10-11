@@ -17,6 +17,8 @@ model User {
   restDays         Json?         @map("rest_days")
   mealTrackingEnabled Boolean    @default(true) @map("meal_tracking_enabled")
   aiCoachEnabled   Boolean       @default(true) @map("ai_coach_enabled")
+  /// Off = the athlete doesn't weigh themselves: hide weigh-ins and judge without them.
+  trackWeight      Boolean       @default(true) @map("track_weight")
   onboardedAt      DateTime?     @map("onboarded_at") @db.Timestamptz()
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   dailyLogs        DailyLog[]
@@ -28,6 +30,7 @@ model User {
   coachMessages    CoachMessage[]
   coachSessions    CoachSession[]
   coachMemory      CoachMemory?
+  coachDecisions   CoachDecision[]
   mealLogs         MealLog[]
 
   @@map("users")
@@ -186,6 +189,23 @@ model CoachMemory {
   user      User     @relation(fields: [userId], references: [id])
 
   @@map("coach_memories")
+}
+
+/// What the coach advised and when to follow it up — its side of the conversation.
+model CoachDecision {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  kind      String    @db.Text
+  summary   String    @db.Text
+  detail    Json?     @db.JsonB
+  topic     String?   @db.Text
+  reviewOn  DateTime? @map("review_on") @db.Date
+  outcome   String?   @db.Text
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("coach_decisions")
 }
 
 model MealLog {

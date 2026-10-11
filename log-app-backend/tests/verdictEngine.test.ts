@@ -12,6 +12,118 @@ function buildWeightSeries(start: number, slopePerDay: number, days = 7): number
   return Array.from({ length: days }, (_, i) => +(start + slopePerDay * i).toFixed(2));
 }
 
+describe("no weigh-ins (allowNoWeight)", () => {
+  const input: VerdictInput = {
+    weightSeriesKg: [],
+    perExercise: [
+      { name: "Squat", thisWeekKg: 100, lastWeekKg: 95 },
+      { name: "Bench", thisWeekKg: 80, lastWeekKg: 75 },
+    ],
+    adherencePct: 100,
+    previousVerdict: previousNone,
+    allowNoWeight: true,
+  };
+
+  it("judges on strength and adherence instead of asking for weight data", () => {
+    const result = computeVerdict(input);
+
+    expect(result.verdict).toBe("hold");
+    expect(result.weightTrendKgPerWeek).toBeNull();
+    expect(result.strengthTrend).toBe("up");
+    expect(result.reasoning.join(" ")).not.toContain("Log two weigh-ins");
+    expect(result.reasoning.join(" ")).toContain("Strength is up this week");
+  });
+
+  it("still flags two weeks of declining strength without weight data", () => {
+    const result = computeVerdict({
+      ...input,
+      perExercise: [
+        { name: "Squat", thisWeekKg: 90, lastWeekKg: 100 },
+        { name: "Bench", thisWeekKg: 70, lastWeekKg: 80 },
+      ],
+      previousVerdict: { strengthTrend: "down", weightTrendKgPerWeek: null },
+    });
+
+    expect(result.verdict).toBe("check_recovery");
+  });
+
+  it("asks for weigh-ins when the athlete does track them", () => {
+    const result = computeVerdict({
+      weightSeriesKg: [],
+      perExercise: [],
+      adherencePct: null,
+      previousVerdict: previousNone,
+    });
+
+    expect(result.reasoning[0]).toContain("Log two weigh-ins a few days apart");
+  });
+});
+
+describe("sparse weigh-ins (once a week)", () => {
+  it("reads a weekly rate from weigh-ins a week apart", () => {
+    const result = computeVerdict({
+      weightSeriesKg: [
+        { day: 0, kg: 70 },
+        { day: 7, kg: 69.6 },
+        { day: 14, kg: 69.2 },
+      ],
+      perExercise: [],
+      adherencePct: 90,
+      previousVerdict: previousNone,
+    });
+
+    expect(result.verdict).toBe("hold");
+    expect(result.weightTrendKgPerWeek).toBeCloseTo(-0.4, 1);
+    const text = result.reasoning.join(" ");
+    expect(text).toContain("in the 0.3–0.8 target range");
+    // Says out loud how thin the reading is.
+    expect(text).toContain("from 3 weigh-ins over 14 days");
+  });
+
+  it("accepts the bare minimum: two weigh-ins a week apart", () => {
+    const result = computeVerdict({
+      weightSeriesKg: [
+        { day: 0, kg: 70 },
+        { day: 7, kg: 69.5 },
+      ],
+      perExercise: [],
+      adherencePct: null,
+      previousVerdict: previousNone,
+    });
+
+    expect(result.weightTrendKgPerWeek).toBeCloseTo(-0.5, 1);
+    expect(result.reasoning.join(" ")).toContain("from 2 weigh-ins over 7 days");
+  });
+
+  it("still refuses to read a trend from two weigh-ins days apart", () => {
+    const result = computeVerdict({
+      weightSeriesKg: [
+        { day: 0, kg: 70 },
+        { day: 2, kg: 69.9 },
+      ],
+      perExercise: [],
+      adherencePct: null,
+      previousVerdict: previousNone,
+    });
+
+    expect(result.weightTrendKgPerWeek).toBeNull();
+    expect(result.reasoning[0]).toContain("Log two weigh-ins");
+  });
+
+  it("keeps the daily read free of the sparse qualifier", () => {
+    const result = computeVerdict({
+      weightSeriesKg: buildWeightSeries(70, -0.4 / 7, 7),
+      perExercise: [],
+      adherencePct: 100,
+      previousVerdict: previousNone,
+    });
+
+    const text = result.reasoning.join(" ");
+    expect(text).toContain("in the 0.3–0.8 target range");
+    expect(text).not.toContain("weigh-ins over");
+  });
+});
+
 describe("linearRegressionSlopePerDay", () => {
   it("returns null for fewer than 2 points", () => {
     expect(linearRegressionSlopePerDay([])).toBeNull();
@@ -67,7 +179,7 @@ describe("computeStrengthTrend", () => {
 });
 
 describe("computeVerdict — insufficient data", () => {
-  it("returns hold with explanatory reasoning for fewer than 4 days", () => {
+  it("returns hold and says what's missing when the weigh-ins are too close together", () => {
     const out = computeVerdict({
       weightSeriesKg: [70, 69.9, 69.8],
       perExercise: [],
@@ -77,7 +189,7 @@ describe("computeVerdict — insufficient data", () => {
     expect(out.verdict).toBe("hold");
     expect(out.weightTrendKgPerWeek).toBeNull();
     expect(out.strengthTrend).toBeNull();
-    expect(out.reasoning[0]).toMatch(/at least 4 days/i);
+    expect(out.reasoning[0]).toMatch(/two weigh-ins/i);
   });
 });
 
