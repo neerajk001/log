@@ -26,6 +26,26 @@ beforeEach(() => {
   mocks.findUniqueUser.mockReset().mockResolvedValue(null);
 });
 
+describe("computeTrends weekly adherence", () => {
+  it("divides by the days elapsed this week, like the verdict does", async () => {
+    // Wednesday: Monday and Tuesday both hit their targets.
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 100, calorieTarget: 2000 });
+    mocks.findManyDaily.mockResolvedValue([
+      { date: new Date("2026-10-05"), weightKg: null, calories: 2100, proteinG: 120 },
+      { date: new Date("2026-10-06"), weightKg: null, calories: 2100, proteinG: 120 },
+    ]);
+
+    const result = await computeTrends("user-1", "7d", {
+      now: new Date("2026-10-07T00:00:00Z"),
+    });
+
+    // 2 of 3 elapsed days (67%), not 2 of 7 (29%) — the number the verdict screen
+    // was disagreeing with.
+    expect(result.adherence_pct).toBe(67);
+    expect(result.calorie_adherence_pct).toBe(67);
+  });
+});
+
 describe("computeTrends series bucketing", () => {
   it("uses one bucket per day for 7d", async () => {
     mocks.findManyDaily.mockResolvedValue([

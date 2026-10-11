@@ -1,12 +1,14 @@
 import { useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, type ErrorBoundaryProps } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, shadows, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { BarChart, Sparkline } from "../../src/components/ui/charts";
 import {
+  Banner,
+  Button,
   Card,
   Divider,
   ErrorState,
@@ -104,10 +106,16 @@ export default function InsightsScreen() {
   const restDays = profile?.rest_days ?? [];
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
-  const { data: trends, loading: trendsLoading, refetch: refetchTrends } = useTrends(
-    range,
-    nutritionWeeks,
-  );
+  const {
+    data: trends,
+    loading: trendsLoading,
+    error: trendsError,
+    refetch: refetchTrends,
+  } = useTrends(range, nutritionWeeks);
+
+  // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
+  // numbers that read as real zeros (a slow load shouldn't look like a broken streak).
+  const firstLoad = loading && metrics.sets === 0 && metrics.workouts === 0;
 
   const weightValues = useMemo(
     () => (trends?.series ?? []).map((b) => b.weight_kg).filter((v): v is number => v != null),
@@ -205,17 +213,34 @@ export default function InsightsScreen() {
         />
 
         {error ? <ErrorState message={error} onRetry={refetch} /> : null}
+        {trendsError ? (
+          <Banner
+            tone="danger"
+            message={trendsError}
+            actionLabel="Retry"
+            onAction={refetchTrends}
+            style={styles.section}
+          />
+        ) : null}
 
         {/* Consistency summary */}
         <MotivationCard
           icon="pulse"
           iconBg={colors.primarySoft}
           iconColor={colors.primary}
-          title={metrics.workoutsThisWeek > 0 ? "You're consistent!" : "Let's get started"}
+          title={
+            firstLoad
+              ? "Your week"
+              : metrics.workoutsThisWeek > 0
+                ? "You're consistent!"
+                : "Let's get started"
+          }
           subtitle={
-            metrics.workoutsThisWeek > 0
-              ? `${metrics.workoutsThisWeek} workout${metrics.workoutsThisWeek === 1 ? "" : "s"} this week`
-              : "No workouts logged this week yet"
+            firstLoad
+              ? "Loading your week…"
+              : metrics.workoutsThisWeek > 0
+                ? `${metrics.workoutsThisWeek} workout${metrics.workoutsThisWeek === 1 ? "" : "s"} this week`
+                : "No workouts logged this week yet"
           }
           onPress={() => router.navigate("/(tabs)/history" as never)}
         />
@@ -226,28 +251,28 @@ export default function InsightsScreen() {
             icon="barbell"
             iconBg={colors.purpleSoft}
             iconColor={colors.purple}
-            value={String(metrics.workouts)}
+            value={firstLoad ? "—" : String(metrics.workouts)}
             label="Workouts"
           />
           <MetricTile
             icon="layers"
             iconBg={colors.blueSoft}
             iconColor={colors.blue}
-            value={String(metrics.sets)}
+            value={firstLoad ? "—" : String(metrics.sets)}
             label="Sets"
           />
           <MetricTile
             icon="trending-up"
             iconBg={colors.greenSoft}
             iconColor={colors.green}
-            value={signedPct(metrics.strengthPct)}
+            value={firstLoad ? "—" : signedPct(metrics.strengthPct)}
             label="Strength"
           />
           <MetricTile
             icon="checkmark-circle"
             iconBg={colors.orangeSoft}
             iconColor={colors.orange}
-            value={adherence != null ? `${adherence}%` : "—"}
+            value={firstLoad ? "—" : adherence != null ? `${adherence}%` : "—"}
             label="Adherence"
           />
         </View>
@@ -589,7 +614,7 @@ export default function InsightsScreen() {
             <Text style={typography.bodyStrong}>Streak</Text>
           </View>
           <View style={styles.streakBody}>
-            <Text style={styles.streakValue}>{metrics.streak}</Text>
+            <Text style={styles.streakValue}>{firstLoad ? "—" : metrics.streak}</Text>
             <Text style={typography.small}>
               {metrics.streak === 1 ? "training day in a row" : "training days in a row"}
             </Text>
@@ -791,5 +816,31 @@ const useStyles = makeUseStyles((t) =>
     dotActive: { backgroundColor: t.colors.primary, borderColor: t.colors.primary },
     dotRest: { borderColor: t.colors.textMuted, borderStyle: "dashed" },
     dotLabel: { fontSize: 10, fontWeight: "600", color: t.colors.textMuted },
+
+    errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
+    errorTitle: { textAlign: "center" },
+    errorText: { textAlign: "center", color: t.colors.textDim },
   }),
 );
+
+/**
+ * Route-level fallback (expo-router picks this up): a render crash on Insights becomes
+ * a friendly, retryable card instead of a red box.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.errorWrap}>
+        <IconBadge name="alert-circle-outline" bg={colors.surface} color={colors.danger} size={56} rounded={false} />
+        <Text style={[typography.h3, styles.errorTitle]}>Insights couldn&apos;t load</Text>
+        <Text style={[typography.small, styles.errorText]}>
+          {error?.message ?? "Something went wrong on this screen."}
+        </Text>
+        <Button label="Try again" icon="refresh" onPress={() => void retry()} />
+      </View>
+    </View>
+  );
+}

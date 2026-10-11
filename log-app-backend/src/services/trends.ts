@@ -286,6 +286,13 @@ export async function computeTrends(
   liftDeltas.sort((a, b) => a.exercise.localeCompare(b.exercise));
 
   const weekLogs = logs.filter((l) => l.date >= currentWeekStart);
+  // Same rule as the weekly verdict: dividing by all 7 days made a Tuesday with both
+  // of its target days hit read as 29% here while the verdict screen said 100%.
+  const weekElapsedDays = clamp(
+    Math.floor((todayUtcMidnight.getTime() - currentWeekStart.getTime()) / 86400000) + 1,
+    1,
+    7,
+  );
 
   return {
     bucket,
@@ -293,7 +300,7 @@ export async function computeTrends(
     nutrition,
     months,
     lifts: liftDeltas,
-    adherence_pct: hitsPct(weekLogs, (l) => l.proteinG, proteinTarget, 7),
-    calorie_adherence_pct: hitsPct(weekLogs, (l) => l.calories, calorieTarget, 7),
+    adherence_pct: hitsPct(weekLogs, (l) => l.proteinG, proteinTarget, weekElapsedDays),
+    calorie_adherence_pct: hitsPct(weekLogs, (l) => l.calories, calorieTarget, weekElapsedDays),
   };
 }

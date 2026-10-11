@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AppError } from "../src/middleware/errorHandler";
 import {
   createLiftLogIdempotent,
+  getLiftMetrics,
   getLiftSummary,
   serializeLiftLog,
   updateLiftLog,
@@ -61,6 +62,71 @@ function expectConflict(error: unknown): boolean {
   expect(error).toMatchObject({ statusCode: 409, code: "IDEMPOTENCY_CONFLICT" });
   return true;
 }
+
+/**
+ * The Insights screen derives its tiles and lists from this, instead of downloading
+ * up to 5,000 raw sets (a 1Y range asks for two years of them).
+ */
+describe("getLiftMetrics", () => {
+  const row = (date: string, exerciseName: string, weightKg: number, reps: number) => ({
+    date: new Date(`${date}T00:00:00Z`),
+    exerciseName,
+    weightKg: new Prisma.Decimal(weightKg),
+    reps,
+  });
+
+  function metricsClient(rows: unknown[]) {
+    return { liftLog: { findMany: vi.fn().mockResolvedValue(rows) } };
+  }
+
+  const windows = { from: "2026-10-01", to: "2026-10-07", prevFrom: "2026-09-24", prevTo: "2026-09-30" };
+
+  it("rolls up the current period and compares it with the previous one", async () => {
+    const mock = metricsClient([
+      row("2026-09-25", "Bench Press", 75, 6),
+      row("2026-10-02", "Bench Press", 80, 5),
+      row("2026-10-02", "Squat", 100, 5),
+      row("2026-10-04", "Bench Press", 82.5, 4),
+    ]);
+
+    const metrics = await getLiftMetrics(userId, windows, mock as never);
+
+    expect(metrics.days).toEqual([
+      { date: "2026-10-02", sets: 2 },
+      { date: "2026-10-04", sets: 1 },
+    ]);
+
+    const bench = metrics.exercises.find((e) => e.name === "Bench Press")!;
+    expect(bench.sets).toBe(2);
+    expect(bench.volume).toBe(80 * 5 + 82.5 * 4);
+    expect(bench.bestKg).toBe(82.5);
+    expect(bench.bestReps).toBe(4);
+    expect(bench.bestDate).toBe("2026-10-04");
+    // The best *before* this one, for the PR delta: 80, not the older 75.
+    expect(bench.prevBestKg).toBe(80);
+    expect(bench.currentTopKg).toBe(82.5);
+    expect(bench.previousTopKg).toBe(75);
+
+    const squat = metrics.exercises.find((e) => e.name === "Squat")!;
+    expect(squat.sets).toBe(1);
+    expect(squat.previousTopKg).toBe(0);
+  });
+
+  it("ignores sets outside both windows", async () => {
+    const mock = metricsClient([
+      row("2026-08-01", "Bench Press", 200, 1),
+      row("2026-10-02", "Bench Press", 80, 5),
+    ]);
+
+    const metrics = await getLiftMetrics(userId, windows, mock as never);
+
+    expect(metrics.days).toEqual([{ date: "2026-10-02", sets: 1 }]);
+    expect(metrics.exercises).toHaveLength(1);
+    // The far-out row must not leak into the record's history either.
+    expect(metrics.exercises[0].bestKg).toBe(80);
+    expect(metrics.exercises[0].prevBestKg).toBe(0);
+  });
+});
 
 /**
  * The Lift screen's "recent exercises" + "Last:" cue used to be built in the client

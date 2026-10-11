@@ -162,11 +162,21 @@ export const liftSummaryQuerySchema = z.object({
   before: dateString.optional(),
 });
 
+/** `/api/logs/lift/metrics` — the current and previous comparison windows. */
+export const liftMetricsQuerySchema = z.object({
+  from: dateString,
+  to: dateString,
+  prev_from: dateString,
+  prev_to: dateString,
+});
+
 export const trendsQuerySchema = z.object({
   /** Bucket width follows the range: day (7d), week (30d/90d), month (1y). */
   range: z.enum(["7d", "30d", "90d", "1y"]).optional(),
   /** Weekly nutrient window for the nutrition card (1–52 weeks). */
   weeks: z.coerce.number().int().min(1).max(52).optional(),
+  /** The athlete's local date — the server's UTC day can be behind it. */
+  date: dateString.optional(),
 });
 
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;

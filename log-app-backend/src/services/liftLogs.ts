@@ -140,6 +140,101 @@ export interface LiftSummary {
   lastByExercise: LiftLogRecord[];
 }
 
+/** One exercise's rollup for the Insights screen. */
+export interface ExerciseMetrics {
+  name: string;
+  sets: number;
+  /** weight × reps summed across the window. */
+  volume: number;
+  /** Heaviest set in the whole window, with the set that set it. */
+  bestKg: number;
+  bestReps: number;
+  bestDate: string;
+  /** The best before it (0 when it was the first), for the PR delta. */
+  prevBestKg: number;
+  /** Heaviest set inside the current period, and inside the previous one. */
+  currentTopKg: number;
+  previousTopKg: number;
+}
+
+export interface LiftMetrics {
+  /** One row per training day in the current period. */
+  days: { date: string; sets: number }[];
+  exercises: ExerciseMetrics[];
+}
+
+/**
+ * Everything the Insights screen derives, reduced server-side.
+ *
+ * It used to download up to 5,000 individual sets (a year's range fetches two years)
+ * and reduce them in the app — on every visit and after every logged set. The
+ * presentation maths (muscle names, streaks, series) still happens on the client, so
+ * nothing is duplicated; only the row transfer moved here.
+ */
+export async function getLiftMetrics(
+  userId: string,
+  opts: { from: string; to: string; prevFrom: string; prevTo: string },
+  client: Pick<PrismaClient, "liftLog"> = prisma,
+): Promise<LiftMetrics> {
+  const start = new Date(`${opts.prevFrom}T00:00:00Z`);
+  const end = new Date(`${opts.to}T00:00:00Z`);
+  const rows = await client.liftLog.findMany({
+    where: { userId, date: { gte: start, lte: end } },
+    select: { date: true, exerciseName: true, weightKg: true, reps: true },
+    orderBy: { date: "asc" },
+  });
+
+  const dayCounts = new Map<string, number>();
+  const exercises = new Map<string, ExerciseMetrics>();
+
+  for (const row of rows) {
+    const iso = row.date.toISOString().slice(0, 10);
+    const kg = Number(row.weightKg);
+    const inCurrent = iso >= opts.from && iso <= opts.to;
+    const inPrevious = iso >= opts.prevFrom && iso <= opts.prevTo;
+    if (!inCurrent && !inPrevious) continue;
+
+    const entry =
+      exercises.get(row.exerciseName) ??
+      {
+        name: row.exerciseName,
+        sets: 0,
+        volume: 0,
+        bestKg: 0,
+        bestReps: 0,
+        bestDate: iso,
+        prevBestKg: 0,
+        currentTopKg: 0,
+        previousTopKg: 0,
+      };
+
+    if (kg > entry.bestKg) {
+      entry.prevBestKg = entry.bestKg;
+      entry.bestKg = kg;
+      entry.bestReps = row.reps;
+      entry.bestDate = iso;
+    }
+
+    if (inCurrent) {
+      dayCounts.set(iso, (dayCounts.get(iso) ?? 0) + 1);
+      entry.sets += 1;
+      entry.volume += kg * row.reps;
+      entry.currentTopKg = Math.max(entry.currentTopKg, kg);
+    } else {
+      entry.previousTopKg = Math.max(entry.previousTopKg, kg);
+    }
+
+    exercises.set(row.exerciseName, entry);
+  }
+
+  return {
+    days: Array.from(dayCounts.entries())
+      .map(([date, sets]) => ({ date, sets }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+    exercises: Array.from(exercises.values()),
+  };
+}
+
 const MAX_RECENT_EXERCISES = 12;
 
 function daysBefore(isoDate: string, days: number): Date {

@@ -95,6 +95,16 @@ of it). `before` is the athlete's local date; the "last" rows are strictly befor
 today's own sets never count as "last". This replaced a client-side download of every
 set in the window.
 
+## `GET /api/logs/lift/metrics?from&to&prev_from&prev_to`
+
+The Insights rollup: `{ days: [{ date, sets }], exercises: ExerciseMetrics[] }` where
+each exercise carries `sets`, `volume`, `best_kg/best_reps/best_date`, `prev_best_kg`
+(the record that preceded the current best, for the PR delta) and
+`current_top_kg`/`previous_top_kg` (the period comparison behind the Strength tile).
+The client keeps the presentation maths (muscle names via its own table, streaks,
+series) — only the row transfer moved here. It replaced pulling up to 5,000 individual
+sets, twice the range, on every visit.
+
 ## `GET /api/plans`
 
 Returns the user's plans. `?active=1` returns only the active one — the Lift screen uses
@@ -206,7 +216,12 @@ Persists the plan and its days/exercises, sets it as the active plan
 (deactivates any prior active plan for that user). Returns the created
 plan in the same shape as `GET /api/plans` (single object, `201`).
 
-## `GET /api/trends?range=4w`
+## `GET /api/trends?range=7d|30d|90d|1y&weeks=1&date=YYYY-MM-DD`
+
+`weeks` is the nutrition card's own weekly window (1–52, default 1). `date` is the
+athlete's **local** date: it anchors every bucket, and it decides which days count as
+"completed" — the server's UTC day is behind IST, which would otherwise hide today's
+rows and shift the charts a day.
 
 Returns:
 ```json

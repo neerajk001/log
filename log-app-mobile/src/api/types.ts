@@ -395,3 +395,22 @@ export interface LiftSummary {
   names: string[];
   last_by_exercise: LiftLog[];
 }
+
+/** One exercise's rollup from the Insights metrics endpoint. */
+export interface ExerciseMetrics {
+  name: string;
+  sets: number;
+  volume: number;
+  best_kg: number;
+  best_reps: number;
+  best_date: string;
+  prev_best_kg: number;
+  current_top_kg: number;
+  previous_top_kg: number;
+}
+
+/** Training days + per-exercise rollups for a range and its comparison window. */
+export interface LiftMetrics {
+  days: { date: string; sets: number }[];
+  exercises: ExerciseMetrics[];
+}

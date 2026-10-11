@@ -3,10 +3,11 @@ import * as Sentry from "@sentry/node";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema, liftSummaryQuerySchema } from "../validation/schemas";
+import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema, liftMetricsQuerySchema, liftSummaryQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
 import {
   createLiftLogIdempotent,
+  getLiftMetrics,
   getLiftSummary,
   serializeLiftLog,
   updateLiftLog,
@@ -105,6 +106,40 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
     logs.map(serializeLiftLog),
   );
 });
+
+router.get(
+  "/lift/metrics",
+  requireAuth,
+  validate(liftMetricsQuerySchema, "query"),
+  async (req, res: Response) => {
+    const { from, to, prev_from, prev_to } = req.query as unknown as {
+      from: string;
+      to: string;
+      prev_from: string;
+      prev_to: string;
+    };
+    const metrics = await getLiftMetrics(req.userId, {
+      from,
+      to,
+      prevFrom: prev_from,
+      prevTo: prev_to,
+    });
+    res.json({
+      days: metrics.days,
+      exercises: metrics.exercises.map((e) => ({
+        name: e.name,
+        sets: e.sets,
+        volume: e.volume,
+        best_kg: e.bestKg,
+        best_reps: e.bestReps,
+        best_date: e.bestDate,
+        prev_best_kg: e.prevBestKg,
+        current_top_kg: e.currentTopKg,
+        previous_top_kg: e.previousTopKg,
+      })),
+    });
+  },
+);
 
 router.get(
   "/lift/summary",
