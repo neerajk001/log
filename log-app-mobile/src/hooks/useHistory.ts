@@ -1,13 +1,13 @@
-import { useCallback, useMemo, useState } from "react";
-import { useFocusEffect } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useDailyLogsApi } from "../api/dailyLogs";
 import { useLiftLogsApi } from "../api/liftLogs";
 import { useActivityApi } from "../api/activity";
 import { useCurrentDate } from "./useCurrentDate";
-import { useDataSync } from "./useDataSync";
+import { useDataSyncOnFocus } from "./useDataSync";
 import type { ActivityLog, DailyLog, LiftLog } from "../api/types";
 import { addDays } from "../utils/date";
-import { groupByDate, strengthChangePct, totalVolume, uniqueWorkoutDates } from "../utils/derive";
+import { groupByDate } from "../utils/derive";
+import { strengthChangePctFrom } from "../utils/metrics";
 
 /** One calendar day of history, combining lifts, daily values and activities. */
 export interface HistoryDay {
@@ -19,7 +19,21 @@ export interface HistoryDay {
   volume: number;
 }
 
-/** History data (daily + lift + activity) for a range, with deletes. */
+/** The range's headline numbers, from the server rollup. */
+interface RangeStats {
+  workouts: number;
+  totalVolume: number;
+  strengthPct: number | null;
+}
+
+type Slice = "daily" | "lift" | "activity" | "stats";
+
+const EMPTY_STATS: RangeStats = { workouts: 0, totalVolume: 0, strengthPct: null };
+
+/**
+ * History data for a range, loaded per source so one failing endpoint can't blank the
+ * other two — and so a write only refetches the slice it changed.
+ */
 export function useHistory(rangeDays: number) {
   const dailyApi = useDailyLogsApi();
   const liftApi = useLiftLogsApi();
@@ -28,43 +42,120 @@ export function useHistory(rangeDays: number) {
   const [dailyLogs, setDailyLogs] = useState<DailyLog[]>([]);
   const [liftLogs, setLiftLogs] = useState<LiftLog[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [rangeStats, setRangeStats] = useState<RangeStats>(EMPTY_STATS);
+  const [errors, setErrors] = useState<Partial<Record<Slice, string>>>({});
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const pendingRef = useRef(0);
 
-  // Live date (not mount-time): a midnight rollover re-runs `load` via the
-  // focus effect, since `to` feeds its dependency chain.
+  // Live date (not mount-time): a midnight rollover re-runs the loaders, since the
+  // window feeds their dependency chain.
   const to = useCurrentDate();
   const from = useMemo(() => addDays(to, -(rangeDays - 1)), [to, rangeDays]);
+  const prevFrom = useMemo(() => addDays(from, -rangeDays), [from, rangeDays]);
+  const prevTo = useMemo(() => addDays(from, -1), [from]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [d, l, a] = await Promise.all([
-        dailyApi.getDailyLogsRange(from, to),
-        liftApi.getLiftLogsRange(from, to),
-        activityApi.getActivityRange(from, to),
-      ]);
-      setDailyLogs(d);
-      setLiftLogs(l);
-      setActivityLogs(a);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load history");
-    } finally {
-      setLoading(false);
-    }
-  }, [dailyApi, liftApi, activityApi, from, to]);
-
-  // useFocusEffect fires on mount too, so no separate useEffect — otherwise
-  // the screen would fetch all three ranges twice on first open.
-  useFocusEffect(
-    useCallback(() => {
-      load();
-    }, [load]),
+  /** Runs one slice, tracking its own error and the shared loading flag. */
+  const run = useCallback(
+    async (slice: Slice, task: () => Promise<void>, fallback: string) => {
+      setErrors((prev) => ({ ...prev, [slice]: undefined }));
+      pendingRef.current += 1;
+      setLoading(true);
+      try {
+        await task();
+      } catch (err) {
+        setErrors((prev) => ({
+          ...prev,
+          [slice]: err instanceof Error ? err.message : fallback,
+        }));
+      } finally {
+        pendingRef.current -= 1;
+        if (pendingRef.current === 0) setLoading(false);
+      }
+    },
+    [],
   );
 
-  // Meals move the day's calories/protein too, hence "daily" alongside the rest.
-  useDataSync(["daily", "lift", "activity"], load);
+  const loadDaily = useCallback(
+    () =>
+      run(
+        "daily",
+        async () => {
+          setDailyLogs(await dailyApi.getDailyLogsRange(from, to));
+        },
+        "Failed to load your daily values",
+      ),
+    [run, dailyApi, from, to],
+  );
+
+  const loadLift = useCallback(
+    () =>
+      run(
+        "lift",
+        async () => {
+          setLiftLogs(await liftApi.getLiftLogsRange(from, to));
+        },
+        "Failed to load your lifts",
+      ),
+    [run, liftApi, from, to],
+  );
+
+  const loadActivity = useCallback(
+    () =>
+      run(
+        "activity",
+        async () => {
+          setActivityLogs(await activityApi.getActivityRange(from, to));
+        },
+        "Failed to load your activity",
+      ),
+    [run, activityApi, from, to],
+  );
+
+  /**
+   * The range's stats come from the rollup, not from the fetched rows: Strength has to
+   * describe the selected range, and ISO-week-over-week did not.
+   */
+  const loadStats = useCallback(
+    () =>
+      run(
+        "stats",
+        async () => {
+          const metrics = await liftApi.getLiftMetrics(from, to, prevFrom, prevTo);
+          setRangeStats({
+            workouts: metrics.days.length,
+            totalVolume: metrics.exercises.reduce((sum, e) => sum + e.volume, 0),
+            strengthPct: strengthChangePctFrom(metrics.exercises),
+          });
+        },
+        "Failed to load your stats",
+      ),
+    [run, liftApi, from, to, prevFrom, prevTo],
+  );
+
+  // Lift writes move the stats too, so they share one loader.
+  const loadLiftSlice = useCallback(() => {
+    loadLift();
+    loadStats();
+  }, [loadLift, loadStats]);
+
+  useDataSyncOnFocus(["daily"], loadDaily);
+  useDataSyncOnFocus(["lift"], loadLiftSlice);
+  useDataSyncOnFocus(["activity"], loadActivity);
+
+  const error =
+    errors.daily ?? errors.lift ?? errors.activity ?? errors.stats ?? null;
+
+  const retry = useCallback(() => {
+    loadDaily();
+    loadLiftSlice();
+    loadActivity();
+  }, [loadDaily, loadLiftSlice, loadActivity]);
+
+  // Deletes revert locally and report through `mutationError` rather than throwing, so
+  // a failed delete can't disappear without a word.
+  const failMutation = (err: unknown, fallback: string) =>
+    setMutationError(err instanceof Error ? err.message : fallback);
 
   const deleteDailyLog = useCallback(
     async (date: string) => {
@@ -74,7 +165,7 @@ export function useHistory(rangeDays: number) {
         await dailyApi.deleteDailyLog(date);
       } catch (err) {
         if (removed) setDailyLogs((prev) => [...prev, removed]);
-        throw err;
+        failMutation(err, "Couldn't delete that day");
       }
     },
     [dailyApi, dailyLogs],
@@ -88,7 +179,7 @@ export function useHistory(rangeDays: number) {
         await liftApi.deleteLiftLog(id);
       } catch (err) {
         if (removed) setLiftLogs((prev) => [...prev, removed]);
-        throw err;
+        failMutation(err, "Couldn't delete that set");
       }
     },
     [liftApi, liftLogs],
@@ -102,30 +193,19 @@ export function useHistory(rangeDays: number) {
         await activityApi.deleteActivity(id);
       } catch (err) {
         if (removed) setActivityLogs((prev) => [...prev, removed]);
-        throw err;
+        failMutation(err, "Couldn't delete that activity");
       }
     },
     [activityApi, activityLogs],
   );
 
-  const stats = useMemo(() => {
-    const workoutDays = uniqueWorkoutDates(liftLogs);
-    const volume = totalVolume(liftLogs);
-    return {
-      daysLogged: dailyLogs.length,
-      workouts: workoutDays.length,
-      totalVolume: volume,
-      avgVolume: workoutDays.length ? volume / workoutDays.length : 0,
-      strengthPct: strengthChangePct(liftLogs),
-      workoutDates: new Set(workoutDays),
-    };
-  }, [dailyLogs, liftLogs]);
+  const stats = useMemo(
+    () => ({ ...rangeStats, daysLogged: dailyLogs.length }),
+    [rangeStats, dailyLogs.length],
+  );
 
-  const groups = useMemo(() => groupByDate(liftLogs), [liftLogs]);
-
-  // Combined per-day view: every date that has a lift, a daily log, or an
-  // activity, newest first. This is what the History screen renders so the
-  // three sources sit together instead of being stacked end-to-end.
+  // Combined per-day view: every date that has a lift, a daily log, or an activity,
+  // newest first. This is what the screen renders so the three sources sit together.
   const days = useMemo<HistoryDay[]>(() => {
     const byDate = new Map<string, HistoryDay>();
     const ensure = (date: string): HistoryDay => {
@@ -153,14 +233,15 @@ export function useHistory(rangeDays: number) {
     dailyLogs,
     liftLogs,
     activityLogs,
-    groups,
     days,
     stats,
     loading,
     error,
+    mutationError,
+    clearMutationError: useCallback(() => setMutationError(null), []),
     from,
     to,
-    refetch: load,
+    refetch: retry,
     deleteDailyLog,
     deleteLiftLog,
     deleteActivity,

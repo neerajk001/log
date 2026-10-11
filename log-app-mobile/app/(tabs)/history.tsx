@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import type { ErrorBoundaryProps } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { StatTile } from "../../src/components/StatTile";
 import { CalendarMonth } from "../../src/components/CalendarMonth";
 import {
+  Banner,
+  Button,
   Card,
   Divider,
   EmptyState,
@@ -18,6 +21,7 @@ import {
 } from "../../src/components/ui/primitives";
 import { Chip, ChipRow, OverflowMenu } from "../../src/components/ui/controls";
 import { useHistory, type HistoryDay } from "../../src/hooks/useHistory";
+import { useMonthMarks } from "../../src/hooks/useMonthMarks";
 import { usePlans } from "../../src/hooks/usePlans";
 import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
@@ -83,12 +87,19 @@ export default function HistoryScreen() {
     stats,
     loading,
     error,
+    mutationError,
+    clearMutationError,
     refetch,
     deleteDailyLog,
     deleteLiftLog,
     deleteActivity,
   } = useHistory(rangeDays);
   const { days: planDays } = usePlans();
+  // Marks follow the month you're looking at, not the time filter.
+  const marked = useMonthMarks(month);
+
+  // Nothing has landed yet: placeholders rather than zeros that read as real.
+  const firstLoad = loading && days.length === 0;
 
   const planDayName = useMemo(() => {
     const map = new Map<string, string>();
@@ -141,20 +152,28 @@ export default function HistoryScreen() {
             />
 
             {error ? <ErrorState message={error} onRetry={refetch} /> : null}
+            {mutationError ? (
+              <Banner
+                tone="warning"
+                message={mutationError}
+                actionLabel="Dismiss"
+                onAction={clearMutationError}
+              />
+            ) : null}
 
             {/* Overall stats */}
             <View style={styles.statRow}>
               <View style={styles.statCell}>
-                <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={String(stats.workouts)} label="Workouts" />
+                <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={firstLoad ? "—" : String(stats.workouts)} label="Workouts" />
               </View>
               <View style={styles.statCell}>
-                <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={String(stats.daysLogged)} label="Days logged" />
+                <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={firstLoad ? "—" : String(stats.daysLogged)} label="Days logged" />
               </View>
               <View style={styles.statCell}>
-                <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
+                <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={firstLoad ? "—" : formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
               </View>
               <View style={styles.statCell}>
-                <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={strengthLabel} label="Strength" />
+                <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={firstLoad ? "—" : strengthLabel} label="Strength" />
               </View>
             </View>
 
@@ -165,7 +184,7 @@ export default function HistoryScreen() {
               selected={selectedDate ?? today}
               max={today}
               onSelect={(iso) => setSelectedDate((cur) => (cur === iso ? null : iso))}
-              marked={stats.workoutDates}
+              marked={marked}
             />
 
             {selectedDate ? (
@@ -209,6 +228,9 @@ export default function HistoryScreen() {
               </View>
 
               <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: isOpen }}
+                accessibilityLabel={`${formatLongDate(day.date)} — ${title}`}
                 style={styles.workoutCard}
                 onPress={() => setOpenDates((prev) => ({ ...prev, [day.date]: !prev[day.date] }))}
               >
@@ -268,7 +290,7 @@ export default function HistoryScreen() {
                             </Text>
                             <Pressable
                               onPress={() =>
-                                confirm("Delete set?", "This removes the logged set.", () => deleteLiftLog(l.id).catch(() => {}))
+                                confirm("Delete set?", "This removes the logged set.", () => void deleteLiftLog(l.id))
                               }
                               hitSlop={14}
                               accessibilityLabel="Delete set"
@@ -290,7 +312,7 @@ export default function HistoryScreen() {
                         </View>
                         <Pressable
                           onPress={() =>
-                            confirm("Delete daily log?", "This removes all values for this day.", () => deleteDailyLog(day.date).catch(() => {}))
+                            confirm("Delete daily log?", "This removes all values for this day.", () => void deleteDailyLog(day.date))
                           }
                           hitSlop={14}
                           accessibilityLabel="Delete daily log"
@@ -316,7 +338,7 @@ export default function HistoryScreen() {
                           </View>
                           <Pressable
                             onPress={() =>
-                              confirm("Delete activity?", "This removes the logged activity.", () => deleteActivity(a.id).catch(() => {}))
+                              confirm("Delete activity?", "This removes the logged activity.", () => void deleteActivity(a.id))
                             }
                             hitSlop={14}
                             accessibilityLabel="Delete activity"
@@ -415,5 +437,31 @@ const useStyles = makeUseStyles((t) =>
     exerciseBlock: { gap: spacing.sm },
     setRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
     dailyText: { flex: 1, gap: 2 },
+
+    errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
+    errorTitle: { textAlign: "center" },
+    errorText: { textAlign: "center", color: t.colors.textDim },
   }),
 );
+
+/**
+ * Route-level fallback (expo-router picks this up): a render crash on History becomes
+ * a friendly, retryable card instead of a red box.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.errorWrap}>
+        <IconBadge name="alert-circle-outline" bg={colors.surface} color={colors.danger} size={56} rounded={false} />
+        <Text style={[typography.h3, styles.errorTitle]}>History couldn&apos;t load</Text>
+        <Text style={[typography.small, styles.errorText]}>
+          {error?.message ?? "Something went wrong on this screen."}
+        </Text>
+        <Button label="Try again" icon="refresh" onPress={() => void retry()} />
+      </View>
+    </View>
+  );
+}
