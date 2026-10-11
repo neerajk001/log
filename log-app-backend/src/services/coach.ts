@@ -522,7 +522,7 @@ async function callModel(
 ): Promise<string> {
   const { baseUrl, apiKey } = aiEndpoint();
   if (!apiKey) {
-    throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
+    throw new AppError(503, "COACH_UNAVAILABLE", "The coach is unavailable right now.");
   }
   const promptCache = config.ai.promptCache;
 
@@ -546,14 +546,22 @@ async function callModel(
       }),
     });
   } catch {
-    throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
+    throw new AppError(
+      502,
+      "COACH_UNREACHABLE",
+      "I can't reach the coach right now — try again.",
+    );
   }
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     const host = hostOf(baseUrl);
     console.error(`[coach] ${host} error ${res.status}:`, detail.slice(0, 300));
-    throw new AppError(502, "COACH_ERROR", `The AI service (${host}) returned ${res.status}`);
+    throw new AppError(
+      502,
+      "COACH_ERROR",
+      "The coach is having trouble right now — try again in a moment.",
+    );
   }
 
   const data = (await res.json()) as {
@@ -575,7 +583,7 @@ async function callModel(
     .find((item) => item.type === "output_text")?.text;
 
   if (!text || text.trim().length === 0) {
-    throw new AppError(502, "COACH_EMPTY", "The AI returned no content");
+    throw new AppError(502, "COACH_EMPTY", "The coach didn't send a reply — try again.");
   }
   return text.trim();
 }
@@ -1882,14 +1890,14 @@ async function streamRound(
     if (err instanceof Error && err.name === "AbortError") {
       return { text: "", calls: [], responseId: null, usage: null, incomplete: false };
     }
-    throw new AppError(502, "COACH_UNREACHABLE", "Could not reach the AI service");
+      throw new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now — try again.");
   }
 
   if (!res.ok || !res.body) {
     const detail = await res.text().catch(() => "");
     const host = hostOf(baseUrl);
     console.error(`[coach] ${host} stream error ${res.status}:`, detail.slice(0, 300));
-    throw new AppError(502, "COACH_ERROR", `The AI service (${host}) returned ${res.status}`);
+      throw new AppError(502, "COACH_ERROR", "The coach is having trouble right now — try again in a moment.");
   }
 
   const reader = res.body.getReader();
@@ -2007,7 +2015,7 @@ export async function runCoachChatStream(
 
   const { baseUrl, apiKey } = aiEndpoint();
   if (!apiKey) {
-    throw new AppError(503, "COACH_UNAVAILABLE", "The AI coach is not configured");
+    throw new AppError(503, "COACH_UNAVAILABLE", "The coach is unavailable right now.");
   }
 
   const history: InputMessage[] = recent

@@ -88,9 +88,10 @@ describe("parsePlanOutput", () => {
 describe("OpenAI API errors", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("reports nested API key errors instead of a generic service error", async () => {
+  it("gives the athlete plain copy while the provider detail goes to the log", async () => {
     process.env.OPENAI_API_KEY = "test-key";
     vi.resetModules();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -111,6 +112,14 @@ describe("OpenAI API errors", () => {
       import("../src/services/planParser").then(({ parsePlanText }) =>
         parsePlanText("test plan"),
       ),
-    ).rejects.toThrow("OpenAI rejected the API key");
+    ).rejects.toThrow("Plan import is unavailable right now");
+
+    // The status and the API message are what make this diagnosable, so they must
+    // still be logged even though the user never sees them.
+    expect(logged).toHaveBeenCalledWith(
+      "[planParser] OpenAI error:",
+      400,
+      expect.objectContaining({ message: "API key not valid. Please pass a valid API key." }),
+    );
   });
 });

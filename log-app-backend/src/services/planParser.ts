@@ -53,7 +53,8 @@ export function parsePlanOutput(rawText: string): ParsedPlan {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    throw new PlanParseError("The AI returned invalid JSON");
+    console.error("[planParser] model returned invalid JSON", { chars: cleaned.length });
+    throw new PlanParseError("Couldn't read that plan — try pasting the text instead.");
   }
 
   return validatePlanOutput(parsed);
@@ -65,7 +66,8 @@ type OpenAIInput =
 
 async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
   if (!config.openai.apiKey) {
-    throw new PlanParseError("Plan parsing is not configured");
+    console.error("[planParser] no OPENAI_API_KEY configured");
+    throw new PlanParseError("Plan import is unavailable right now — try again later.");
   }
 
   let response: Response;
@@ -96,7 +98,8 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
       }),
     });
   } catch {
-    throw new PlanParseError("Could not reach the plan parsing service");
+    console.error("[planParser] could not reach api.openai.com");
+    throw new PlanParseError("Plan import is unavailable right now — try again later.");
   }
 
   if (!response.ok) {
@@ -105,29 +108,14 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
     try {
       apiError = (JSON.parse(errBody) as { error?: typeof apiError }).error;
     } catch {}
-    const invalidApiKey =
-      response.status === 401 ||
-      apiError?.code === "invalid_api_key" ||
-      /invalid api key|api key not valid/i.test(apiError?.message ?? errBody);
     console.error("[planParser] OpenAI error:", response.status, {
       model: config.openai.model,
+      code: apiError?.code,
       message: apiError?.message,
     });
-    if (invalidApiKey) {
-      throw new PlanParseError(
-        "OpenAI rejected the API key. Check that OPENAI_API_KEY is a valid OpenAI secret key.",
-      );
-    }
-    if (response.status === 404) {
-      throw new PlanParseError(
-        `OpenAI model not found or unavailable: ${config.openai.model}`,
-      );
-    }
-    throw new PlanParseError(
-      apiError?.message
-        ? `OpenAI request failed: ${apiError.message}`
-        : `OpenAI request failed with status ${response.status}`,
-    );
+    // The status, model and API message above are the diagnosis; the athlete gets plain
+    // copy rather than an operator's error text.
+    throw new PlanParseError("Plan import is unavailable right now — try again later.");
   }
 
   const data = (await response.json()) as {
@@ -138,7 +126,8 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
     .find((item) => item.type === "output_text")?.text;
 
   if (!rawText || rawText.trim().length === 0) {
-    throw new PlanParseError("The plan parsing service returned no content");
+    console.error("[planParser] model returned no content");
+    throw new PlanParseError("Couldn't read that plan — try pasting the text instead.");
   }
 
   return parsePlanOutput(rawText);
