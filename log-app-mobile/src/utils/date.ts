@@ -8,12 +8,21 @@ export function todayIso(): string {
   return toIso(new Date());
 }
 
-export function todayLocal(): string {
-  const d = new Date();
+function localIso(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+export function todayLocal(): string {
+  return localIso(new Date());
+}
+
+/** The LOCAL date of a UTC timestamp (e.g. a chat's `updated_at`), as YYYY-MM-DD. */
+export function localDateOf(timestamp: string): string {
+  const d = new Date(timestamp);
+  return Number.isNaN(d.getTime()) ? "" : localIso(d);
 }
 
 export function isoDaysAgo(days: number, from: Date = new Date()): string {

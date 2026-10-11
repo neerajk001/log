@@ -268,7 +268,10 @@ export function CoachChat({
           {
             label: "New chat",
             icon: "add",
-            onPress: () => router.replace("/coach/new" as never),
+            // `fresh` bypasses the Meals chat's one-thread-per-day reuse, and the
+            // agent keeps you in the section you were in.
+            onPress: () =>
+              router.replace({ pathname: "/coach/new", params: { agent, fresh: "1" } } as never),
           },
           {
             label: "Chat history",

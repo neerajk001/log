@@ -1974,8 +1974,18 @@ export async function runCoachChatStream(
     throw new AppError(404, "NOT_FOUND", "Chat not found");
   }
   if (!session) {
+    const newAgent = agent ?? "general";
     session = await prisma.coachSession.create({
-      data: { userId, title: message.trim().slice(0, 60) || "New chat", agent: agent ?? "general" },
+      data: {
+        userId,
+        // The Meals chat is one thread per day, so date it rather than naming it
+        // after whichever meal happened to be logged first.
+        title:
+          newAgent === "meal"
+            ? `Food log · ${today}`
+            : message.trim().slice(0, 60) || "New chat",
+        agent: newAgent,
+      },
     });
   } else if (agent && agent !== session.agent) {
     // The user switched agent (chips) — persist it for this session.
