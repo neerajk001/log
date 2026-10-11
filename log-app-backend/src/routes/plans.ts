@@ -12,6 +12,7 @@ import {
     PlanParseError,
 } from "../services/planParser";
 import { resolvePlanDayForDate } from "../services/planRotation";
+import { matchPlanDayIds } from "../services/planDays";
 import {
     createPlanSchema,
     planIdParamSchema,
@@ -150,28 +151,33 @@ router.post(
   validate(createPlanSchema),
   async (req, res: Response, next: NextFunction) => {
     try {
-      const { name, source, days } = req.body as CreatePlanInput;
+      const { name, source, days, is_active } = req.body as CreatePlanInput;
+      const activate = is_active ?? true;
 
-      await prisma.workoutPlan.updateMany({
-        where: { userId: req.userId, isActive: true },
-        data: { isActive: false },
-      });
+      const plan = await prisma.$transaction(async (tx) => {
+        if (activate) {
+          await tx.workoutPlan.updateMany({
+            where: { userId: req.userId, isActive: true },
+            data: { isActive: false },
+          });
+        }
 
-      const plan = await prisma.workoutPlan.create({
-        data: {
-          userId: req.userId,
-          name,
-          source,
-          isActive: true,
-          planDays: {
-            create: days.map((day, index) => ({
-              dayName: day.day_name,
-              dayOrder: index + 1,
-              exercises: day.exercises as unknown as Prisma.InputJsonValue,
-            })),
+        return tx.workoutPlan.create({
+          data: {
+            userId: req.userId,
+            name,
+            source,
+            isActive: activate,
+            planDays: {
+              create: days.map((day, index) => ({
+                dayName: day.day_name,
+                dayOrder: index + 1,
+                exercises: day.exercises as unknown as Prisma.InputJsonValue,
+              })),
+            },
           },
-        },
-        include: { planDays: { orderBy: { dayOrder: "asc" } } },
+          include: { planDays: { orderBy: { dayOrder: "asc" } } },
+        });
       });
 
       res.status(201).json(serializePlan(plan));
@@ -296,7 +302,12 @@ router.put(
       }
 
       const plan = await prisma.$transaction(async (tx) => {
-        await tx.planDay.deleteMany({ where: { planId, plan: { userId: req.userId } } });
+        const existingDays = await tx.planDay.findMany({
+          where: { planId, plan: { userId: req.userId } },
+          orderBy: { dayOrder: "asc" },
+          select: { id: true },
+        });
+
         const updated = await tx.workoutPlan.updateMany({
           where: { id: planId, userId: req.userId },
           data: { name, source },
@@ -304,14 +315,26 @@ router.put(
         if (updated.count === 0) {
           throw new AppError(404, "NOT_FOUND", "Plan not found");
         }
-        await tx.planDay.createMany({
-          data: days.map((day, index) => ({
-            planId,
+
+        const { keep, remove } = matchPlanDayIds(
+          existingDays.map((day) => day.id),
+          days.length,
+        );
+        if (remove.length > 0) {
+          await tx.planDay.deleteMany({ where: { id: { in: remove } } });
+        }
+
+        for (const [index, day] of days.entries()) {
+          const data = {
             dayName: day.day_name,
             dayOrder: index + 1,
             exercises: day.exercises as unknown as Prisma.InputJsonValue,
-          })),
-        });
+          };
+          const id = keep[index];
+          if (id) await tx.planDay.update({ where: { id }, data });
+          else await tx.planDay.create({ data: { planId, ...data } });
+        }
+
         return tx.workoutPlan.findFirstOrThrow({
           where: { id: planId, userId: req.userId },
           include: { planDays: { orderBy: { dayOrder: "asc" } } },

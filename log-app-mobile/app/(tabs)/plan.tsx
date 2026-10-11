@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { router } from "expo-router";
+import { router, type ErrorBoundaryProps } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import type { Palette } from "../../src/theme/colors";
@@ -194,5 +194,31 @@ const useStyles = makeUseStyles((t) =>
       padding: spacing.md,
     },
     dayText: { flex: 1, gap: 2 },
+
+    errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
+    errorTitle: { textAlign: "center" },
+    errorText: { textAlign: "center", color: t.colors.textDim },
   }),
 );
+
+/**
+ * Route-level fallback (expo-router picks this up): a render crash on Plan becomes a
+ * friendly, retryable card instead of a red box.
+ */
+export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.errorWrap}>
+        <IconBadge name="alert-circle-outline" bg={colors.surface} color={colors.danger} size={56} rounded={false} />
+        <Text style={[typography.h3, styles.errorTitle]}>Plan couldn&apos;t load</Text>
+        <Text style={[typography.small, styles.errorText]}>
+          {error?.message ?? "Something went wrong on this screen."}
+        </Text>
+        <Button label="Try again" icon="refresh" onPress={() => void retry()} />
+      </View>
+    </View>
+  );
+}

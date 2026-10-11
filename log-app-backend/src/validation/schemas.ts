@@ -132,6 +132,11 @@ export const parsedPlanSchema = z.object({
 export const createPlanSchema = parsedPlanSchema.extend({
   name: z.string().min(1).max(200),
   source: z.enum(["manual", "ai_parsed"]),
+  /**
+   * Whether the new plan becomes the active one (default true). Duplicating a plan sends
+   * false, so making a copy no longer steals the active slot.
+   */
+  is_active: z.boolean().optional(),
 });
 
 export const planParseBodySchema = z.object({

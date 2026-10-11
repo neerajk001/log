@@ -146,6 +146,8 @@ export interface CreatePlanInput {
   name: string;
   source: "manual" | "ai_parsed";
   days: { day_name: string; exercises: PlanExercise[] }[];
+  /** Defaults to true server-side; a duplicate sends false so a copy doesn't take over. */
+  is_active?: boolean;
 }
 
 export type VerdictKind = "hold" | "adjust_calories" | "check_recovery";

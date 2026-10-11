@@ -13,6 +13,10 @@ import { setPendingPlan } from "../../src/state/parsedPlan";
 import { ApiError } from "../../src/api/client";
 import { emptyDay, type EditableDay } from "../../src/components/PlanDaysEditor";
 
+/** Keep in step with the server's cap (routes/plans.ts) — it sends the file to the model. */
+const MAX_PLAN_FILE_MB = 1;
+const MAX_PLAN_FILE_BYTES = MAX_PLAN_FILE_MB * 1024 * 1024;
+
 function toEditableDays(
   days: { day_name: string; exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[] }[],
 ): EditableDay[] {
@@ -86,8 +90,8 @@ export default function ImportPlanScreen() {
         return;
       }
       const file = result.assets[0];
-      if (file.size != null && file.size > 2 * 1024 * 1024) {
-        setError("That file is too large. Maximum size is 2 MB.");
+      if (file.size != null && file.size > MAX_PLAN_FILE_BYTES) {
+        setError(`That file is too large. Maximum size is ${MAX_PLAN_FILE_MB} MB.`);
         setLoading(false);
         return;
       }
@@ -111,7 +115,7 @@ export default function ImportPlanScreen() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 0) {
-          setError("Couldn't reach the server. Check that you're on the same Wi-Fi and the backend is running.");
+          setError("Couldn't reach the server. Check your connection and try again.");
         } else if (err.status === 422) {
           setError("Couldn't parse that PDF — try pasting plain text, or build the plan manually.");
         } else {
@@ -171,7 +175,9 @@ export default function ImportPlanScreen() {
                 onPress={parsePdf}
                 disabled={loading}
               />
-              <Text style={[typography.caption, styles.hint]}>PDF or text, up to 2 MB.</Text>
+              <Text style={[typography.caption, styles.hint]}>
+                PDF or text, up to {MAX_PLAN_FILE_MB} MB.
+              </Text>
             </Card>
           ) : null}
         </View>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolvePlanDayForDate, type PlanDayLike } from "../src/services/planRotation";
+import { matchPlanDayIds } from "../src/services/planDays";
 
 function days(count: number): PlanDayLike[] {
   return Array.from({ length: count }, (_, i) => ({ id: `day-${i + 1}`, dayOrder: i + 1 }));
@@ -43,5 +44,31 @@ describe("resolvePlanDayForDate", () => {
 
   it("returns null when the plan has no days", () => {
     expect(resolvePlanDayForDate(localDate("2026-10-01"), [], localDate("2026-10-02"))).toBeNull();
+  });
+});
+
+/**
+ * Plan updates match days by position so the lift logs pointing at them survive — an edit
+ * that recreated every day used to null `lift_logs.plan_day_id` and cost history its
+ * session names.
+ */
+describe("matchPlanDayIds", () => {
+  it("keeps day i on day i, so a renamed day still owns its sets", () => {
+    expect(matchPlanDayIds(["a", "b", "c"], 3)).toEqual({ keep: ["a", "b", "c"], remove: [] });
+  });
+
+  it("removes only the days the new plan doesn't have", () => {
+    expect(matchPlanDayIds(["a", "b", "c", "d"], 2)).toEqual({
+      keep: ["a", "b"],
+      remove: ["c", "d"],
+    });
+  });
+
+  it("keeps everything when the plan gains days", () => {
+    expect(matchPlanDayIds(["a"], 4)).toEqual({ keep: ["a"], remove: [] });
+  });
+
+  it("handles an empty existing plan", () => {
+    expect(matchPlanDayIds([], 3)).toEqual({ keep: [], remove: [] });
   });
 });

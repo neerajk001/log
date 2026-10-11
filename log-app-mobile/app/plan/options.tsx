@@ -55,6 +55,8 @@ export default function PlanOptionsScreen() {
       await api.createPlan({
         name: `${plan.name} (copy)`,
         source: plan.source,
+        // A copy is not a promotion: without this the new plan becomes the active one.
+        is_active: false,
         days: plan.days.map((d) => ({
           day_name: d.day_name,
           exercises: d.exercises.map((e) => ({ name: e.name, sets: e.sets, reps: e.reps })),
@@ -138,6 +140,7 @@ export default function PlanOptionsScreen() {
             icon="create-outline"
             title="Edit Plan"
             subtitle="Modify exercises, sets or days"
+            disabled={!!busy}
             onPress={() =>
               plan.days[0]
                 ? router.navigate({ pathname: "/plan/[id]/edit-day", params: { id: plan.id, dayId: plan.days[0].id } } as never)
@@ -149,6 +152,7 @@ export default function PlanOptionsScreen() {
             icon="sparkles-outline"
             title="Import New Plan"
             subtitle="Replace current plan using AI"
+            disabled={!!busy}
             onPress={() => router.navigate("/plan/import" as never)}
           />
           <Divider />
@@ -156,14 +160,15 @@ export default function PlanOptionsScreen() {
             icon="copy-outline"
             title="Duplicate Plan"
             subtitle="Create a copy of this plan"
-            onPress={busy ? undefined : duplicate}
+            disabled={!!busy}
+            onPress={duplicate}
           />
           <Divider />
           <ListRow
             icon="checkmark-circle-outline"
             title="Set as Active"
             subtitle={plan.is_active ? "This plan is already active" : "Make this your active plan"}
-            disabled={plan.is_active || busy === "activate"}
+            disabled={plan.is_active || busy === "activate" || !!busy}
             onPress={activate}
           />
           <Divider />
@@ -174,7 +179,7 @@ export default function PlanOptionsScreen() {
             title="Delete Plan"
             subtitle="Remove this plan and its days"
             destructive
-            disabled={busy === "delete"}
+            disabled={busy === "delete" || !!busy}
             onPress={confirmDelete}
           />
         </View>
