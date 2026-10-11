@@ -21,10 +21,13 @@ import {
     type CreatePlanInput,
 } from "../validation/schemas";
 
+/** Generous for a workout plan, and it goes to the model inline (see planParser). */
+const PLAN_FILE_MAX_BYTES = 1024 * 1024;
+
 const router = Router();
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 2 * 1024 * 1024 },
+  limits: { fileSize: PLAN_FILE_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf" || file.mimetype === "text/plain") {
       cb(null, true);
@@ -126,7 +129,13 @@ router.post(
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
       if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-        next(new AppError(400, "VALIDATION_ERROR", "File is too large. Maximum size is 2 MB."));
+        next(
+          new AppError(
+            400,
+            "VALIDATION_ERROR",
+            `File is too large. Maximum size is ${PLAN_FILE_MAX_BYTES / (1024 * 1024)} MB.`,
+          ),
+        );
         return;
       }
       next(err);

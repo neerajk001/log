@@ -54,6 +54,9 @@ export const config = {
     thinking: process.env.AI_THINKING || "",
     replyTokens: parseInt(process.env.AI_REPLY_TOKENS || "400", 10),
     toolTokens: parseInt(process.env.AI_TOOL_TOKENS || "1600", 10),
+    // Tool rounds per turn (1-8). Every round replays the conversation when response
+    // chaining is off, so this multiplies the input cost of a hard question.
+    toolRounds: Math.max(1, Math.min(8, parseInt(process.env.AI_TOOL_ROUNDS || "4", 10) || 4)),
     // Previous messages replayed each turn. Lower = cheaper, shorter memory —
     // with response chaining off, every one of these is re-sent on every round.
     historyTurns: Math.max(2, Math.min(24, parseInt(process.env.AI_HISTORY_TURNS || "8", 10) || 8)),

@@ -677,7 +677,7 @@ export function parseOpenAIDelta(payload: string): string | null {
 
 /* ----------------------------------------------------------- coach tools */
 
-const MAX_TOOL_ROUNDS = 4;
+const MAX_TOOL_ROUNDS = config.ai.toolRounds;
 const MAX_TOOL_DAYS = 90;
 
 /** Responses-API tool definitions (flat name/parameters, not nested). */
