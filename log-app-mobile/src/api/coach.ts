@@ -4,13 +4,16 @@ import { API_BASE_URL, useApiClient } from "./client";
 import { invalidateResources } from "./cache";
 import type {
   AgentId,
+  CoachDecision,
   CoachMemory,
   CoachMessage,
   CoachProfile,
   CoachProfileInput,
   CoachProposal,
   CoachSession,
+  DismissedMeal,
   ParsedPlanPreview,
+  PhysiqueReading,
 } from "./types";
 
 export function useCoachApi() {
@@ -29,11 +32,13 @@ export function useCoachApi() {
       deleteSession: (id: string) => client.del<{ ok: true }>(`/api/coach/sessions/${id}`),
       getMemory: () => client.get<CoachMemory | null>("/api/coach/memory"),
       clearMemory: () => client.del<{ ok: true }>("/api/coach/memory"),
-      chat: (message: string) => client.post<{ reply: string }>("/api/coach/chat", { message }),
+      getDecisions: (limit = 20) =>
+        client.get<CoachDecision[]>(`/api/coach/decisions?limit=${limit}`),
+      clearDecisions: () => client.del<{ ok: true }>("/api/coach/decisions"),
       generatePlan: (body: { goal?: string; notes?: string }) =>
         client.post<ParsedPlanPreview>("/api/coach/plan", body),
       analyzePhoto: (formData: FormData) =>
-        client.postFormData<{ analysis: string }>("/api/coach/analyze", formData),
+        client.postFormData<PhysiqueReading>("/api/coach/analyze", formData),
     }),
     [client],
   );
@@ -51,6 +56,7 @@ export async function streamCoachChat({
   sessionId,
   localDate,
   agent,
+  dismissedMeal,
   onDelta,
   onStatus,
   onSessionId,
@@ -62,6 +68,8 @@ export async function streamCoachChat({
   sessionId?: string | null;
   localDate?: string;
   agent?: AgentId;
+  /** A meal estimate the athlete just dismissed — carries it back to the model. */
+  dismissedMeal?: DismissedMeal;
   onDelta: (delta: string) => void;
   onStatus?: (status: string) => void;
   onSessionId?: (sessionId: string) => void;
@@ -77,7 +85,13 @@ export async function streamCoachChat({
       Authorization: `Bearer ${token}`,
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ message, sessionId: sessionId ?? undefined, localDate, agent }),
+    body: JSON.stringify({
+      message,
+      sessionId: sessionId ?? undefined,
+      localDate,
+      agent,
+      dismissedMeal,
+    }),
     signal,
   });
 

@@ -38,6 +38,7 @@ export function useMe() {
       rest_days?: number[] | null;
       meal_tracking_enabled?: boolean;
       ai_coach_enabled?: boolean;
+      track_weight?: boolean;
       /** Dev/testing: flip the first-run onboarding flag. */
       onboarded?: boolean;
     }) => {

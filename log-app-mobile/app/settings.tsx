@@ -116,7 +116,7 @@ export default function SettingsScreen() {
               label="Calorie target"
               unit="kcal"
               value={profile?.calorie_target ?? null}
-              hint="Used as a reference in your daily log."
+              hint="Shown against your daily log and the Nutrition trend in Insights."
               onSave={async (v) => {
                 await update({ calorie_target: v });
               }}
@@ -213,6 +213,25 @@ export default function SettingsScreen() {
         </Card>
 
         <Text style={styles.sectionLabel}>Logging</Text>
+        <Card style={styles.toggleRow}>
+          <View style={styles.toggleText}>
+            <Text style={typography.bodyStrong}>Track bodyweight</Text>
+            <Text style={typography.small}>
+              {profile?.track_weight === false
+                ? "Off — weigh-ins are hidden and your weekly verdict judges strength and consistency instead."
+                : "Weigh-ins, your weight trend, and the weight part of your weekly verdict."}
+            </Text>
+          </View>
+          <Switch
+            value={profile?.track_weight !== false}
+            onValueChange={(v) => {
+              update({ track_weight: v }).catch(() => {});
+              lightTick();
+            }}
+            trackColor={{ false: colors.border, true: colors.primary }}
+            thumbColor={colors.white}
+          />
+        </Card>
         <Card style={styles.toggleRow}>
           <View style={styles.toggleText}>
             <Text style={typography.bodyStrong}>Haptic feedback</Text>

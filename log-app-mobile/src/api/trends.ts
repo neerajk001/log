@@ -1,10 +1,12 @@
 import { useMemo } from "react";
 import { useApiClient } from "./client";
-import type { TrendsResponse } from "./types";
+import type { TrendRange, TrendsResponse } from "./types";
 
 export function useTrendsApi() {
   const client = useApiClient();
   return useMemo(() => ({
-    getTrends: () => client.get<TrendsResponse>("/api/trends"),
+    /** Each range/window is a distinct cache key, so switching back is instant. */
+    getTrends: (range: TrendRange, weeks: number) =>
+      client.get<TrendsResponse>(`/api/trends?range=${range}&weeks=${weeks}`),
   }), [client]);
 }

@@ -8,26 +8,52 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { BarChart, Sparkline } from "../../src/components/ui/charts";
 import {
   Card,
+  Divider,
   ErrorState,
   IconBadge,
   LoadingState,
   SectionHeader,
   type IoniconName,
 } from "../../src/components/ui/primitives";
-import { SegmentedControl } from "../../src/components/ui/controls";
+import { SegmentedControl, Chip, ChipRow } from "../../src/components/ui/controls";
 import { useInsights } from "../../src/hooks/useInsights";
 import { useTrends } from "../../src/hooks/useTrends";
 import { useMe } from "../../src/hooks/useMe";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { formatNumber } from "../../src/utils/derive";
-import { formatMediumDate, weekDayLabels } from "../../src/utils/date";
+import { weekDayLabels } from "../../src/utils/date";
+import type { TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+const FULL_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
-const RANGES = [
-  { value: "7", label: "7D" },
-  { value: "30", label: "30D" },
-  { value: "90", label: "90D" },
+const RANGES: { value: TrendRange; label: string }[] = [
+  { value: "7d", label: "7D" },
+  { value: "30d", label: "30D" },
+  { value: "90d", label: "90D" },
+  { value: "1y", label: "1Y" },
+];
+
+/** The range also picks the training window for the metrics below. */
+const RANGE_DAYS: Record<TrendRange, number> = { "7d": 7, "30d": 30, "90d": 90, "1y": 365 };
+
+/** Nutrition windows — always shown as weekly averages. */
+const NUTRITION_WINDOWS: { weeks: number; label: string; phrase: string }[] = [
+  { weeks: 1, label: "1W", phrase: "week" },
+  { weeks: 2, label: "2W", phrase: "2 weeks" },
+  { weeks: 3, label: "3W", phrase: "3 weeks" },
+  { weeks: 4, label: "1M", phrase: "1 month" },
+  { weeks: 8, label: "2M", phrase: "2 months" },
+  { weeks: 13, label: "3M", phrase: "3 months" },
+  { weeks: 26, label: "6M", phrase: "6 months" },
+  { weeks: 52, label: "1Y", phrase: "1 year" },
 ];
 
 function signedPct(n: number | null): string {
@@ -35,49 +61,121 @@ function signedPct(n: number | null): string {
   return `${n > 0 ? "+" : ""}${n}%`;
 }
 
+/** Label for one series bucket: weekday, "Wk Oct 5", or a month name. */
+function bucketLabel(start: string, bucket: "day" | "week" | "month"): string {
+  const d = new Date(`${start}T00:00:00Z`);
+  if (bucket === "day") return WEEKDAY_NAMES[d.getUTCDay()];
+  if (bucket === "week") return `Wk ${MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCDate()}`;
+  return MONTH_NAMES[d.getUTCMonth()];
+}
+
+function monthLabel(start: string): string {
+  const d = new Date(`${start}T00:00:00Z`);
+  return `${FULL_MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+const BUCKET_NOUN: Record<"day" | "week" | "month", string> = {
+  day: "day",
+  week: "week",
+  month: "month",
+};
+
+const BUCKET_ADJECTIVE: Record<"day" | "week" | "month", string> = {
+  day: "daily",
+  week: "weekly",
+  month: "monthly",
+};
+
 /**
  * Insights — a plain-language progress summary: how consistent you've been,
  * the headline numbers, your volume trend, where that volume went, your best
  * lifts, and a streak. The weekly verdict lives on its own screen (`/verdict`).
  */
 export default function InsightsScreen() {
-  const [range, setRange] = useState("7");
-  const rangeDays = Number(range);
+  const [range, setRange] = useState<TrendRange>("7d");
+  const [nutritionMetric, setNutritionMetric] = useState<"calories" | "protein">("calories");
+  const [nutritionWeeks, setNutritionWeeks] = useState(1);
+  const [weightRowsOpen, setWeightRowsOpen] = useState(false);
+  const [consistencyOpen, setConsistencyOpen] = useState(false);
+  const rangeDays = RANGE_DAYS[range];
   const { colors, typography } = useTheme();
   const styles = useStyles();
   const { profile } = useMe();
   const restDays = profile?.rest_days ?? [];
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
-  const { data: trends, loading: trendsLoading, refetch: refetchTrends } = useTrends();
+  const { data: trends, loading: trendsLoading, refetch: refetchTrends } = useTrends(
+    range,
+    nutritionWeeks,
+  );
 
   const weightValues = useMemo(
-    () => (trends?.weight ?? []).map((w) => w.avg_kg).filter((v): v is number => v != null),
+    () => (trends?.series ?? []).map((b) => b.weight_kg).filter((v): v is number => v != null),
     [trends],
   );
   const currentAvg = weightValues.length > 0 ? weightValues[weightValues.length - 1] : null;
   const adherence = trends?.adherence_pct ?? null;
+  const trackWeight = profile?.track_weight !== false;
+  const bucketSize = trends?.bucket ?? "week";
+  const months = trends?.months ?? [];
+  const latestMonth = months[0] ?? null;
+  // One-line preview shown while the consistency card is collapsed.
+  const latestMonthPreview = latestMonth
+    ? [
+        monthLabel(latestMonth.month_start),
+        `${latestMonth.workouts} workout${latestMonth.workouts === 1 ? "" : "s"}`,
+        latestMonth.calorie_adherence_pct != null
+          ? `${latestMonth.calorie_adherence_pct}% calories`
+          : null,
+        latestMonth.protein_adherence_pct != null
+          ? `${latestMonth.protein_adherence_pct}% protein`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : "";
 
-  // Recent weekly averages, newest first, with the change vs the prior week.
-  const recentWeeks = useMemo(() => {
-    const points = (trends?.weight ?? []).filter((w) => w.avg_kg != null);
-    const last = points.slice(-6);
-    const rows = last.map((w, i) => {
-      const globalIndex = points.length - last.length + i;
-      const prev = globalIndex > 0 ? points[globalIndex - 1].avg_kg : null;
-      return {
-        week_start: w.week_start,
-        avg: w.avg_kg as number,
-        delta: prev != null && w.avg_kg != null ? w.avg_kg - prev : null,
-      };
-    });
-    return rows
+  // The most recent buckets, newest first, with the change vs the bucket before.
+  const recentBuckets = useMemo(() => {
+    const size = trends?.bucket ?? "week";
+    const points = (trends?.series ?? []).filter((b) => b.weight_kg != null);
+    return points
+      .slice(-6)
       .reverse()
-      .map((r, i) => ({
-        ...r,
-        label: i === 0 ? "This week" : i === 1 ? "Last week" : formatMediumDate(r.week_start),
+      .map((b, i, arr) => ({
+        start: b.start,
+        avg: b.weight_kg as number,
+        delta:
+          arr[i + 1]?.weight_kg != null
+            ? (b.weight_kg as number) - (arr[i + 1].weight_kg as number)
+            : null,
+        label: i === 0 ? "Latest" : bucketLabel(b.start, size),
       }));
   }, [trends]);
+
+  const nutritionValues = useMemo(
+    () =>
+      (trends?.nutrition ?? [])
+        .map((b) => (nutritionMetric === "calories" ? b.calories : b.protein_g))
+        .filter((v): v is number => v != null),
+    [trends, nutritionMetric],
+  );
+  const nutritionWindow =
+    NUTRITION_WINDOWS.find((w) => w.weeks === nutritionWeeks) ?? NUTRITION_WINDOWS[0];
+  const currentNutrition =
+    nutritionValues.length > 0 ? nutritionValues[nutritionValues.length - 1] : null;
+  const rangeAverage =
+    nutritionValues.length > 0
+      ? Math.round(nutritionValues.reduce((a, b) => a + b, 0) / nutritionValues.length)
+      : null;
+  const nutritionUnit = nutritionMetric === "calories" ? "kcal" : "g";
+  const proteinTarget = profile?.protein_target_g ?? null;
+  const calorieTarget = profile?.calorie_target ?? null;
+  const nutritionTarget = nutritionMetric === "calories" ? calorieTarget : proteinTarget;
+  const targetDeltaPct =
+    nutritionTarget != null && rangeAverage != null && nutritionTarget > 0
+      ? Math.round(((rangeAverage - nutritionTarget) / nutritionTarget) * 100)
+      : null;
 
   const refresh = () => {
     refetch();
@@ -156,12 +254,34 @@ export default function InsightsScreen() {
 
         <SectionHeader title="Progress" />
 
-        {/* Weight (R5) */}
+        {/* Weight (R5) — the per-bucket list collapses; the number and chart stay */}
+        {trackWeight ? (
         <Card style={styles.section}>
-          <View style={styles.cardHeaderLeft}>
-            <IconBadge name="scale-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
-            <Text style={typography.bodyStrong}>Weight · weekly average</Text>
-          </View>
+          <Pressable
+            onPress={() => setWeightRowsOpen((open) => !open)}
+            accessibilityRole="button"
+            accessibilityLabel={`Recent ${BUCKET_NOUN[bucketSize]}s`}
+            accessibilityState={{ expanded: weightRowsOpen }}
+            style={styles.cardHeader}
+          >
+            <View style={styles.cardHeaderLeft}>
+              <IconBadge name="scale-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
+              <Text style={typography.bodyStrong}>
+                Weight · {BUCKET_ADJECTIVE[bucketSize]} average
+              </Text>
+            </View>
+            <View style={styles.headerRight}>
+              <Text style={typography.caption}>
+                {recentBuckets.length} {BUCKET_NOUN[bucketSize]}
+                {recentBuckets.length === 1 ? "" : "s"}
+              </Text>
+              <Ionicons
+                name={weightRowsOpen ? "chevron-up" : "chevron-down"}
+                size={18}
+                color={colors.textMuted}
+              />
+            </View>
+          </Pressable>
           {weightValues.length > 0 ? (
             <>
               <View style={styles.weightBody}>
@@ -171,10 +291,10 @@ export default function InsightsScreen() {
                 </Text>
                 <Sparkline values={weightValues} width={300} height={90} />
               </View>
-              {recentWeeks.length > 1 ? (
+              {weightRowsOpen && recentBuckets.length > 1 ? (
                 <View style={styles.weekList}>
-                  {recentWeeks.map((w) => (
-                    <View key={w.week_start} style={styles.weekRow}>
+                  {recentBuckets.map((w) => (
+                    <View key={w.start} style={styles.weekRow}>
                       <Text style={[typography.small, styles.weekLabel]} numberOfLines={1}>
                         {w.label}
                       </Text>
@@ -196,7 +316,10 @@ export default function InsightsScreen() {
                 </View>
               ) : null}
               <Text style={[typography.small, styles.note]}>
-                Average of your daily weights, each week.
+                Average of your daily weights, per {BUCKET_NOUN[bucketSize]}.
+                {recentBuckets.length > 1 && !weightRowsOpen
+                  ? ` Tap the header for each ${BUCKET_NOUN[bucketSize]}.`
+                  : ""}
               </Text>
             </>
           ) : (
@@ -205,6 +328,174 @@ export default function InsightsScreen() {
             </Text>
           )}
         </Card>
+        ) : null}
+
+        {/* Nutrition — calories/protein, one chart with a toggle */}
+        <Card style={styles.section}>
+          <View style={styles.cardHeaderLeft}>
+            <IconBadge name="nutrition-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
+            <Text style={typography.bodyStrong}>Nutrition · weekly average</Text>
+          </View>
+
+          <SegmentedControl
+            value={nutritionMetric}
+            onChange={setNutritionMetric}
+            options={[
+              { value: "calories", label: "Calories" },
+              { value: "protein", label: "Protein" },
+            ]}
+          />
+
+          <ChipRow>
+            {NUTRITION_WINDOWS.map((w) => (
+              <Chip
+                key={w.weeks}
+                label={w.label}
+                active={nutritionWeeks === w.weeks}
+                onPress={() => setNutritionWeeks(w.weeks)}
+              />
+            ))}
+          </ChipRow>
+
+          {nutritionValues.length > 0 ? (
+            <>
+              <View style={styles.weightBody}>
+                <Text style={[typography.caption, styles.note]}>
+                  {nutritionWeeks === 1 ? "This week" : `Average · last ${nutritionWindow.phrase}`}
+                </Text>
+                <Text style={typography.metric}>
+                  {rangeAverage != null ? formatNumber(rangeAverage) : "—"}
+                  <Text style={typography.metricUnit}> {nutritionUnit}</Text>
+                </Text>
+                <Sparkline
+                  values={nutritionValues}
+                  width={300}
+                  height={90}
+                  color={nutritionMetric === "calories" ? colors.orange : colors.blue}
+                  dots={nutritionValues.length <= 16}
+                />
+              </View>
+              <Text style={[typography.small, styles.note]}>
+                {nutritionValues.length} week{nutritionValues.length === 1 ? "" : "s"} of data · one
+                point per week, completed days only.
+              </Text>
+            </>
+          ) : (
+            <Text style={[typography.small, styles.note]}>
+              Log calories and protein on Today to see this trend.
+            </Text>
+          )}
+
+          {nutritionTarget != null || rangeAverage != null ? (
+            <>
+              <Divider />
+              <View style={styles.weekList}>
+                <View style={styles.weekRow}>
+                  <Text style={[typography.small, styles.weekLabel]}>Target</Text>
+                  <Text style={typography.bodyStrong}>
+                    {nutritionTarget != null
+                      ? `${formatNumber(nutritionTarget)} ${nutritionUnit}`
+                      : "Not set"}
+                  </Text>
+                </View>
+                {nutritionWeeks > 1 ? (
+                  <View style={styles.weekRow}>
+                    <Text style={[typography.small, styles.weekLabel]}>Latest week</Text>
+                    <Text style={typography.bodyStrong}>
+                      {currentNutrition != null
+                        ? `${formatNumber(currentNutrition)} ${nutritionUnit}`
+                        : "—"}
+                    </Text>
+                  </View>
+                ) : null}
+                {targetDeltaPct != null ? (
+                  <View style={styles.weekRow}>
+                    <Text style={[typography.small, styles.weekLabel]}>vs target</Text>
+                    <Text style={[typography.small, styles.weekFlat]}>
+                      {targetDeltaPct > 0
+                        ? `${targetDeltaPct}% over`
+                        : `${Math.abs(targetDeltaPct)}% under`}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={[typography.small, styles.note]}>
+                Target from Settings, compared with this window average.
+              </Text>
+            </>
+          ) : (
+            <Text style={[typography.small, styles.note]}>
+              Set calorie and protein targets in Settings to compare them here.
+            </Text>
+          )}
+        </Card>
+
+        {/* Consistency, month by month — collapsed to a one-line preview */}
+        {months.length > 0 ? (
+          <Card style={styles.section}>
+            <Pressable
+              onPress={() => setConsistencyOpen((open) => !open)}
+              accessibilityRole="button"
+              accessibilityLabel="Consistency by month"
+              accessibilityState={{ expanded: consistencyOpen }}
+              style={styles.cardHeader}
+            >
+              <View style={styles.cardHeaderLeft}>
+                <IconBadge name="calendar-outline" bg={colors.surfaceAlt} color={colors.text} size={30} rounded={false} />
+                <Text style={typography.bodyStrong}>Consistency · by month</Text>
+              </View>
+              <View style={styles.headerRight}>
+                <Text style={typography.caption}>{months.length} months</Text>
+                <Ionicons
+                  name={consistencyOpen ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color={colors.textMuted}
+                />
+              </View>
+            </Pressable>
+
+            {consistencyOpen ? (
+              <>
+                <View style={styles.monthList}>
+                  {months.map((m) => (
+                    <View key={m.month_start} style={styles.monthRow}>
+                      <View style={styles.monthHead}>
+                        <Text style={typography.bodyStrong}>{monthLabel(m.month_start)}</Text>
+                        <Text style={typography.small}>
+                          {m.workouts} workout{m.workouts === 1 ? "" : "s"}
+                        </Text>
+                      </View>
+                      <Text style={[typography.small, styles.monthLine]}>
+                        {m.days_logged === 0
+                          ? "Nothing logged this month"
+                          : [
+                              m.calories != null ? `avg ${formatNumber(m.calories)} kcal` : null,
+                              m.protein_g != null ? `${m.protein_g} g protein` : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                      </Text>
+                      <Text style={[typography.small, styles.monthLine]}>
+                        {[
+                          m.protein_adherence_pct != null ? `protein ${m.protein_adherence_pct}%` : null,
+                          m.calorie_adherence_pct != null ? `calories ${m.calorie_adherence_pct}%` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "Set targets in Settings to track these"}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <Text style={[typography.small, styles.note]}>
+                  Days you hit each target, and what you averaged, month by month — completed days
+                  only.
+                </Text>
+              </>
+            ) : (
+              <Text style={[typography.small, styles.note]}>{latestMonthPreview}</Text>
+            )}
+          </Card>
+        ) : null}
 
         {/* Sets per week */}
         <Card style={styles.section}>
@@ -404,6 +695,7 @@ const useStyles = makeUseStyles((t) =>
     section: { gap: spacing.md },
     cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     cardHeaderLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    headerRight: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
     pill: {
       backgroundColor: t.colors.surfaceAlt,
       borderRadius: radii.pill,
@@ -453,6 +745,11 @@ const useStyles = makeUseStyles((t) =>
     weekUp: { color: t.colors.success },
     weekDown: { color: t.colors.blue },
     weekFlat: { color: t.colors.textMuted },
+
+    monthList: { gap: spacing.md },
+    monthRow: { gap: 3 },
+    monthHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+    monthLine: { color: t.colors.textDim },
 
     muscleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     musclePct: { color: t.colors.textDim, width: 40, textAlign: "right" },

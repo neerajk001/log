@@ -55,7 +55,6 @@ export default function TodayScreen() {
   const { signOut } = useClerk();
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const fields = useMemo(() => fieldConfigs(colors), [colors]);
 
   const [activeDate, setActiveDate] = useState(today);
   const prevTodayRef = useRef(today);
@@ -73,6 +72,14 @@ export default function TodayScreen() {
   const { data, placeholder, loading, error, fieldErrors, retry, save, retrySave, refetch } =
     useTodayLog(activeDate);
   const { profile, defaults, update: updateMe } = useMe();
+  // Weigh-ins only appear when the athlete tracks them (Settings → Track bodyweight).
+  const fields = useMemo(
+    () =>
+      fieldConfigs(colors).filter(
+        (f) => f.field !== "weight_kg" || profile?.track_weight !== false,
+      ),
+    [colors, profile?.track_weight],
+  );
   const { entries: lifts, deleteEntry: deleteLift, loading: liftsLoading, error: liftsError, refetch: refetchLifts } = useLiftLogs(activeDate);
   const {
     entries: activities,
@@ -94,6 +101,16 @@ export default function TodayScreen() {
       ),
     [meals],
   );
+
+  /* Nutrition goals from Settings — shown on the tiles and the day summary. */
+  const proteinTarget = profile?.protein_target_g ?? null;
+  const calorieTarget = profile?.calorie_target ?? null;
+  const fieldTargets: Record<string, number | null> = {
+    calories: calorieTarget,
+    protein_g: proteinTarget,
+  };
+  const loggedCalories = data?.calories ?? mealTotals.calories;
+  const loggedProtein = data?.protein_g ?? mealTotals.protein;
 
   /* Auto-repeat locked defaults into a day that's missing them. */
   const appliedRef = useRef<Set<string>>(new Set());
@@ -296,6 +313,7 @@ export default function TodayScreen() {
                 iconColor={f.iconColor}
                 value={data?.[f.field] ?? null}
                 placeholder={placeholder?.[f.field] ?? null}
+                target={fieldTargets[f.field] ?? null}
                 locked={defaults[f.field] != null}
                 onToggleLock={() => toggleLock(f.field)}
                 onSave={(v) => save(f.field, v)}
@@ -474,6 +492,15 @@ export default function TodayScreen() {
                   <Text style={[typography.caption, styles.hint]}>
                     From meals: {mealTotals.calories} kcal · {mealTotals.protein} g protein
                   </Text>
+                  {calorieTarget != null || proteinTarget != null ? (
+                    <Text style={[typography.caption, styles.hint]}>
+                      Today: {loggedCalories}
+                      {calorieTarget != null ? ` / ${calorieTarget}` : ""} kcal
+                      {proteinTarget != null
+                        ? ` · ${loggedProtein} / ${proteinTarget} g protein`
+                        : ""}
+                    </Text>
+                  ) : null}
                 </View>
               )}
             </View>

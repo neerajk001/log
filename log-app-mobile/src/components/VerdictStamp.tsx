@@ -5,7 +5,7 @@ import type { Palette } from "../theme/colors";
 import { radii, spacing } from "../theme/spacing";
 import type { VerdictKind } from "../api/types";
 
-const LABELS: Record<VerdictKind, string> = {
+export const VERDICT_LABELS: Record<VerdictKind, string> = {
   hold: "Hold Steady",
   adjust_calories: "Adjust Calories",
   check_recovery: "Check Recovery",
@@ -28,7 +28,7 @@ export function VerdictStamp({ verdict }: { verdict: VerdictKind }) {
     <View style={[styles.stamp, { backgroundColor: tone.bg, borderColor: tone.border }]}>
       <Ionicons name={tone.icon} size={22} color={tone.color} />
       <Text style={[typography.h2, styles.label, { color: tone.color }]}>
-        {LABELS[verdict].toUpperCase()}
+        {VERDICT_LABELS[verdict].toUpperCase()}
       </Text>
     </View>
   );

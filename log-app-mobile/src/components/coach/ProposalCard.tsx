@@ -40,6 +40,7 @@ export function ProposalCard({
   messageId,
   item,
   onResolved,
+  onDismissed,
 }: {
   messageId: string;
   item: ChatProposal;
@@ -49,6 +50,8 @@ export function ProposalCard({
     status: "applied" | "dismissed" | "error",
     note?: string,
   ) => void;
+  /** Meal proposals: dismissing asks what was off, so the coach can re-estimate. */
+  onDismissed?: (messageId: string, proposalId: string, proposal: ChatProposal["proposal"]) => void;
 }) {
   const { proposal } = item;
   const plansApi = usePlansApi();
@@ -297,7 +300,13 @@ export function ProposalCard({
           variant="ghost"
           size="sm"
           disabled={busy}
-          onPress={() => resolve("dismissed")}
+          onPress={() => {
+            if (onDismissed && (proposal.kind === "meal_log" || proposal.kind === "meal_update")) {
+              onDismissed(messageId, item.id, proposal);
+              return;
+            }
+            resolve("dismissed");
+          }}
           style={styles.flex}
         />
       </View>

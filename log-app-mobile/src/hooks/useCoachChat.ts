@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { streamCoachChat, useCoachApi } from "../api/coach";
-import type { AgentId, CoachProposal } from "../api/types";
+import type { AgentId, CoachProposal, DismissedMeal } from "../api/types";
 import { todayLocal } from "../utils/date";
+
+/** Asked the moment a meal estimate is dismissed — the answer becomes the correction. */
+const CORRECTION_PROMPT = "No problem — what was off? Portion, an item, or the numbers?";
 
 export interface ChatProposal {
   id: string;
@@ -34,6 +37,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingCorrection, setPendingCorrection] = useState<DismissedMeal | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
@@ -63,7 +67,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const runStream = useCallback(
-    async (message: string, appendUser: boolean) => {
+    async (message: string, appendUser: boolean, correction?: DismissedMeal | null) => {
       const assistantId = `coach-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setError(null);
       setStatus(null);
@@ -88,6 +92,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
           sessionId,
           localDate: todayLocal(),
           agent,
+          dismissedMeal: correction ?? undefined,
           signal: controller.signal,
           onSessionId: (id) => setSessionId(id),
           onDelta: (delta) => {
@@ -141,9 +146,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     (text: string) => {
       const message = text.trim();
       if (!message || streaming) return;
-      void runStream(message, true);
+      // A dismissed meal rides along with the next thing the athlete says.
+      const correction = pendingCorrection;
+      if (correction) setPendingCorrection(null);
+      void runStream(message, true, correction);
     },
-    [runStream, streaming],
+    [runStream, streaming, pendingCorrection],
   );
 
   const stop = useCallback(() => {
@@ -190,6 +198,27 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     ]);
   }, []);
 
+  /**
+   * Dismissing a meal estimate isn't the end of it: the coach asks what was off and
+   * keeps the estimate, so the athlete's answer re-estimates from their correction
+   * instead of repeating the same numbers.
+   */
+  const dismissMealProposal = useCallback(
+    (messageId: string, proposalId: string, proposal: CoachProposal) => {
+      if (proposal.kind !== "meal_log" && proposal.kind !== "meal_update") return;
+      resolveProposal(messageId, proposalId, "dismissed");
+      setPendingCorrection({
+        title: proposal.title,
+        items: proposal.items,
+        calories: proposal.calories,
+        protein_g: proposal.protein_g,
+        date: proposal.date,
+      });
+      injectAssistant(CORRECTION_PROMPT);
+    },
+    [injectAssistant, resolveProposal],
+  );
+
   return {
     sessionId,
     agent,
@@ -203,6 +232,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     stop,
     retry,
     resolveProposal,
+    dismissMealProposal,
     injectAssistant,
     refetch: load,
   };

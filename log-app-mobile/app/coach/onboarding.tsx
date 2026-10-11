@@ -15,7 +15,8 @@ import { useCoachProfile } from "../../src/hooks/useCoachProfile";
 import { useCoachApi } from "../../src/api/coach";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
-import type { CoachProfile, CoachProfileInput } from "../../src/api/types";
+import { formatMediumDate } from "../../src/utils/date";
+import type { CoachProfile, CoachProfileInput, PhysiqueReading } from "../../src/api/types";
 import type { EditableDay } from "../../src/components/PlanDaysEditor";
 
 const GOALS: { value: string; subtitle: string; icon: IoniconName }[] = [
@@ -123,7 +124,7 @@ function PlanBuilderWizard({
   const [injuries, setInjuries] = useState(initial?.injuries ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
 
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [reading, setReading] = useState<PhysiqueReading | null>(null);
   const [busy, setBusy] = useState<null | "save" | "plan" | "photo">(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,8 +189,7 @@ function PlanBuilderWizard({
       } as unknown as Blob);
       if (notes.trim()) form.append("description", notes.trim());
       setBusy("photo");
-      const { analysis: text } = await coachApi.analyzePhoto(form);
-      setAnalysis(text);
+      setReading(await coachApi.analyzePhoto(form));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't analyze that photo.");
     } finally {
@@ -345,12 +345,17 @@ function PlanBuilderWizard({
             loading={busy === "photo"}
             disabled={busy != null}
           />
-          {analysis ? (
+          {reading ? (
             <Card style={styles.analysis}>
               <Text style={typography.bodyStrong}>{"Coach's read on your photo"}</Text>
-              <Text style={typography.small}>{analysis}</Text>
+              {reading.headline ? <Text style={typography.body}>{reading.headline}</Text> : null}
+              <Text style={typography.small}>{reading.analysis}</Text>
               <Text style={[typography.caption, styles.privacyNote]}>
-                Photo analyzed in the moment, never stored.
+                Photo analysed in the moment and never stored. The written read is kept so your coach
+                can compare it later
+                {reading.review_on
+                  ? ` — next check-in around ${formatMediumDate(reading.review_on)}.`
+                  : "."}
               </Text>
             </Card>
           ) : null}

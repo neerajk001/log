@@ -74,6 +74,8 @@ export interface UserProfile {
   /** Onboarding toggles; undefined means "assume on". */
   meal_tracking_enabled?: boolean;
   ai_coach_enabled?: boolean;
+  /** Off = doesn't weigh themselves: no weigh-in tile, verdict judges strength. */
+  track_weight?: boolean;
   /** Null until first-run onboarding is finished. */
   onboarded_at?: string | null;
 }
@@ -155,13 +157,41 @@ export interface VerdictResponse {
   weight_trend_kg_per_week: number | null;
   strength_trend: StrengthTrend | null;
   adherence_pct: number | null;
+  /** Days this week the calorie target was met (null when no target is set). */
+  calorie_adherence_pct: number | null;
+  /** Last week's verdict, for "same as last week" / "changed from". */
+  previous_verdict: VerdictKind | null;
+  /** What was actually logged this week — the verdict's inputs. */
+  week: {
+    workouts: number;
+    sets: number;
+    days_logged: number;
+    avg_calories: number | null;
+    avg_protein_g: number | null;
+  };
   reasoning: string[];
 }
 
-export interface WeightPoint {
-  week_start: string;
-  avg_kg: number | null;
+/** One bucket of the Insights series — width follows the requested range. */
+export interface TrendBucket {
+  start: string;
+  weight_kg: number | null;
+  calories: number | null;
+  protein_g: number | null;
 }
+
+/** One month of the consistency rollup. */
+export interface MonthSummary {
+  month_start: string;
+  workouts: number;
+  days_logged: number;
+  calories: number | null;
+  protein_g: number | null;
+  protein_adherence_pct: number | null;
+  calorie_adherence_pct: number | null;
+}
+
+export type TrendRange = "7d" | "30d" | "90d" | "1y";
 
 export interface LiftDelta {
   exercise: string;
@@ -171,9 +201,34 @@ export interface LiftDelta {
 }
 
 export interface TrendsResponse {
-  weight: WeightPoint[];
+  /** Bucket width: day (7d), week (30d/90d), month (1y). */
+  bucket: "day" | "week" | "month";
+  series: TrendBucket[];
+  /** Weekly nutrient averages over the nutrition card's own window. */
+  nutrition: TrendBucket[];
+  /** Last six calendar months, newest first. */
+  months: MonthSummary[];
   lifts: LiftDelta[];
   adherence_pct: number | null;
+  calorie_adherence_pct: number | null;
+}
+
+/** The coach's read on a body photo. The image itself is never stored. */
+export interface PhysiqueReading {
+  analysis: string;
+  headline: string | null;
+  review_on: string | null;
+}
+
+/** Something the coach advised, with when to follow it up. */
+export interface CoachDecision {
+  id: string;
+  kind: string;
+  summary: string;
+  topic: string | null;
+  review_on: string | null;
+  outcome: string | null;
+  created_at: string;
 }
 
 export interface CoachProfile {
@@ -259,6 +314,13 @@ export interface MealAnalysis {
   protein_g: number;
   confidence: "low" | "medium" | "high";
   question?: string;
+  /** Targets + what was already logged today (nulls when unset). */
+  day?: {
+    calorie_target: number | null;
+    protein_target_g: number | null;
+    calories: number | null;
+    protein_g: number | null;
+  } | null;
 }
 
 /** A change the coach has prepared and the user must confirm. */
@@ -315,3 +377,15 @@ export type CoachProposal =
       calories: number;
       protein_g: number;
     };
+
+/**
+ * A meal estimate the athlete dismissed, sent back with their reason so the coach
+ * can re-estimate from the correction (photo estimates are never stored server-side).
+ */
+export interface DismissedMeal {
+  title: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+  date?: string;
+}

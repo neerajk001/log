@@ -17,6 +17,7 @@ export function MetricCard({
   label,
   value,
   placeholder,
+  target,
   unit,
   icon,
   iconBg,
@@ -30,6 +31,8 @@ export function MetricCard({
   label: string;
   value: number | null;
   placeholder?: number | null;
+  /** Daily goal for this metric — shows progress when set. */
+  target?: number | null;
   unit: string;
   icon: IoniconName;
   iconBg: string;
@@ -46,6 +49,11 @@ export function MetricCard({
 
   const display = value != null ? String(value) : placeholder != null ? String(placeholder) : "—";
   const isPlaceholder = value == null && placeholder != null;
+  const hasTarget = target != null && target > 0;
+  const hitPct =
+    hasTarget && value != null
+      ? Math.min(100, Math.round((value / (target as number)) * 100))
+      : null;
 
   const startEdit = useCallback(() => {
     setDraft(value != null ? String(value) : "");
@@ -74,7 +82,11 @@ export function MetricCard({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${label} ${display} ${unit}`}
+      accessibilityLabel={
+        hasTarget
+          ? `${label} ${display} of ${target} ${unit}`
+          : `${label} ${display} ${unit}`
+      }
       onPress={startEdit}
       style={[styles.tile, fieldError ? styles.tileError : null]}
     >
@@ -122,6 +134,20 @@ export function MetricCard({
         <Text style={typography.metricUnit}>{unit}</Text>
       </View>
 
+      {hasTarget ? (
+        <View style={styles.progressWrap}>
+          <View style={styles.progressRow}>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${hitPct ?? 0}%` }]} />
+            </View>
+            <Text style={styles.progressText}>{hitPct != null ? `${hitPct}%` : "—"}</Text>
+          </View>
+          <Text style={styles.targetText} numberOfLines={1}>
+            of {target} {unit}
+          </Text>
+        </View>
+      ) : null}
+
       {fieldError ? <Text style={styles.error}>{fieldError}</Text> : null}
     </Pressable>
   );
@@ -148,6 +174,18 @@ const useStyles = makeUseStyles((t) =>
     valueRow: { flexDirection: "row", alignItems: "baseline", gap: 4 },
     input: { flex: 1, padding: 0, minWidth: 40 },
     placeholder: { color: t.colors.textMuted },
+    progressWrap: { gap: 4, marginTop: 2 },
+    progressRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+    progressTrack: {
+      flex: 1,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: t.colors.chartTrack,
+      overflow: "hidden",
+    },
+    progressFill: { height: "100%", borderRadius: 2, backgroundColor: t.colors.primary },
+    progressText: { ...t.typography.caption, color: t.colors.textDim, minWidth: 26, textAlign: "right" },
+    targetText: { ...t.typography.caption, color: t.colors.textMuted },
     error: { ...t.typography.caption, color: t.colors.danger },
   }),
 );

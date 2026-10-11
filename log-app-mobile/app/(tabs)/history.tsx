@@ -19,6 +19,7 @@ import {
 import { Chip, ChipRow, OverflowMenu } from "../../src/components/ui/controls";
 import { useHistory, type HistoryDay } from "../../src/hooks/useHistory";
 import { usePlans } from "../../src/hooks/usePlans";
+import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { formatLongDate } from "../../src/utils/date";
 import { formatNumber, muscleGroupFor } from "../../src/utils/derive";
@@ -74,6 +75,8 @@ export default function HistoryScreen() {
   const styles = useStyles();
   const tagTheme = { colors, scheme };
   const today = useCurrentDate();
+  const { profile } = useMe();
+  const proteinTarget = profile?.protein_target_g ?? null;
 
   const {
     days,
@@ -189,6 +192,10 @@ export default function HistoryScreen() {
           const muscles = Array.from(new Set(day.exercises.map(muscleGroupFor)));
           const title = workoutTitle(day, planDayName);
           const dailySummary = day.daily ? formatDaily(day.daily) : "";
+          const hitProteinTarget =
+            proteinTarget != null &&
+            day.daily?.protein_g != null &&
+            day.daily.protein_g >= proteinTarget;
 
           return (
             <View style={styles.group}>
@@ -231,9 +238,17 @@ export default function HistoryScreen() {
                   ) : null}
 
                   {day.daily ? (
-                    <Text style={[typography.caption, styles.dailyLine]} numberOfLines={1}>
-                      {dailySummary}
-                    </Text>
+                    <View style={styles.dailyRow}>
+                      <Text style={[typography.caption, styles.dailyLine]} numberOfLines={1}>
+                        {dailySummary}
+                      </Text>
+                      {hitProteinTarget ? (
+                        <View style={styles.hitBadge} accessibilityLabel="Hit your protein target">
+                          <Ionicons name="checkmark" size={11} color={colors.success} />
+                          <Text style={styles.hitBadgeText}>Protein</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   ) : null}
                 </View>
                 <Ionicons name={isOpen ? "chevron-up" : "chevron-forward"} size={18} color={colors.textMuted} />
@@ -384,6 +399,17 @@ const useStyles = makeUseStyles((t) =>
     metaRow: { flexDirection: "row", gap: spacing.md, marginTop: 2 },
     meta: { flexDirection: "row", alignItems: "center", gap: 3 },
     dailyLine: { color: t.colors.textDim },
+    dailyRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+    hitBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      backgroundColor: t.colors.successSoft,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.xs,
+      paddingVertical: 1,
+    },
+    hitBadgeText: { fontSize: 10, fontWeight: "700", color: t.colors.success },
 
     setsCard: { gap: spacing.md },
     exerciseBlock: { gap: spacing.sm },

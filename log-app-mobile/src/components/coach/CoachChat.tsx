@@ -67,6 +67,7 @@ export function CoachChat({
     stop,
     retry,
     resolveProposal,
+    dismissMealProposal,
     injectAssistant,
     agent,
     setAgent,
@@ -98,6 +99,8 @@ export function CoachChat({
         name: file.name ?? "meal.jpg",
         type: file.mimeType ?? "image/jpeg",
       } as unknown as Blob);
+      // The athlete's local date, so the estimate knows what's logged today.
+      form.append("date", todayLocal());
       setPhotoBusy(true);
       const analysis = await mealsApi.analyzeMeal(form);
       const proposal: CoachProposal = {
@@ -108,9 +111,20 @@ export function CoachChat({
         calories: analysis.calories,
         protein_g: analysis.protein_g,
       };
+      const proteinTarget = analysis.day?.protein_target_g ?? null;
+      const proteinLeft =
+        proteinTarget != null
+          ? proteinTarget - ((analysis.day?.protein_g ?? 0) + analysis.protein_g)
+          : null;
+      const leftLine =
+        proteinLeft != null && proteinTarget != null
+          ? proteinLeft > 0
+            ? ` That leaves ${proteinLeft} g of your ${proteinTarget} g protein target.`
+            : ` That puts you ${Math.abs(proteinLeft)} g over your ${proteinTarget} g target.`
+          : "";
       const text = analysis.question
         ? `${analysis.question} I've estimated the rest below.`
-        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein. Confirm to log it.`;
+        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein.${leftLine} Confirm to log it.`;
       injectAssistant(text, proposal);
     } catch (err) {
       injectAssistant(err instanceof Error ? err.message : "Couldn't analyze that photo.");
@@ -208,6 +222,7 @@ export function CoachChat({
                       messageId={item.id}
                       item={p}
                       onResolved={resolveProposal}
+                      onDismissed={dismissMealProposal}
                     />
                   ))}
                 </View>

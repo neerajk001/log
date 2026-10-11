@@ -173,11 +173,14 @@ export function Sparkline({
   width = 300,
   height = 120,
   color,
+  dots = true,
 }: {
   values: number[];
   width?: number;
   height?: number;
   color?: string;
+  /** Set false for dense series so the markers don't merge into a thick line. */
+  dots?: boolean;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -191,14 +194,18 @@ export function Sparkline({
   }
 
   const pad = 12;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  // A single value has no span to plot, so mirror it: a flat line reads better
+  // than one lone dot (e.g. a one-week window).
+  const series = values.length === 1 ? [values[0], values[0]] : values;
+  const min = Math.min(...series);
+  const max = Math.max(...series);
   const span = max - min || 1;
-  const step = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
+  const flat = min === max;
+  const step = series.length > 1 ? (width - pad * 2) / (series.length - 1) : 0;
 
-  const points = values.map((v, i) => ({
+  const points = series.map((v, i) => ({
     x: pad + i * step,
-    y: pad + (height - pad * 2) * (1 - (v - min) / span),
+    y: flat ? height / 2 : pad + (height - pad * 2) * (1 - (v - min) / span),
   }));
 
   const last = points[points.length - 1];
@@ -213,9 +220,11 @@ export function Sparkline({
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      {points.map((p, i) => (
-        <Circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 4 : 2.5} fill={stroke} />
-      ))}
+      {dots
+        ? points.map((p, i) => (
+            <Circle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 4 : 2.5} fill={stroke} />
+          ))
+        : null}
       <Circle cx={last.x} cy={last.y} r={7} fill={stroke} opacity={0.15} />
     </Svg>
   );

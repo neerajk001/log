@@ -23,15 +23,21 @@ export function useDataSync(resources: readonly Resource[], load: () => void): v
 
 /**
  * `useDataSync` plus a refetch whenever the screen regains focus — the fix for
- * hooks that otherwise fetched on mount only. Safe to use *instead of* a mount
- * effect (the focus effect fires on mount too), and cheap: `load` reads the GET
- * cache first, so an unchanged resource costs no request.
+ * hooks that otherwise fetched on mount only.
+ *
+ * Also re-runs whenever `load`'s identity changes, which is how a hook reacts to
+ * its own inputs (a new date, range or window): without this, changing the range
+ * on Insights left the charts on the old data. Each call reads the GET cache
+ * first, so an unchanged resource costs no request.
  */
 export function useDataSyncOnFocus(resources: readonly Resource[], load: () => void): void {
   useDataSync(resources, load);
   const loadRef = useRef(load);
   useEffect(() => {
     loadRef.current = load;
+  }, [load]);
+  useEffect(() => {
+    loadRef.current();
   }, [load]);
   useFocusEffect(
     useCallback(() => {
