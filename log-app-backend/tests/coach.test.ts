@@ -72,6 +72,7 @@ vi.mock("../src/db/client", () => ({
 
 import {
   AGENTS,
+  analyzeMeal,
   buildAthleteContext,
   executeCoachTool,
   generateCoachPlan,
@@ -969,6 +970,58 @@ describe("buildAthleteContext meal scope", () => {
 
     expect(mocks.findManyDaily).toHaveBeenCalled();
     expect(mocks.findManyLift).toHaveBeenCalled();
+  });
+});
+
+describe("meal analysis request", () => {
+  const REAL = { baseUrl: config.ai.baseUrl, apiKey: config.ai.apiKey };
+
+  afterEach(() => {
+    config.ai.baseUrl = REAL.baseUrl;
+    config.ai.apiKey = REAL.apiKey;
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves enough output budget that reasoning can't truncate the JSON", async () => {
+    // Observed in production: at a 700-token ceiling the meal model spent 536 tokens
+    // reasoning and returned the object cut off mid-string, which the app couldn't parse.
+    config.ai.baseUrl = "https://ai.test/v1";
+    config.ai.apiKey = "test-key";
+    let body: { max_output_tokens?: number; thinking?: unknown } = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        body = JSON.parse(String(init?.body ?? "{}"));
+        return new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify({
+                      title: "Meal",
+                      items: [{ name: "Roti", quantity: "2 medium", calories: 208, protein_g: 6 }],
+                      calories: 208,
+                      protein_g: 6,
+                      confidence: "medium",
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    const result = await analyzeMeal("user-1", Buffer.from("image"), "image/jpeg");
+
+    expect(body.max_output_tokens).toBe(3000);
+    expect(body.thinking).toEqual({ type: "disabled" });
+    expect(result.calories).toBe(208);
+    expect(result.items[0].protein_g).toBe(6);
   });
 });
 

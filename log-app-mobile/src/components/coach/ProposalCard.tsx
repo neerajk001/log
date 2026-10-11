@@ -41,7 +41,7 @@ function itemLines(items: MealItem[]): string {
   return items
     .map(
       (i) =>
-        `• ${i.name}${i.quantity ? ` (${i.quantity})` : ""} — ${i.calories} kcal · ${i.protein_g} g protein`,
+        `• ${i.name}${i.quantity ? ` · ${i.quantity}` : ""} — ${i.calories} kcal · ${i.protein_g} g protein`,
     )
     .join("\n");
 }

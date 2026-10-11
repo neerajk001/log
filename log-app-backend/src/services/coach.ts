@@ -1009,7 +1009,7 @@ export const AGENTS: Record<AgentId, Agent> = {
     system: agentSystem(FOCUS_MEAL),
     tools: toolsNamed(MEAL_TOOL_NAMES),
     model: () => config.models.meal,
-    thinking: true,
+    thinking: config.ai.thinking !== "disabled",
   },
   training: {
     id: "training",
@@ -2317,8 +2317,10 @@ export async function analyzePhysique(
         ],
       },
     ],
-    600,
-    { json: true, model: config.models.physique },
+    // Same reasoning-budget headroom as the meal path: the read is short, but a model that
+    // thinks first can otherwise spend the whole ceiling and return nothing.
+    1500,
+    { json: true, model: config.models.physique, thinking: false },
   );
 
   let parsed: { headline?: unknown; assessment?: unknown };
@@ -2523,8 +2525,13 @@ export async function analyzeMeal(
         ],
       },
     ],
-    700,
-    { json: true, model: config.models.mealVision },
+    // A generous ceiling, because the model may spend most of its budget reasoning before it
+    // writes the JSON: at 700, DeepSeek burned 536 on reasoning and returned the object cut
+    // off mid-string (which the app then couldn't parse). Output is only billed for what's
+    // generated, so headroom costs nothing when the model is brief. `thinking: false` is
+    // sent too, but not every provider honours it — Command Code ignores it.
+    3000,
+    { json: true, model: config.models.mealVision, thinking: false },
   );
 
   if (!raw.trim()) {
