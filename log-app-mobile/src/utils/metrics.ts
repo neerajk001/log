@@ -27,9 +27,10 @@ export function muscleBreakdownFrom(exercises: ExerciseMetrics[]): MuscleSlice[]
     .sort((a, b) => b.sets - a.sets);
 }
 
+/** Most-trained exercises over the range, ranked by sets logged. */
 export function topExercisesFrom(exercises: ExerciseMetrics[], limit = 5): TopExercise[] {
   return [...exercises]
-    .sort((a, b) => b.volume - a.volume)
+    .sort((a, b) => b.sets - a.sets)
     .slice(0, limit)
     .map((e) => ({ exercise: e.name, volume: e.volume, sets: e.sets }));
 }

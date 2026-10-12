@@ -28,14 +28,25 @@ export function BarChart({
   data,
   height = 160,
   axis = false,
+  color,
+  target,
+  unit = "kg",
 }: {
   data: VolumeBar[];
   height?: number;
   axis?: boolean;
+  /** Bar fill; defaults to the chart palette. */
+  color?: string;
+  /** Optional reference line (e.g. a nutrition target) drawn across the plot. */
+  target?: number | null;
+  /** Suffix for the highlighted bar's tooltip. */
+  unit?: string;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const max = Math.max(1, ...data.map((d) => d.value));
+  const dataMax = Math.max(1, ...data.map((d) => d.value));
+  const showTarget = axis && target != null && target > 0;
+  const max = showTarget ? Math.max(dataMax, target as number) : dataMax;
   const maxIndex = data.reduce((best, d, i) => (d.value > data[best].value ? i : best), 0);
   const barArea = height - 44;
   const tipZone = axis ? 20 : 0;
@@ -43,6 +54,10 @@ export function BarChart({
   const step = axis ? niceStep(max / 4) : 0;
   const top = axis ? Math.ceil(max / step) * step : max;
   const scale = axis ? top : max;
+  const targetTop = showTarget ? tipZone + (1 - (target as number) / scale) * barArea : null;
+
+  const fill = color ?? colors.chartBar;
+  const activeFill = color ?? colors.chartBarActive;
 
   const bars = data.map((d, i) => {
     const isMax = i === maxIndex && d.value > 0;
@@ -51,15 +66,12 @@ export function BarChart({
       <View key={d.iso} style={styles.barCol}>
         {isMax ? (
           <View style={styles.barTooltip}>
-            <Text style={styles.barTooltipText}>{formatNumber(d.value)} kg</Text>
+            <Text style={styles.barTooltipText}>
+              {formatNumber(d.value)} {unit}
+            </Text>
           </View>
         ) : null}
-        <View
-          style={[
-            styles.bar,
-            { height: h, backgroundColor: isMax ? colors.chartBarActive : colors.chartBar },
-          ]}
-        />
+        <View style={[styles.bar, { height: h, backgroundColor: isMax ? activeFill : fill }]} />
         {axis ? null : <Text style={styles.barLabel}>{d.label}</Text>}
       </View>
     );
@@ -88,6 +100,7 @@ export function BarChart({
           {tickValues.map((t, i) => (
             <View key={t} style={[styles.gridline, { top: tipZone + (i / tickCount) * barArea }]} />
           ))}
+          {targetTop != null ? <View style={[styles.targetLine, { top: targetTop }]} /> : null}
           <View style={[styles.barsLayer, { height: barArea }]}>{bars}</View>
         </View>
         <View style={styles.labelRow}>
@@ -260,6 +273,15 @@ const useStyles = makeUseStyles((t) =>
       right: 0,
       height: StyleSheet.hairlineWidth,
       backgroundColor: t.colors.border,
+    },
+    targetLine: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      height: 0,
+      borderTopWidth: 1,
+      borderStyle: "dashed",
+      borderColor: t.colors.textMuted,
     },
     barsLayer: {
       position: "absolute",
