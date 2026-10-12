@@ -36,6 +36,7 @@ import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { useDailyComparison } from "../../src/hooks/useDailyComparison";
 import type { MealLog } from "../../src/api/types";
 import { formatMediumDate, parseIso } from "../../src/utils/date";
+import { muscleGroupsForDay, totalVolume } from "../../src/utils/derive";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -139,26 +140,20 @@ export default function TodayScreen() {
     return Array.from(map.entries()).map(([name, sets]) => ({ name, sets }));
   }, [lifts]);
 
-  const completedByExercise = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const l of lifts) map.set(l.exercise_name, (map.get(l.exercise_name) ?? 0) + 1);
-    return map;
-  }, [lifts]);
-
   const workoutExerciseNames = useMemo(
     () => (day?.exercises ?? []).map((ex) => ex.name),
     [day],
   );
-
-  const workoutTotals = useMemo(() => {
-    let done = 0;
-    let total = 0;
-    for (const ex of day?.exercises ?? []) {
-      total += ex.sets;
-      done += Math.min(ex.sets, completedByExercise.get(ex.name) ?? 0);
-    }
-    return { done, total };
-  }, [day, completedByExercise]);
+  const workoutMuscles = useMemo(
+    () => (day ? muscleGroupsForDay(day.day_name, workoutExerciseNames) : []),
+    [day, workoutExerciseNames],
+  );
+  // Rough set-based estimate — the app doesn't time sessions.
+  const workoutDurationMin = useMemo(
+    () => (day?.exercises ?? []).reduce((sum, ex) => sum + ex.sets, 0) * 3,
+    [day],
+  );
+  const workoutVolumeKg = useMemo(() => totalVolume(lifts), [lifts]);
 
   const liftDeltas = useMemo(() => {
     const map = new Map<string, number>();
@@ -313,9 +308,11 @@ export default function TodayScreen() {
             <TodaysWorkoutCard
               dayName={day.day_name}
               exerciseNames={workoutExerciseNames}
-              done={workoutTotals.done}
-              total={workoutTotals.total}
+              muscles={workoutMuscles}
+              durationMin={workoutDurationMin}
+              volumeKg={workoutVolumeKg}
               onLogLift={() => goLiftDay(day.id)}
+              onOpenDay={() => goLiftDay(day.id)}
             />
           </View>
         ) : null}
@@ -331,6 +328,8 @@ export default function TodayScreen() {
                 mealCount={meals.length}
                 mealCalories={mealTotals.calories}
                 mealProtein={mealTotals.protein}
+                dateLabel={activeDate === today ? "Today" : formatMediumDate(activeDate)}
+                onPressDate={() => setCalendarOpen(true)}
                 onLogMeal={goLogMeal}
                 onPressMeals={() => setMealsOpen(true)}
                 onEdit={(field, value) => {
