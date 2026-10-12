@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
-import { spacing } from "../../theme/spacing";
+import { radii, spacing } from "../../theme/spacing";
 import { Button, Card, Divider, IconBadge, ProgressBar } from "../ui/primitives";
 import { DonutChart } from "../ui/charts";
 import { formatNumber } from "../../utils/derive";
@@ -20,7 +20,7 @@ function EditableValue({
   unit: string;
   onSave: (value: number | null) => void;
 }) {
-  const { colors, typography } = useTheme();
+  const { colors } = useTheme();
   const styles = useStyles();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -61,9 +61,9 @@ function EditableValue({
         setEditing(true);
       }}
     >
-      <Text style={styles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+      <Text style={styles.value} numberOfLines={2}>
         {formatNumber(value)}
-        <Text style={[typography.metricUnit, styles.valueTarget]}>
+        <Text style={styles.valueTarget}>
           {target != null ? ` / ${formatNumber(target)}` : ""} {unit}
         </Text>
       </Text>
@@ -86,23 +86,22 @@ function NutritionColumn({
   color: string;
   onEdit: (value: number | null) => void;
 }) {
-  const { typography } = useTheme();
   const styles = useStyles();
   const hasTarget = target != null && target > 0;
   const pct = hasTarget ? Math.min(100, Math.round((value / (target as number)) * 100)) : null;
 
   return (
     <View style={styles.col}>
-      <DonutChart size={58} thickness={9} slices={[{ label, value, color }]} />
+      <DonutChart size={48} thickness={8} slices={[{ label, value, color }]} />
       <View style={styles.colText}>
         <View style={styles.labelRow}>
-          <Text style={[typography.small, styles.colLabel]} numberOfLines={1}>
+          <Text style={styles.colLabel} numberOfLines={1}>
             {label}
           </Text>
           {pct != null ? <Text style={[styles.pct, { color }]}>{pct}%</Text> : null}
         </View>
         <EditableValue value={value} target={target} unit={unit} onSave={onEdit} />
-        <ProgressBar value={value} max={hasTarget ? (target as number) : 1} color={color} />
+        <ProgressBar value={value} max={hasTarget ? (target as number) : 1} color={color} height={8} />
       </View>
     </View>
   );
@@ -139,16 +138,18 @@ export function NutritionCard({
   onPressMeals: () => void;
   onEdit: (field: "calories" | "protein_g", value: number | null) => void;
 }) {
-  const { colors, typography } = useTheme();
+  const { colors } = useTheme();
   const styles = useStyles();
   const { width } = useWindowDimensions();
-  const narrow = width < 380;
+  // The icons + summary + button don't fit on one row on narrow phones — drop
+  // the button to its own row rather than letting the row overflow.
+  const narrow = width < 400;
 
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={34} rounded={false} />
+          <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={48} rounded={false} />
           <Text style={styles.title}>Nutrition</Text>
         </View>
         <Pressable
@@ -157,13 +158,15 @@ export function NutritionCard({
           accessibilityLabel={`Change date, currently ${dateLabel}`}
           style={styles.datePill}
         >
-          <Ionicons name="calendar-outline" size={13} color={colors.textDim} />
+          <Ionicons name="calendar-outline" size={15} color={colors.textDim} />
           <Text style={styles.dateText} numberOfLines={1}>
             {dateLabel}
           </Text>
-          <Ionicons name="chevron-down" size={13} color={colors.textDim} />
+          <Ionicons name="chevron-down" size={15} color={colors.textDim} />
         </Pressable>
       </View>
+
+      <Divider />
 
       <View style={styles.cols}>
         <NutritionColumn
@@ -197,36 +200,35 @@ export function NutritionCard({
               style={styles.mealsPress}
             >
               <View style={styles.thumbs}>
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <View key={i} style={[styles.thumb, i >= mealCount && styles.thumbEmpty]}>
+                {[0, 1, 2].map((i) => (
+                  <View key={i} style={[styles.thumb, i >= Math.min(mealCount, 3) && styles.thumbEmpty]}>
                     <Ionicons
                       name="restaurant"
-                      size={12}
-                      color={i < mealCount ? colors.green : colors.textMuted}
+                      size={14}
+                      color={i < Math.min(mealCount, 3) ? colors.green : colors.textMuted}
                     />
                   </View>
                 ))}
               </View>
-              <Text
-                style={[typography.small, styles.mealsText]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.8}
-              >
-                {mealCount} {mealCount === 1 ? "meal" : "meals"} · {formatNumber(mealCalories)} kcal ·{" "}
-                {formatNumber(mealProtein)} g
-              </Text>
+              <View style={styles.mealsText}>
+                <Text style={styles.mealsCount} numberOfLines={1}>
+                  {mealCount} {mealCount === 1 ? "meal" : "meals"}
+                </Text>
+                <Text style={styles.mealsSummary} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                  {formatNumber(mealCalories)} kcal · {formatNumber(mealProtein)} g
+                </Text>
+              </View>
             </Pressable>
           ) : (
-            <Text style={[typography.small, styles.mealsText]} numberOfLines={1}>
+            <Text style={styles.mealsSummary} numberOfLines={1}>
               No meals logged yet
             </Text>
           )}
         </View>
+        {narrow ? null : <View style={styles.footerDivider} />}
         <Button
           label="Log Meal"
           icon="add"
-          size="sm"
           onPress={onLogMeal}
           style={narrow ? styles.fullButton : undefined}
         />
@@ -238,30 +240,43 @@ export function NutritionCard({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     card: { gap: spacing.lg, borderColor: t.colors.border },
-    header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    title: { fontSize: 17, fontWeight: "700", color: t.colors.text },
+
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    title: { fontSize: 21, fontWeight: "700", color: t.colors.text },
     datePill: {
       flexDirection: "row",
       alignItems: "center",
       gap: spacing.xs,
       backgroundColor: t.colors.surfaceAlt,
-      borderRadius: 999,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      borderRadius: radii.pill,
       paddingHorizontal: spacing.md,
-      height: 32,
-      maxWidth: 140,
+      height: 34,
+      maxWidth: 150,
+      flexShrink: 1,
     },
-    dateText: { fontSize: 12, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
+    dateText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
 
     cols: { flexDirection: "row", alignItems: "center" },
     col: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
-    colText: { flex: 1, gap: 5, minWidth: 0 },
-    labelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-    colLabel: { color: t.colors.text },
-    pct: { fontSize: 13, fontWeight: "700" },
-    value: { fontSize: 18, fontWeight: "700", color: t.colors.text },
-    valueTarget: { fontSize: 12, fontWeight: "500" },
-    editInput: { padding: 0, minWidth: 48 },
+    colText: { flex: 1, gap: 4, minWidth: 0 },
+    labelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    colLabel: { ...t.typography.small, color: t.colors.textDim, flexShrink: 1 },
+    pct: { fontSize: 13, fontWeight: "700", flexShrink: 0 },
+    value: { fontSize: 19, fontWeight: "700", color: t.colors.text },
+    valueTarget: { fontSize: 12, fontWeight: "500", color: t.colors.textDim },
+    editInput: { padding: 0, minWidth: 44 },
     vDivider: {
       width: StyleSheet.hairlineWidth,
       alignSelf: "stretch",
@@ -269,21 +284,29 @@ const useStyles = makeUseStyles((t) =>
       marginHorizontal: spacing.md,
     },
 
-    footer: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    footer: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     footerStack: { flexDirection: "column", alignItems: "stretch" },
     mealsInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
     mealsPress: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
-    thumbs: { flexDirection: "row", gap: 3 },
+    thumbs: { flexDirection: "row", gap: 5 },
     thumb: {
-      width: 26,
-      height: 26,
-      borderRadius: 8,
+      width: 30,
+      height: 30,
+      borderRadius: 9,
       backgroundColor: t.colors.greenSoft,
       alignItems: "center",
       justifyContent: "center",
     },
     thumbEmpty: { backgroundColor: t.colors.surfaceAlt },
-    mealsText: { flex: 1, color: t.colors.textDim, minWidth: 0 },
-    fullButton: { flexGrow: 0 },
+    mealsText: { flex: 1, gap: 1, minWidth: 0 },
+    mealsCount: { ...t.typography.bodyStrong, fontSize: 14, color: t.colors.text },
+    mealsSummary: { ...t.typography.small, color: t.colors.textDim },
+    footerDivider: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: "stretch",
+      backgroundColor: t.colors.border,
+      marginHorizontal: spacing.xs,
+    },
+    fullButton: { marginTop: spacing.sm },
   }),
 );

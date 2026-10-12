@@ -202,13 +202,28 @@ export function EmptyState({
 
 /* ------------------------------------------------------------ ProgressBar */
 
-export function ProgressBar({ value, max = 1, color }: { value: number; max?: number; color?: string }) {
+export function ProgressBar({
+  value,
+  max = 1,
+  color,
+  height = 6,
+}: {
+  value: number;
+  max?: number;
+  color?: string;
+  height?: number;
+}) {
   const { colors } = useTheme();
   const styles = useStyles();
   const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   return (
-    <View style={styles.progressTrack}>
-      <View style={[styles.progressFill, { width: `${pct * 100}%`, backgroundColor: color ?? colors.primary }]} />
+    <View style={[styles.progressTrack, { height, borderRadius: height / 2 }]}>
+      <View
+        style={[
+          styles.progressFill,
+          { width: `${pct * 100}%`, backgroundColor: color ?? colors.primary, borderRadius: height / 2 },
+        ]}
+      />
     </View>
   );
 }
