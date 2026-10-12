@@ -413,9 +413,13 @@ export default function InsightsScreen() {
                 />
               </View>
               <Text style={[typography.small, styles.note]}>
-                {nutritionLoggedDays} logged day{nutritionLoggedDays === 1 ? "" : "s"} ·{" "}
-                {nutritionValues.length} week{nutritionValues.length === 1 ? "" : "s"} of data,
-                completed days only.
+                {nutritionValues.length > 1
+                  ? `Mean of ${nutritionValues.length} weekly averages · from ${nutritionLoggedDays} logged day${
+                      nutritionLoggedDays === 1 ? "" : "s"
+                    }, completed days only.`
+                  : `From ${nutritionLoggedDays} logged day${
+                      nutritionLoggedDays === 1 ? "" : "s"
+                    }, completed days only.`}
               </Text>
             </>
           ) : (
