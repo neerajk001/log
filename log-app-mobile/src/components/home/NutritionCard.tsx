@@ -86,14 +86,25 @@ function NutritionColumn({
   color: string;
   onEdit: (value: number | null) => void;
 }) {
-  const { typography } = useTheme();
+  const { colors, typography } = useTheme();
   const styles = useStyles();
   const hasTarget = target != null && target > 0;
   const pct = hasTarget ? Math.min(100, Math.round((value / (target as number)) * 100)) : null;
+  // Arc = logged / target. Without a target there's no progress to show, so the
+  // ring stays solid; with one, the remainder is drawn in the track colour.
+  const filled = hasTarget ? Math.min(value, target as number) : 1;
+  const remaining = hasTarget ? Math.max(0, (target as number) - value) : 0;
 
   return (
     <View style={styles.col}>
-      <DonutChart size={58} thickness={9} slices={[{ label, value, color }]} />
+      <DonutChart
+        size={58}
+        thickness={9}
+        slices={[
+          { label, value: filled, color },
+          { label: `${label} remaining`, value: remaining, color: colors.chartTrack },
+        ]}
+      />
       <View style={styles.colText}>
         <View style={styles.labelRow}>
           <Text style={[typography.small, styles.colLabel]} numberOfLines={1}>
