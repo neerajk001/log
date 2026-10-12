@@ -1,118 +1,59 @@
-import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { spacing } from "../../theme/spacing";
-import { Button, Card, IconBadge, ProgressBar, Tag } from "../ui/primitives";
-
-export interface WorkoutExercise {
-  name: string;
-  sets: number;
-  reps: string;
-  logged: boolean;
-}
+import { Button, Card, IconBadge } from "../ui/primitives";
 
 /**
- * Today's prescribed session as the screen's lead card: day name, set progress,
- * a jump into logging, and an inline exercise breakdown. Hidden entirely by the
- * screen when there is no active plan.
+ * Today's prescribed session as one slim strip: day name, the day's exercises,
+ * and a single "Log Lift" action. Hidden by the screen when there's no plan.
  */
 export function TodaysWorkoutCard({
   dayName,
-  exercises,
+  exerciseNames,
   done,
   total,
-  onContinue,
+  onLogLift,
 }: {
   dayName: string;
-  exercises: WorkoutExercise[];
+  exerciseNames: string[];
   done: number;
   total: number;
-  onContinue: () => void;
+  onLogLift: () => void;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const [expanded, setExpanded] = useState(false);
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-  const status =
-    done <= 0
-      ? { label: "Not started", bg: colors.tagNeutralBg, text: colors.tagNeutralText }
-      : done >= total
-        ? { label: "Complete", bg: colors.successSoft, text: colors.success }
-        : { label: "In Progress", bg: colors.warningSoft, text: colors.warning };
 
   return (
-    <Card style={styles.card}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <IconBadge name="barbell" bg={colors.primarySoft} color={colors.primary} size={30} rounded={false} />
-          <Text style={typography.caption}>Today&apos;s Workout</Text>
+    <Card padded={false} style={styles.strip}>
+      <IconBadge name="barbell" bg={colors.primarySoft} color={colors.primary} size={30} rounded={false} />
+      <View style={styles.text}>
+        <View style={styles.titleRow}>
+          <Text style={typography.bodyStrong} numberOfLines={1}>
+            {dayName}
+          </Text>
+          <Text style={styles.sets}>{done}/{total} sets</Text>
         </View>
-        <Tag label={status.label} bg={status.bg} text={status.text} />
+        <Text style={[typography.caption, styles.exercises]} numberOfLines={1}>
+          {exerciseNames.length > 0 ? exerciseNames.join(", ") : "No exercises in this day"}
+        </Text>
       </View>
-
-      <Text style={typography.h1} numberOfLines={1}>
-        {dayName}
-      </Text>
-      <Text style={typography.small}>
-        {exercises.length} {exercises.length === 1 ? "exercise" : "exercises"} · {done}/{total} sets
-        completed
-      </Text>
-
-      <View style={styles.progressRow}>
-        <View style={styles.progressBar}>
-          <ProgressBar value={done} max={Math.max(1, total)} />
-        </View>
-        <Text style={styles.pct}>{pct}%</Text>
-      </View>
-
-      {expanded ? (
-        <View style={styles.exList}>
-          {exercises.map((ex) => (
-            <View key={ex.name} style={styles.exRow}>
-              <Ionicons
-                name={ex.logged ? "checkmark-circle" : "ellipse-outline"}
-                size={16}
-                color={ex.logged ? colors.success : colors.textMuted}
-              />
-              <Text style={[typography.small, styles.exName]} numberOfLines={1}>
-                {ex.name}
-              </Text>
-              <Text style={typography.caption}>
-                {ex.sets} × {ex.reps}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      <View style={styles.buttons}>
-        <Button label="Continue Workout" icon="play" onPress={onContinue} style={styles.flex} />
-        <Button
-          label="View Exercises"
-          icon={expanded ? "chevron-up" : "list"}
-          variant="outline"
-          onPress={() => setExpanded((open) => !open)}
-          style={styles.flex}
-        />
-      </View>
+      <Button label="Log Lift" icon="add" size="sm" onPress={onLogLift} />
     </Card>
   );
 }
 
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
-    card: { gap: spacing.sm, borderColor: t.colors.primarySoftBorder },
-    header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    progressRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.xs },
-    progressBar: { flex: 1 },
-    pct: { ...t.typography.caption, color: t.colors.textDim, minWidth: 34, textAlign: "right" },
-    exList: { gap: spacing.sm, marginTop: spacing.xs },
-    exRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    exName: { flex: 1, color: t.colors.text },
-    buttons: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },
-    flex: { flex: 1 },
+    strip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      padding: spacing.md,
+      borderColor: t.colors.primarySoftBorder,
+    },
+    text: { flex: 1, gap: 2, minWidth: 0 },
+    titleRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
+    sets: { ...t.typography.caption, color: t.colors.textMuted },
+    exercises: { color: t.colors.textDim },
   }),
 );

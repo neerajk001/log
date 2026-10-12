@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
-import { radii, spacing } from "../../theme/spacing";
+import { spacing } from "../../theme/spacing";
 import { Button, Card, IconBadge } from "../ui/primitives";
 import { DonutChart } from "../ui/charts";
 import { formatNumber } from "../../utils/derive";
@@ -45,7 +45,7 @@ function EditableValue({
         keyboardType="numeric"
         placeholder="—"
         placeholderTextColor={colors.textMuted}
-        style={[typography.h3, styles.editInput]}
+        style={[typography.bodyStrong, styles.editInput]}
       />
     );
   }
@@ -59,7 +59,7 @@ function EditableValue({
         setEditing(true);
       }}
     >
-      <Text style={typography.h3} numberOfLines={1}>
+      <Text style={typography.bodyStrong} numberOfLines={1}>
         {value != null ? formatNumber(value) : "—"}
         <Text style={typography.metricUnit}> {unit}</Text>
       </Text>
@@ -86,21 +86,18 @@ function NutritionRing({
   const styles = useStyles();
   const hasTarget = target != null && target > 0;
   const pct = hasTarget ? Math.min(100, Math.round((value / (target as number)) * 100)) : null;
-  const remaining = target != null ? Math.max(0, target - value) : null;
 
   return (
     <View style={styles.ring}>
-      <DonutChart
-        size={68}
-        thickness={9}
-        slices={[{ label, value, color }]}
-        centerTop={pct != null ? `${pct}%` : undefined}
-      />
+      <DonutChart size={52} thickness={8} slices={[{ label, value, color }]} />
       <View style={styles.ringText}>
-        <Text style={typography.caption}>{label}</Text>
+        <Text style={typography.caption} numberOfLines={1}>
+          {label}
+          {pct != null ? ` ${pct}%` : ""}
+        </Text>
         <EditableValue value={value} unit={unit} onSave={onEdit} />
         <Text style={typography.caption} numberOfLines={1}>
-          {remaining != null ? `${formatNumber(remaining)} ${unit} remaining` : "No target set"}
+          {target != null ? `of ${formatNumber(target)} ${unit}` : "no target"}
         </Text>
       </View>
     </View>
@@ -108,8 +105,8 @@ function NutritionRing({
 }
 
 /**
- * Today's nutrition at a glance: calorie and protein rings on their targets, a
- * summary row of the day's meals, and the coach-powered "Log Meal" action.
+ * Today's nutrition at a glance: calorie and protein rings on their targets and,
+ * on one row, the day's meal summary with the "Log Meal" action.
  */
 export function NutritionCard({
   loggedCalories,
@@ -136,18 +133,17 @@ export function NutritionCard({
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const hasTarget = calorieTarget != null && calorieTarget > 0;
 
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={30} rounded={false} />
+          <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={26} rounded={false} />
           <Text style={typography.caption}>Nutrition</Text>
         </View>
         <Text style={typography.caption}>
-          Today: {formatNumber(loggedCalories)}
-          {hasTarget ? ` / ${formatNumber(calorieTarget as number)}` : ""} kcal
+          {formatNumber(loggedCalories)}
+          {calorieTarget != null ? ` / ${formatNumber(calorieTarget)}` : ""} kcal
         </Text>
       </View>
 
@@ -170,37 +166,33 @@ export function NutritionCard({
         />
       </View>
 
-      {mealCount > 0 ? (
-        <Pressable
-          onPress={onPressMeals}
-          accessibilityRole="button"
-          accessibilityLabel={`${mealCount} meals logged`}
-          style={styles.mealsRow}
-        >
-          <View style={styles.thumbs}>
-            {Array.from({ length: Math.min(mealCount, 3) }).map((_, i) => (
-              <View key={i} style={[styles.thumb, i > 0 && styles.thumbOverlap]}>
-                <Ionicons name="restaurant" size={13} color={colors.green} />
-              </View>
-            ))}
-          </View>
-          <View style={styles.mealsText}>
-            <Text style={typography.bodyStrong} numberOfLines={1}>
-              {mealCount} {mealCount === 1 ? "meal" : "meals"} logged
+      <View style={styles.mealsRow}>
+        {mealCount > 0 ? (
+          <Pressable
+            onPress={onPressMeals}
+            accessibilityRole="button"
+            accessibilityLabel={`${mealCount} meals logged`}
+            style={styles.mealsInfo}
+          >
+            <View style={styles.thumbs}>
+              {Array.from({ length: Math.min(mealCount, 2) }).map((_, i) => (
+                <View key={i} style={[styles.thumb, i > 0 && styles.thumbOverlap]}>
+                  <Ionicons name="restaurant" size={11} color={colors.green} />
+                </View>
+              ))}
+            </View>
+            <Text style={[typography.caption, styles.mealsText]} numberOfLines={1}>
+              {mealCount} {mealCount === 1 ? "meal" : "meals"} · {formatNumber(mealCalories)} kcal ·{" "}
+              {formatNumber(mealProtein)} g
             </Text>
-            <Text style={typography.small} numberOfLines={1}>
-              {formatNumber(mealCalories)} kcal · {formatNumber(mealProtein)} g protein
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </Pressable>
-      ) : (
-        <Text style={[typography.small, styles.emptyNote]}>
-          No meals logged yet — describe what you ate and the coach estimates it.
-        </Text>
-      )}
-
-      <Button label="Log Meal" icon="add" onPress={onLogMeal} style={styles.logButton} />
+          </Pressable>
+        ) : (
+          <Text style={[typography.caption, styles.mealsText]} numberOfLines={1}>
+            No meals logged yet
+          </Text>
+        )}
+        <Button label="Log Meal" icon="add" size="sm" onPress={onLogMeal} />
+      </View>
     </Card>
   );
 }
@@ -213,31 +205,29 @@ const useStyles = makeUseStyles((t) =>
 
     ringsRow: { flexDirection: "row", gap: spacing.md },
     ring: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
-    ringText: { flex: 1, gap: 2, minWidth: 0 },
-    editInput: { padding: 0, minWidth: 48, color: t.colors.text },
+    ringText: { flex: 1, gap: 1, minWidth: 0 },
+    editInput: { padding: 0, minWidth: 44, color: t.colors.text },
 
-    mealsRow: {
+    mealsRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    mealsInfo: {
+      flex: 1,
       flexDirection: "row",
       alignItems: "center",
-      gap: spacing.md,
-      backgroundColor: t.colors.surfaceAlt,
-      borderRadius: radii.md,
-      padding: spacing.md,
+      gap: spacing.sm,
+      minWidth: 0,
     },
     thumbs: { flexDirection: "row" },
     thumb: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
       backgroundColor: t.colors.greenSoft,
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 2,
-      borderColor: t.colors.surfaceAlt,
+      borderColor: t.colors.surface,
     },
     thumbOverlap: { marginLeft: -10 },
-    mealsText: { flex: 1, gap: 2, minWidth: 0 },
-    emptyNote: { color: t.colors.textDim },
-    logButton: { marginTop: spacing.xs },
+    mealsText: { flex: 1, color: t.colors.textDim, minWidth: 0 },
   }),
 );

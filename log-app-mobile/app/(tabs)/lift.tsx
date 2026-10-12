@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router, type ErrorBoundaryProps } from "expo-router";
+import { router, useLocalSearchParams, type ErrorBoundaryProps } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { useClerk } from "@clerk/clerk-expo";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
@@ -65,7 +65,10 @@ export default function LiftScreen() {
   } = useLiftLogs(today);
   const { names: recent, lastByExercise } = useRecentExercises();
 
-  const [overrideDayId, setOverrideDayId] = useState<string | null>(null);
+  // The selected plan day lives in the route param, so Today's workout strip can
+  // open this screen on its day — and the choice sticks for the next set.
+  const params = useLocalSearchParams<{ dayId?: string }>();
+  const overrideDayId = typeof params.dayId === "string" ? params.dayId : null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [quickName, setQuickName] = useState("");
@@ -220,13 +223,13 @@ export default function LiftScreen() {
 
         {days.length > 1 ? (
           <ChipRow style={styles.dayChips}>
-            <Chip label="Today" active={overrideDayId == null} onPress={() => setOverrideDayId(null)} />
+            <Chip label="Today" active={overrideDayId == null} onPress={() => router.setParams({ dayId: undefined })} />
             {days.map((d) => (
               <Chip
                 key={d.id}
                 label={d.day_name}
-                active={(overrideDayId ?? rotatedDay?.id) === d.id}
-                onPress={() => setOverrideDayId((cur) => (cur === d.id ? null : d.id))}
+                active={overrideDayId === d.id}
+                onPress={() => router.setParams({ dayId: overrideDayId === d.id ? undefined : d.id })}
               />
             ))}
           </ChipRow>

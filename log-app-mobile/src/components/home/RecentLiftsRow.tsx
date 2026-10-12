@@ -49,11 +49,11 @@ export function RecentLiftsRow({
                   ? "Best set today"
                   : `${g.sets.length} sets`;
             return (
-              <Card key={g.name} style={styles.liftCard}>
-                <Text style={[typography.caption, styles.liftName]} numberOfLines={2}>
+              <Card key={g.name} padded={false} style={styles.liftCard}>
+                <Text style={[typography.caption, styles.liftName]} numberOfLines={1}>
                   {g.name}
                 </Text>
-                <Text style={typography.h3}>
+                <Text style={typography.bodyStrong} numberOfLines={1}>
                   {top.weight_kg} × {top.reps}
                 </Text>
                 <Text style={[typography.caption, styles.liftCaption]} numberOfLines={1}>
@@ -72,8 +72,8 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     section: { marginTop: spacing.xxl },
     row: { gap: spacing.sm, paddingVertical: 2 },
-    liftCard: { width: 150, gap: spacing.xs },
-    liftName: { color: t.colors.textDim, minHeight: 28 },
+    liftCard: { width: 112, gap: 2, padding: spacing.md },
+    liftName: { color: t.colors.textDim },
     liftCaption: { color: t.colors.textMuted },
   }),
 );

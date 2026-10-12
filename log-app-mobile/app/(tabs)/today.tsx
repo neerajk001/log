@@ -145,15 +145,9 @@ export default function TodayScreen() {
     return map;
   }, [lifts]);
 
-  const workoutExercises = useMemo(
-    () =>
-      (day?.exercises ?? []).map((ex) => ({
-        name: ex.name,
-        sets: ex.sets,
-        reps: ex.reps,
-        logged: (completedByExercise.get(ex.name) ?? 0) > 0,
-      })),
-    [day, completedByExercise],
+  const workoutExerciseNames = useMemo(
+    () => (day?.exercises ?? []).map((ex) => ex.name),
+    [day],
   );
 
   const workoutTotals = useMemo(() => {
@@ -190,6 +184,11 @@ export default function TodayScreen() {
 
   const goLift = useCallback(() => {
     router.navigate("/(tabs)/lift" as never);
+  }, []);
+  // Carry the day the card is showing so the Lift screen opens on it (and keeps it
+  // for the next set), rather than snapping back to today's rotation.
+  const goLiftDay = useCallback((dayId: string) => {
+    router.navigate({ pathname: "/(tabs)/lift", params: { dayId } } as never);
   }, []);
   const goHistory = useCallback(() => {
     router.navigate("/(tabs)/history" as never);
@@ -313,10 +312,10 @@ export default function TodayScreen() {
           <View style={styles.block}>
             <TodaysWorkoutCard
               dayName={day.day_name}
-              exercises={workoutExercises}
+              exerciseNames={workoutExerciseNames}
               done={workoutTotals.done}
               total={workoutTotals.total}
-              onContinue={goLift}
+              onLogLift={() => goLiftDay(day.id)}
             />
           </View>
         ) : null}
