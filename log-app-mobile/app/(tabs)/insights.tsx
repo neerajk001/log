@@ -128,6 +128,9 @@ export default function InsightsScreen() {
     error: trendsError,
     refetch: refetchTrends,
   } = useTrends(range, nutritionWeeks);
+  // The bars always show the last seven days, whatever range/window is selected
+  // (when range is 7d this de-dupes to the same cached request).
+  const { data: weekTrends } = useTrends("7d", nutritionWeeks);
   const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
@@ -169,7 +172,6 @@ export default function InsightsScreen() {
     nutritionValues.length > 0
       ? Math.round(nutritionValues.reduce((a, b) => a + b, 0) / nutritionValues.length)
       : null;
-  const nutritionLoggedDays = nutritionBuckets.reduce((sum, b) => sum + b.days, 0);
   const nutritionUnit = nutritionMetric === "calories" ? "kcal" : "g";
   const proteinTarget = profile?.protein_target_g ?? null;
   const calorieTarget = profile?.calorie_target ?? null;
@@ -180,15 +182,7 @@ export default function InsightsScreen() {
     nutritionTarget != null && nutritionAverage != null && nutritionTarget > 0
       ? Math.round(((nutritionAverage - nutritionTarget) / nutritionTarget) * 100)
       : null;
-  const nutritionChart = useMemo(
-    () =>
-      nutritionBuckets.map((b) => ({
-        iso: b.start,
-        label: bucketLabel(b.start, "week"),
-        value: (nutritionMetric === "calories" ? b.calories : b.protein_g) ?? 0,
-      })),
-    [nutritionBuckets, nutritionMetric],
-  );
+  // The average spans the chosen window (weekly averages)…
   const nutritionWindow =
     NUTRITION_WINDOWS.find((w) => w.weeks === nutritionWeeks) ?? NUTRITION_WINDOWS[0];
   const newestNutritionWeek = nutritionBuckets[nutritionBuckets.length - 1] ?? null;
@@ -198,6 +192,21 @@ export default function InsightsScreen() {
         ? "This week"
         : "Last week"
       : `Last ${nutritionWindow.phrase}`;
+
+  // …but the bars stay on the last 7 days of daily intake, so a wider window
+  // fades them (they only cover a week) and only the average follows the filter.
+  const barsDimmed = nutritionWeeks > 1;
+  const weekSeries = useMemo(() => weekTrends?.series ?? [], [weekTrends]);
+  const nutritionChart = useMemo(
+    () =>
+      weekSeries.map((b) => ({
+        iso: b.start,
+        label: bucketLabel(b.start, "day"),
+        value: (nutritionMetric === "calories" ? b.calories : b.protein_g) ?? 0,
+      })),
+    [weekSeries, nutritionMetric],
+  );
+  const weekLoggedDays = weekSeries.reduce((sum, b) => sum + b.days, 0);
 
   /** Days with data inside the top range — the adherence tile's denominator context. */
   const rangeLoggedDays = series.reduce((sum, b) => sum + b.days, 0);
@@ -467,7 +476,7 @@ export default function InsightsScreen() {
               <IconBadge name="nutrition-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
               <View style={styles.cardHeaderText}>
                 <Text style={typography.bodyStrong}>Nutrition</Text>
-                <Text style={typography.caption}>Weekly average · completed days only</Text>
+                <Text style={typography.caption}>Average · {nutritionWindowLabel}</Text>
               </View>
             </View>
 
@@ -517,24 +526,24 @@ export default function InsightsScreen() {
                       }`
                     : "No target set — add one in Settings to compare."}
                 </Text>
-                <BarChart
-                  data={nutritionChart}
-                  axis
-                  color={nutritionMetric === "calories" ? colors.orange : colors.blue}
-                  target={nutritionTarget}
-                  unit={nutritionUnit}
-                />
+                <View style={barsDimmed ? styles.chartDimmed : undefined}>
+                  <BarChart
+                    data={nutritionChart}
+                    axis
+                    color={nutritionMetric === "calories" ? colors.orange : colors.blue}
+                    target={nutritionTarget}
+                    unit={nutritionUnit}
+                  />
+                </View>
                 <Text style={[typography.caption, styles.note]}>
-                  {nutritionValues.length > 1
-                    ? `Mean of ${nutritionValues.length} weekly averages`
-                    : nutritionWindowLabel}{" "}
-                  · from {nutritionLoggedDays} logged day{nutritionLoggedDays === 1 ? "" : "s"},
-                  completed days only.
+                  {barsDimmed
+                    ? `Showing last week · from ${weekLoggedDays} log${weekLoggedDays === 1 ? "" : "s"}`
+                    : `From ${weekLoggedDays} logged day${weekLoggedDays === 1 ? "" : "s"} · completed days only`}
                 </Text>
               </>
             ) : (
               <Text style={[typography.small, styles.note]}>
-                No completed days logged in this range yet — anything you log today counts from
+                No completed days logged in this window yet — anything you log today counts from
                 tomorrow.
               </Text>
             )}
@@ -777,6 +786,7 @@ const useStyles = makeUseStyles((t) =>
     cardHeaderLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexShrink: 1 },
     cardHeaderText: { gap: 1, flexShrink: 1 },
     note: { color: t.colors.textDim },
+    chartDimmed: { opacity: 0.35 },
 
     verdictCard: {
       flexDirection: "row",
