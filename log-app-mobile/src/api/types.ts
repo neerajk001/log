@@ -180,6 +180,8 @@ export interface TrendBucket {
   weight_kg: number | null;
   calories: number | null;
   protein_g: number | null;
+  /** Completed days that actually had calories/protein — the basis for the averages. */
+  days: number;
 }
 
 /** One month of the consistency rollup. */

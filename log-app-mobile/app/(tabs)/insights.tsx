@@ -23,7 +23,7 @@ import { useTrends } from "../../src/hooks/useTrends";
 import { useMe } from "../../src/hooks/useMe";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { formatNumber } from "../../src/utils/derive";
-import { weekDayLabels } from "../../src/utils/date";
+import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
 import type { TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -177,6 +177,20 @@ export default function InsightsScreen() {
       ? Math.round(nutritionValues.reduce((a, b) => a + b, 0) / nutritionValues.length)
       : null;
   const nutritionUnit = nutritionMetric === "calories" ? "kcal" : "g";
+  /**
+   * The window ends on the current week when it has completed days, otherwise on the last
+   * complete week — so a Monday shows last week's average instead of nothing. The label
+   * follows the data rather than assuming which week it is.
+   */
+  const nutritionBuckets = trends?.nutrition ?? [];
+  const newestNutritionWeek = nutritionBuckets[nutritionBuckets.length - 1] ?? null;
+  const nutritionWeekLabel =
+    nutritionWeeks === 1
+      ? newestNutritionWeek?.start === startOfWeek(todayLocal())
+        ? "This week"
+        : "Last week"
+      : `Average · last ${nutritionWindow.phrase}`;
+  const nutritionLoggedDays = nutritionBuckets.reduce((sum, b) => sum + b.days, 0);
   const proteinTarget = profile?.protein_target_g ?? null;
   const calorieTarget = profile?.calorie_target ?? null;
   const nutritionTarget = nutritionMetric === "calories" ? calorieTarget : proteinTarget;
@@ -385,9 +399,7 @@ export default function InsightsScreen() {
           {nutritionValues.length > 0 ? (
             <>
               <View style={styles.weightBody}>
-                <Text style={[typography.caption, styles.note]}>
-                  {nutritionWeeks === 1 ? "This week" : `Average · last ${nutritionWindow.phrase}`}
-                </Text>
+                <Text style={[typography.caption, styles.note]}>{nutritionWeekLabel}</Text>
                 <Text style={typography.metric}>
                   {rangeAverage != null ? formatNumber(rangeAverage) : "—"}
                   <Text style={typography.metricUnit}> {nutritionUnit}</Text>
@@ -401,13 +413,15 @@ export default function InsightsScreen() {
                 />
               </View>
               <Text style={[typography.small, styles.note]}>
-                {nutritionValues.length} week{nutritionValues.length === 1 ? "" : "s"} of data · one
-                point per week, completed days only.
+                {nutritionLoggedDays} logged day{nutritionLoggedDays === 1 ? "" : "s"} ·{" "}
+                {nutritionValues.length} week{nutritionValues.length === 1 ? "" : "s"} of data,
+                completed days only.
               </Text>
             </>
           ) : (
             <Text style={[typography.small, styles.note]}>
-              Log calories and protein on Today to see this trend.
+              No completed days logged in this window yet — anything you log today counts from
+              tomorrow.
             </Text>
           )}
 

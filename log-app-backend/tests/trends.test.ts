@@ -46,6 +46,69 @@ describe("computeTrends weekly adherence", () => {
   });
 });
 
+describe("computeTrends nutrition window", () => {
+  const log = (date: string, calories: number | null, proteinG: number | null) => ({
+    date: new Date(date),
+    weightKg: null,
+    calories,
+    proteinG,
+  });
+
+  it("averages only the days that were logged — an unlogged day is not a zero", async () => {
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 110, calorieTarget: 1600 });
+    // Wednesday, with Monday logged and Tuesday not: the average is Monday's alone.
+    mocks.findManyDaily.mockResolvedValue([log("2026-10-12", 1500, 100)]);
+
+    const result = await computeTrends("user-1", "7d", {
+      now: new Date("2026-10-14T00:00:00Z"),
+      nutritionWeeks: 1,
+    });
+
+    const week = result.nutrition[result.nutrition.length - 1];
+    expect(week.start).toBe("2026-10-12");
+    expect(week.calories).toBe(1500);
+    expect(week.protein_g).toBe(100);
+    expect(week.days).toBe(1);
+  });
+
+  it("ends on the last complete week when the current one has nothing completed", async () => {
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 110, calorieTarget: 1600 });
+    // Monday: today's own numbers are still in progress, so the window falls back a week.
+    mocks.findManyDaily.mockResolvedValue([
+      log("2026-10-12", 1500, 100),
+      log("2026-10-06", 1800, 120),
+      log("2026-10-07", 1600, 110),
+      log("2026-10-08", 1700, 115),
+    ]);
+
+    const result = await computeTrends("user-1", "7d", {
+      now: new Date("2026-10-12T00:00:00Z"),
+      nutritionWeeks: 1,
+    });
+
+    const week = result.nutrition[result.nutrition.length - 1];
+    expect(week.start).toBe("2026-10-05");
+    // Three completed days averaged — Monday's own total stays out of it.
+    expect(week.days).toBe(3);
+    expect(week.calories).toBe(1700);
+    expect(week.protein_g).toBe(115);
+  });
+
+  it("stays on the current week once it has a completed day", async () => {
+    mocks.findUniqueUser.mockResolvedValue({ proteinTargetG: 110, calorieTarget: 1600 });
+    mocks.findManyDaily.mockResolvedValue([log("2026-10-13", 1500, 100)]);
+
+    const result = await computeTrends("user-1", "7d", {
+      now: new Date("2026-10-14T00:00:00Z"),
+      nutritionWeeks: 1,
+    });
+
+    const week = result.nutrition[result.nutrition.length - 1];
+    expect(week.start).toBe("2026-10-12");
+    expect(week.days).toBe(1);
+  });
+});
+
 describe("computeTrends series bucketing", () => {
   it("uses one bucket per day for 7d", async () => {
     mocks.findManyDaily.mockResolvedValue([

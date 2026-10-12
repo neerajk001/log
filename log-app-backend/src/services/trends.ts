@@ -8,6 +8,11 @@ export interface TrendBucket {
   weight_kg: number | null;
   calories: number | null;
   protein_g: number | null;
+  /**
+   * How many completed days in this bucket actually had calories/protein — the basis for the
+   * averages above. Days left unlogged are absent from the average, never counted as zero.
+   */
+  days: number;
 }
 
 /** One month of the consistency rollup (newest first in the response). */
@@ -163,6 +168,8 @@ function buildBuckets(
       ),
       calories: average(numbers(completed.map((l) => l.calories))),
       protein_g: average(numbers(completed.map((l) => l.proteinG))),
+      // Days that contributed: a day with neither value isn't part of the average.
+      days: completed.filter((l) => l.calories != null || l.proteinG != null).length,
     });
   }
   return out;
@@ -224,8 +231,19 @@ export async function computeTrends(
     count,
     todayUtcMidnight,
   );
-  // The nutrition card always reads weekly averages, whatever the range is.
-  const nutrition = buildBuckets(logs, currentWeekStart, "week", nutritionWeeks, todayUtcMidnight);
+  // The nutrition card always reads weekly averages. It ends on the current week when that
+  // week has completed data; otherwise (a Monday, or a week with nothing logged yet) it ends
+  // on the last complete week instead of showing an empty card — the client labels which one
+  // from the bucket's start date.
+  const thisWeek = buildBuckets(logs, currentWeekStart, "week", 1, todayUtcMidnight)[0];
+  const currentWeekHasData = thisWeek.calories != null || thisWeek.protein_g != null;
+  const nutrition = buildBuckets(
+    logs,
+    currentWeekHasData ? currentWeekStart : addDays(currentWeekStart, -7),
+    "week",
+    nutritionWeeks,
+    todayUtcMidnight,
+  );
 
   const workoutDays = liftDates.map((row) => row.date.getTime());
   const currentMonthStart = startOfMonth(todayUtcMidnight);
