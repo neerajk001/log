@@ -59,6 +59,11 @@ export function BarChart({
   const fill = color ?? colors.chartBar;
   const activeFill = color ?? colors.chartBarActive;
 
+  // Long series (e.g. 52 weekly bars) need tighter gaps and thinned labels so
+  // nothing overflows or collides.
+  const barGap = data.length > 24 ? 1 : data.length > 14 ? 3 : spacing.sm;
+  const labelEvery = data.length > 14 ? Math.ceil(data.length / 7) : 1;
+
   const bars = data.map((d, i) => {
     const isMax = i === maxIndex && d.value > 0;
     const h = d.value > 0 ? Math.max(6, (d.value / scale) * barArea) : 4;
@@ -78,7 +83,7 @@ export function BarChart({
   });
 
   if (!axis) {
-    return <View style={[styles.barWrap, { height: height + 12 }]}>{bars}</View>;
+    return <View style={[styles.barWrap, { gap: barGap, height: height + 12 }]}>{bars}</View>;
   }
 
   const tickValues: number[] = [];
@@ -101,14 +106,18 @@ export function BarChart({
             <View key={t} style={[styles.gridline, { top: tipZone + (i / tickCount) * barArea }]} />
           ))}
           {targetTop != null ? <View style={[styles.targetLine, { top: targetTop }]} /> : null}
-          <View style={[styles.barsLayer, { height: barArea }]}>{bars}</View>
+          <View style={[styles.barsLayer, { gap: barGap, height: barArea }]}>{bars}</View>
         </View>
-        <View style={styles.labelRow}>
-          {data.map((d) => (
-            <Text key={d.iso} style={[styles.barLabel, styles.labelCell]}>
-              {d.label}
-            </Text>
-          ))}
+        <View style={[styles.labelRow, { gap: barGap }]}>
+          {data.map((d, i) =>
+            i % labelEvery === 0 ? (
+              <Text key={d.iso} style={[styles.barLabel, styles.labelCell]}>
+                {d.label}
+              </Text>
+            ) : (
+              <View key={d.iso} style={styles.labelCell} />
+            ),
+          )}
         </View>
       </View>
     </View>

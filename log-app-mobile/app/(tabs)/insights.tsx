@@ -34,7 +34,7 @@ import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { VERDICT_LABELS } from "../../src/components/VerdictStamp";
 import { formatNumber } from "../../src/utils/derive";
-import { weekDayLabels } from "../../src/utils/date";
+import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
 import type { TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -75,6 +75,18 @@ const CATEGORIES: { value: Category; label: string }[] = [
   { value: "all", label: "All" },
 ];
 
+/** Nutrition windows — the card averages over its own window, independent of the range. */
+const NUTRITION_WINDOWS: { weeks: number; label: string; phrase: string }[] = [
+  { weeks: 1, label: "1W", phrase: "week" },
+  { weeks: 2, label: "2W", phrase: "2 weeks" },
+  { weeks: 3, label: "3W", phrase: "3 weeks" },
+  { weeks: 4, label: "1M", phrase: "month" },
+  { weeks: 8, label: "2M", phrase: "2 months" },
+  { weeks: 13, label: "3M", phrase: "3 months" },
+  { weeks: 26, label: "6M", phrase: "6 months" },
+  { weeks: 52, label: "1Y", phrase: "year" },
+];
+
 function signedPct(n: number | null): string {
   if (n == null) return "—";
   return `${n > 0 ? "+" : ""}${n}%`;
@@ -97,6 +109,7 @@ export default function InsightsScreen() {
   const [range, setRange] = useState<TrendRange>("7d");
   const [category, setCategory] = useState<Category>("overview");
   const [nutritionMetric, setNutritionMetric] = useState<"calories" | "protein">("calories");
+  const [nutritionWeeks, setNutritionWeeks] = useState(1);
   const [weightRowsOpen, setWeightRowsOpen] = useState(false);
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -114,7 +127,7 @@ export default function InsightsScreen() {
     loading: trendsLoading,
     error: trendsError,
     refetch: refetchTrends,
-  } = useTrends(range, 1);
+  } = useTrends(range, nutritionWeeks);
   const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
@@ -142,18 +155,21 @@ export default function InsightsScreen() {
       : null;
 
   /* ---------------------------------------------------------- nutrition */
+  // The nutrition card keeps its own window of weekly averages, independent of
+  // the top range — the 1W / 2W / … control the screen has always had.
+  const nutritionBuckets = useMemo(() => trends?.nutrition ?? [], [trends]);
   const nutritionValues = useMemo(
     () =>
-      series
+      nutritionBuckets
         .map((b) => (nutritionMetric === "calories" ? b.calories : b.protein_g))
         .filter((v): v is number => v != null),
-    [series, nutritionMetric],
+    [nutritionBuckets, nutritionMetric],
   );
   const nutritionAverage =
     nutritionValues.length > 0
       ? Math.round(nutritionValues.reduce((a, b) => a + b, 0) / nutritionValues.length)
       : null;
-  const nutritionLoggedDays = series.reduce((sum, b) => sum + b.days, 0);
+  const nutritionLoggedDays = nutritionBuckets.reduce((sum, b) => sum + b.days, 0);
   const nutritionUnit = nutritionMetric === "calories" ? "kcal" : "g";
   const proteinTarget = profile?.protein_target_g ?? null;
   const calorieTarget = profile?.calorie_target ?? null;
@@ -166,13 +182,25 @@ export default function InsightsScreen() {
       : null;
   const nutritionChart = useMemo(
     () =>
-      series.map((b) => ({
+      nutritionBuckets.map((b) => ({
         iso: b.start,
-        label: bucketLabel(b.start, bucket),
+        label: bucketLabel(b.start, "week"),
         value: (nutritionMetric === "calories" ? b.calories : b.protein_g) ?? 0,
       })),
-    [series, nutritionMetric, bucket],
+    [nutritionBuckets, nutritionMetric],
   );
+  const nutritionWindow =
+    NUTRITION_WINDOWS.find((w) => w.weeks === nutritionWeeks) ?? NUTRITION_WINDOWS[0];
+  const newestNutritionWeek = nutritionBuckets[nutritionBuckets.length - 1] ?? null;
+  const nutritionWindowLabel =
+    nutritionWeeks === 1
+      ? newestNutritionWeek?.start === startOfWeek(todayLocal())
+        ? "This week"
+        : "Last week"
+      : `Last ${nutritionWindow.phrase}`;
+
+  /** Days with data inside the top range — the adherence tile's denominator context. */
+  const rangeLoggedDays = series.reduce((sum, b) => sum + b.days, 0);
 
   /* ------------------------------------------------------------- weight rows */
   const recentWeightRows = useMemo(() => {
@@ -325,7 +353,7 @@ export default function InsightsScreen() {
               iconColor={colors.orange}
               value={firstLoad ? "—" : adherence != null ? `${adherence}%` : "—"}
               label="Adherence"
-              sub={nutritionLoggedDays > 0 ? `${nutritionLoggedDays}/${rangeDays}` : ""}
+              sub={rangeLoggedDays > 0 ? `${rangeLoggedDays}/${rangeDays}` : ""}
             />
           </View>
         ) : null}
@@ -439,7 +467,7 @@ export default function InsightsScreen() {
               <IconBadge name="nutrition-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
               <View style={styles.cardHeaderText}>
                 <Text style={typography.bodyStrong}>Nutrition</Text>
-                <Text style={typography.caption}>Daily average · completed days only</Text>
+                <Text style={typography.caption}>Weekly average · completed days only</Text>
               </View>
             </View>
 
@@ -451,6 +479,17 @@ export default function InsightsScreen() {
                 { value: "protein", label: "Protein" },
               ]}
             />
+
+            <ChipRow>
+              {NUTRITION_WINDOWS.map((w) => (
+                <Chip
+                  key={w.weeks}
+                  label={w.label}
+                  active={nutritionWeeks === w.weeks}
+                  onPress={() => setNutritionWeeks(w.weeks)}
+                />
+              ))}
+            </ChipRow>
 
             {nutritionValues.length > 0 ? (
               <>
@@ -486,8 +525,11 @@ export default function InsightsScreen() {
                   unit={nutritionUnit}
                 />
                 <Text style={[typography.caption, styles.note]}>
-                  From {nutritionLoggedDays} logged day{nutritionLoggedDays === 1 ? "" : "s"} ·{" "}
-                  {RANGE_NOUN[range]}.
+                  {nutritionValues.length > 1
+                    ? `Mean of ${nutritionValues.length} weekly averages`
+                    : nutritionWindowLabel}{" "}
+                  · from {nutritionLoggedDays} logged day{nutritionLoggedDays === 1 ? "" : "s"},
+                  completed days only.
                 </Text>
               </>
             ) : (
