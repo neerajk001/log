@@ -4,49 +4,38 @@ import { router, type ErrorBoundaryProps } from "expo-router";
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
-import type { Palette } from "../../src/theme/colors";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DateStrip } from "../../src/components/DateStrip";
 import { MetricCard } from "../../src/components/MetricCard";
 import { ActivitySheet } from "../../src/components/ActivitySheet";
 import { CalendarSheet } from "../../src/components/CalendarSheet";
-import { SectionHeader, EmptyState, Button, Banner, Card, LoadingState, IconBadge, type IoniconName } from "../../src/components/ui/primitives";
-import { SegmentedControl, IconButton, OverflowMenu } from "../../src/components/ui/controls";
+import { MealSheet } from "../../src/components/MealSheet";
+import { MealsSheet } from "../../src/components/MealsSheet";
+import { TodaysWorkoutCard } from "../../src/components/home/TodaysWorkoutCard";
+import { NutritionCard } from "../../src/components/home/NutritionCard";
+import { RecentLiftsRow } from "../../src/components/home/RecentLiftsRow";
+import {
+  SectionHeader,
+  EmptyState,
+  Button,
+  Banner,
+  Card,
+  LoadingState,
+  IconBadge,
+} from "../../src/components/ui/primitives";
+import { IconButton, OverflowMenu } from "../../src/components/ui/controls";
 import { useTodayLog } from "../../src/hooks/useTodayLog";
 import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useActivity } from "../../src/hooks/useActivity";
-import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { useMeals } from "../../src/hooks/useMeals";
-import { MealSheet } from "../../src/components/MealSheet";
-import type { DailyField, MealLog, VerdictResponse } from "../../src/api/types";
-import { formatMediumDate } from "../../src/utils/date";
-
-const VERDICT_LABELS: Record<VerdictResponse["verdict"], string> = {
-  hold: "Hold Steady",
-  adjust_calories: "Adjust Calories",
-  check_recovery: "Check Recovery",
-};
-
-interface FieldConfig {
-  field: DailyField;
-  label: string;
-  unit: string;
-  icon: IoniconName;
-  iconBg: string;
-  iconColor: string;
-}
-
-function fieldConfigs(colors: Palette): FieldConfig[] {
-  return [
-    { field: "weight_kg", label: "Weight", unit: "kg", icon: "scale-outline", iconBg: colors.blueSoft, iconColor: colors.blue },
-    { field: "calories", label: "Calories", unit: "kcal", icon: "flame", iconBg: colors.orangeSoft, iconColor: colors.orange },
-    { field: "protein_g", label: "Protein", unit: "g", icon: "nutrition-outline", iconBg: colors.greenSoft, iconColor: colors.green },
-    { field: "sleep_hours", label: "Sleep", unit: "hours", icon: "moon", iconBg: colors.purpleSoft, iconColor: colors.purple },
-  ];
-}
+import { usePlanToday } from "../../src/hooks/usePlanToday";
+import { useRecentExercises } from "../../src/hooks/useRecentExercises";
+import { useDailyComparison } from "../../src/hooks/useDailyComparison";
+import type { MealLog } from "../../src/api/types";
+import { formatMediumDate, parseIso } from "../../src/utils/date";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -54,6 +43,21 @@ function greeting(): string {
   if (h < 18) return "Good Afternoon";
   return "Good Evening";
 }
+
+/** "MON, 12 OCT 2026" — the day the strip is pointed at. */
+function dateLabel(iso: string): string {
+  return parseIso(iso)
+    .toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    })
+    .toUpperCase();
+}
+
+type Footnote = { text: string; tone?: "positive" | "negative" | "neutral" };
 
 export default function TodayScreen() {
   const today = useCurrentDate();
@@ -70,10 +74,12 @@ export default function TodayScreen() {
     setActiveDate((cur) => (cur === prevTodayRef.current ? today : cur));
     prevTodayRef.current = today;
   }, [today]);
-  const [segment, setSegment] = useState<"log" | "defaults">("log");
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [mealsOpen, setMealsOpen] = useState(false);
+  const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
 
   const {
     data,
@@ -83,18 +89,18 @@ export default function TodayScreen() {
     fieldErrors,
     retry,
     save,
-    saveMany,
     retrySave,
     refetch,
   } = useTodayLog(activeDate);
-  const { profile, defaults, update: updateMe, error: meError, refetch: refetchMe } = useMe();
+  const { profile, error: meError, refetch: refetchMe } = useMe();
   const tracksWeight = profile?.track_weight !== false;
-  // Weigh-ins only appear when the athlete tracks them (Settings → Track bodyweight).
-  const fields = useMemo(
-    () => fieldConfigs(colors).filter((f) => f.field !== "weight_kg" || tracksWeight),
-    [colors, tracksWeight],
-  );
-  const { entries: lifts, deleteEntry: deleteLift, loading: liftsLoading, error: liftsError, refetch: refetchLifts } = useLiftLogs(activeDate);
+
+  const {
+    entries: lifts,
+    loading: liftsLoading,
+    error: liftsError,
+    refetch: refetchLifts,
+  } = useLiftLogs(activeDate);
   const {
     entries: activities,
     addEntry: addActivity,
@@ -103,14 +109,10 @@ export default function TodayScreen() {
     error: activitiesError,
     refetch: refetchActivities,
   } = useActivity(activeDate);
-  const {
-    data: verdict,
-    loading: verdictLoading,
-    error: verdictError,
-    refetch: refetchVerdict,
-  } = useWeeklyVerdict();
   const { meals, loading: mealsLoading, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
-  const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
+  const { day, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(activeDate);
+  const { lastByExercise } = useRecentExercises(30);
+  const { weightDeltaKg, sleepDeltaHours } = useDailyComparison(today);
 
   const mealTotals = useMemo(
     () =>
@@ -121,67 +123,11 @@ export default function TodayScreen() {
     [meals],
   );
 
-  /* Nutrition goals from Settings — shown on the tiles and the day summary. */
+  /* Nutrition goals from Settings — shown on the rings and the day summary. */
   const proteinTarget = profile?.protein_target_g ?? null;
   const calorieTarget = profile?.calorie_target ?? null;
-  const fieldTargets: Record<string, number | null> = {
-    calories: calorieTarget,
-    protein_g: proteinTarget,
-  };
   const loggedCalories = data?.calories ?? mealTotals.calories;
   const loggedProtein = data?.protein_g ?? mealTotals.protein;
-
-  /* Auto-repeat locked defaults into a day that's missing them. */
-  const appliedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    appliedRef.current = new Set();
-  }, [activeDate]);
-
-  useEffect(() => {
-    if (loading || !data) return;
-    // One PUT for every locked field this day is missing.
-    const patch: Partial<Record<DailyField, number>> = {};
-    for (const f of fields) {
-      const locked = defaults[f.field];
-      const key = `${activeDate}:${f.field}`;
-      if (locked != null && (data[f.field] ?? null) == null && !appliedRef.current.has(key)) {
-        appliedRef.current.add(key);
-        patch[f.field] = locked;
-      }
-    }
-    if (Object.keys(patch).length > 0) void saveMany(patch);
-  }, [data, defaults, loading, activeDate, fields, saveMany]);
-
-  const toggleLock = useCallback(
-    async (field: DailyField) => {
-      const current = defaults[field] ?? null;
-      if (current != null) {
-        await updateMe({ daily_defaults: { ...defaults, [field]: null } });
-        return;
-      }
-      const seed = data?.[field] ?? placeholder?.[field] ?? null;
-      if (seed == null) {
-        Alert.alert("Nothing to lock", "Log a value first, then lock it to repeat daily.");
-        return;
-      }
-      await updateMe({ daily_defaults: { ...defaults, [field]: seed } });
-    },
-    [defaults, data, placeholder, updateMe],
-  );
-
-  const missingDefaults = useMemo(
-    () => fields.filter((f) => defaults[f.field] != null && (data?.[f.field] ?? null) == null),
-    [defaults, data, fields],
-  );
-
-  const applyAllDefaults = useCallback(async () => {
-    const patch: Partial<Record<DailyField, number>> = {};
-    for (const f of missingDefaults) {
-      const value = defaults[f.field];
-      if (value != null) patch[f.field] = value;
-    }
-    await saveMany(patch);
-  }, [missingDefaults, defaults, saveMany]);
 
   const groupedLifts = useMemo(() => {
     const map = new Map<string, typeof lifts>();
@@ -193,15 +139,44 @@ export default function TodayScreen() {
     return Array.from(map.entries()).map(([name, sets]) => ({ name, sets }));
   }, [lifts]);
 
-  const confirmDeleteLift = useCallback(
-    (id: string) => {
-      Alert.alert("Delete set?", "This removes the logged set.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Delete", style: "destructive", onPress: () => deleteLift(id).catch(() => {}) },
-      ]);
-    },
-    [deleteLift],
+  const completedByExercise = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of lifts) map.set(l.exercise_name, (map.get(l.exercise_name) ?? 0) + 1);
+    return map;
+  }, [lifts]);
+
+  const workoutExercises = useMemo(
+    () =>
+      (day?.exercises ?? []).map((ex) => ({
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+        logged: (completedByExercise.get(ex.name) ?? 0) > 0,
+      })),
+    [day, completedByExercise],
   );
+
+  const workoutTotals = useMemo(() => {
+    let done = 0;
+    let total = 0;
+    for (const ex of day?.exercises ?? []) {
+      total += ex.sets;
+      done += Math.min(ex.sets, completedByExercise.get(ex.name) ?? 0);
+    }
+    return { done, total };
+  }, [day, completedByExercise]);
+
+  const liftDeltas = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const g of groupedLifts) {
+      const prev = lastByExercise.get(g.name)?.weight_kg ?? null;
+      if (prev == null || prev <= 0) continue;
+      const top = g.sets.reduce((m, s) => Math.max(m, s.weight_kg), 0);
+      const delta = Math.round((top - prev) * 10) / 10;
+      if (delta !== 0) map.set(g.name, delta);
+    }
+    return map;
+  }, [groupedLifts, lastByExercise]);
 
   const confirmDeleteActivity = useCallback(
     (id: string) => {
@@ -216,29 +191,47 @@ export default function TodayScreen() {
   const goLift = useCallback(() => {
     router.navigate("/(tabs)/lift" as never);
   }, []);
+  const goHistory = useCallback(() => {
+    router.navigate("/(tabs)/history" as never);
+  }, []);
+  const goLogMeal = useCallback(() => {
+    router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never);
+  }, []);
 
-  const refreshing = loading || liftsLoading || activitiesLoading || mealsLoading || verdictLoading;
+  const refreshing = loading || liftsLoading || activitiesLoading || mealsLoading || planLoading;
   const refetchAll = useCallback(() => {
     refetch();
     refetchLifts();
     refetchActivities();
     refetchMeals();
-    refetchVerdict();
-  }, [refetch, refetchLifts, refetchActivities, refetchMeals, refetchVerdict]);
+    refetchPlan();
+  }, [refetch, refetchLifts, refetchActivities, refetchMeals, refetchPlan]);
 
-  // Mirrors the verdict screen: a call the engine derived from strength + adherence is
-  // usable without weigh-ins, but a weight-tracker with no trend yet shouldn't be told
-  // to "hold" — that's the "not enough data" case, explained on the verdict screen.
-  const verdictUsable =
-    verdict != null && (!tracksWeight || verdict.weight_trend_kg_per_week != null);
-  const verdictLabel = verdictUsable ? VERDICT_LABELS[verdict.verdict] : null;
-  // A call the engine derived from strength and adherence has no kg/week to show.
-  const verdictNote =
-    verdictUsable && verdict.weight_trend_kg_per_week != null
-      ? `${verdict.weight_trend_kg_per_week > 0 ? "+" : ""}${verdict.weight_trend_kg_per_week.toFixed(2)} kg/week`
-      : verdictUsable
-        ? "From your strength and consistency"
-        : null;
+  /* Week-over-week footnotes only make sense on the live day. */
+  const isToday = activeDate === today;
+  const weightFootnote: Footnote | undefined =
+    isToday && tracksWeight && weightDeltaKg != null && weightDeltaKg !== 0
+      ? {
+          text: `${weightDeltaKg < 0 ? "↓" : "↑"} ${Math.abs(weightDeltaKg).toFixed(1)} kg this week`,
+          tone: weightDeltaKg < 0 ? "positive" : "neutral",
+        }
+      : undefined;
+
+  const sleepValue = data?.sleep_hours ?? null;
+  const sleepQuality =
+    sleepValue == null ? null : sleepValue >= 7 ? "Good" : sleepValue >= 6 ? "Fair" : "Low";
+  const sleepFootnote: Footnote | undefined = !isToday
+    ? undefined
+    : sleepDeltaHours != null && sleepDeltaHours !== 0
+      ? {
+          text: `${sleepQuality ? `${sleepQuality} · ` : ""}${sleepDeltaHours > 0 ? "+" : "−"}${Math.abs(
+            sleepDeltaHours,
+          )}h from last week`,
+          tone: sleepDeltaHours > 0 ? "positive" : "neutral",
+        }
+      : sleepQuality
+        ? { text: sleepQuality, tone: "neutral" }
+        : undefined;
 
   return (
     <View style={styles.container}>
@@ -280,26 +273,23 @@ export default function TodayScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.dateStrip}>
+        <View style={styles.dateBlock}>
+          <Text style={styles.dateLabel}>{dateLabel(activeDate)}</Text>
           <DateStrip selected={activeDate} today={today} onSelect={setActiveDate} />
         </View>
 
-        <View style={styles.greeting}>
-          <Text style={typography.h2}>
-            {greeting()}, {user?.firstName ?? "there"}
-          </Text>
-          <Text style={typography.small}>Consistency today, strength tomorrow.</Text>
+        <View style={styles.greetingRow}>
+          <View style={styles.greeting}>
+            <Text style={typography.h2}>
+              {greeting()}, {user?.firstName ?? "there"}
+            </Text>
+            <Text style={typography.small}>Consistency today, strength tomorrow.</Text>
+          </View>
+          <View style={styles.encouragement}>
+            <IconBadge name="trending-up" bg={colors.primarySoft} color={colors.primary} size={26} rounded={false} />
+            <Text style={styles.encouragementText}>Small steps{"\n"}big results.</Text>
+          </View>
         </View>
-
-        <SegmentedControl
-          style={styles.segment}
-          value={segment}
-          onChange={setSegment}
-          options={[
-            { value: "log", label: "Log" },
-            { value: "defaults", label: "Daily Defaults" },
-          ]}
-        />
 
         {error ? <Banner tone="danger" message={error} actionLabel="Retry" onAction={refetch} style={styles.block} /> : null}
         {/* Only worth showing when we truly don't know their settings yet. */}
@@ -315,249 +305,143 @@ export default function TodayScreen() {
             style={styles.block}
           />
         ) : null}
+        {planError ? (
+          <Banner tone="danger" message={planError} actionLabel="Retry" onAction={() => refetchPlan()} style={styles.block} />
+        ) : null}
 
-        {segment === "defaults" ? (
-          <Card style={styles.block}>
-            <Text style={typography.bodyStrong}>Daily defaults</Text>
-            <Text style={[typography.small, styles.defaultsHelp]}>
-              Lock a field to repeat its value every day. Locked values are filled in automatically
-              when you open a new day.
-            </Text>
-            <Button
-              label={
-                missingDefaults.length > 0
-                  ? `Repeat ${missingDefaults.length} default${missingDefaults.length > 1 ? "s" : ""} for this day`
-                  : "Defaults set — manage locks below"
-              }
-              variant={missingDefaults.length > 0 ? "primary" : "outline"}
-              icon="refresh"
-              disabled={missingDefaults.length === 0}
-              onPress={applyAllDefaults}
-              style={styles.defaultsButton}
+        {day ? (
+          <View style={styles.block}>
+            <TodaysWorkoutCard
+              dayName={day.day_name}
+              exercises={workoutExercises}
+              done={workoutTotals.done}
+              total={workoutTotals.total}
+              onContinue={goLift}
             />
-          </Card>
+          </View>
+        ) : null}
+
+        {profile?.meal_tracking_enabled !== false ? (
+          <>
+            <View style={styles.block}>
+              <NutritionCard
+                loggedCalories={loggedCalories}
+                calorieTarget={calorieTarget}
+                loggedProtein={loggedProtein}
+                proteinTarget={proteinTarget}
+                mealCount={meals.length}
+                mealCalories={mealTotals.calories}
+                mealProtein={mealTotals.protein}
+                onLogMeal={goLogMeal}
+                onPressMeals={() => setMealsOpen(true)}
+                onEdit={(field, value) => {
+                  void save(field, value);
+                }}
+              />
+            </View>
+            {mealsError ? (
+              <Banner tone="danger" message={mealsError} actionLabel="Retry" onAction={refetchMeals} style={styles.block} />
+            ) : null}
+          </>
         ) : null}
 
         {loading && !data ? (
           <LoadingState label="Loading today…" />
         ) : (
           <View style={styles.grid}>
-            {fields.map((f) => (
+            {tracksWeight ? (
               <MetricCard
-                key={f.field}
-                field={f.field}
-                label={f.label}
-                unit={f.unit}
-                icon={f.icon}
-                iconBg={f.iconBg}
-                iconColor={f.iconColor}
-                value={data?.[f.field] ?? null}
-                placeholder={placeholder?.[f.field] ?? null}
-                target={fieldTargets[f.field] ?? null}
-                locked={defaults[f.field] != null}
-                onToggleLock={() => toggleLock(f.field)}
-                onSave={(v) => save(f.field, v)}
-                fieldError={fieldErrors[f.field]}
+                field="weight_kg"
+                label="Weight"
+                unit="kg"
+                icon="scale-outline"
+                iconBg={colors.blueSoft}
+                iconColor={colors.blue}
+                value={data?.weight_kg ?? null}
+                placeholder={placeholder?.weight_kg ?? null}
+                onSave={(v) => save("weight_kg", v)}
+                fieldError={fieldErrors.weight_kg}
+                footnote={weightFootnote}
               />
-            ))}
+            ) : null}
+            <MetricCard
+              field="sleep_hours"
+              label="Sleep"
+              unit="hours"
+              icon="moon"
+              iconBg={colors.purpleSoft}
+              iconColor={colors.purple}
+              value={data?.sleep_hours ?? null}
+              placeholder={placeholder?.sleep_hours ?? null}
+              onSave={(v) => save("sleep_hours", v)}
+              fieldError={fieldErrors.sleep_hours}
+              footnote={sleepFootnote}
+            />
           </View>
         )}
 
-        {segment === "log" ? (
-          <>
-            {verdictError ? (
-              <Banner
-                tone="danger"
-                message={verdictError}
-                actionLabel="Retry"
-                onAction={refetchVerdict}
-                style={styles.block}
-              />
-            ) : null}
-
-            {verdictLabel ? (
-              <Pressable style={styles.verdictCard} onPress={() => router.navigate("/verdict" as never)}>
-                <IconBadge name="ribbon-outline" bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
-                <View style={styles.verdictText}>
-                  <Text style={typography.caption}>Weekly Verdict</Text>
-                  <Text style={styles.verdictLabel}>{verdictLabel}</Text>
-                  {verdictNote ? <Text style={typography.small}>{verdictNote}</Text> : null}
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-              </Pressable>
-            ) : null}
-
-            <View style={styles.section}>
-              <SectionHeader
-                title="Today's Lifts"
-                {...(groupedLifts.length > 0 ? { actionLabel: "Add", onAction: goLift } : {})}
-              />
-              {liftsError ? (
-                <Banner
-                  tone="danger"
-                  message={liftsError}
-                  actionLabel="Retry"
-                  onAction={() => refetchLifts()}
-                  style={styles.block}
-                />
-              ) : null}
-              {liftsLoading && lifts.length === 0 ? (
-                <LoadingState label="Loading lifts…" />
-              ) : groupedLifts.length === 0 ? (
-                <EmptyState
-                  compact
-                  icon="barbell-outline"
-                  title="No lifts logged yet."
-                  subtitle="Log your sets directly."
-                >
-                  <Button label="Add Lift" icon="add" onPress={goLift} />
-                </EmptyState>
-              ) : (
-                <View style={styles.list}>
-                  {groupedLifts.map((g) => (
-                    <Card key={g.name} style={styles.liftCard}>
-                      <Text style={typography.bodyStrong}>{g.name}</Text>
-                      <View style={styles.setChips}>
-                        {g.sets.map((s) => (
-                          <Pressable
-                            key={s.id}
-                            style={styles.setChip}
-                            onLongPress={() => confirmDeleteLift(s.id)}
-                            accessibilityLabel={`${s.exercise_name} set ${s.weight_kg} by ${s.reps}`}
-                          >
-                            <Text style={styles.setChipText}>
-                              {s.weight_kg} × {s.reps}
-                            </Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      <Text style={[typography.caption, styles.hint]}>Long-press a set to delete</Text>
-                    </Card>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            <View style={styles.section}>
-              <SectionHeader
-                title="Activity"
-                {...(activities.length > 0 ? { actionLabel: "Add", onAction: () => setActivityOpen(true) } : {})}
-              />
-              {activitiesError ? (
-                <Banner
-                  tone="danger"
-                  message={activitiesError}
-                  actionLabel="Retry"
-                  onAction={() => refetchActivities()}
-                  style={styles.block}
-                />
-              ) : null}
-              {activitiesLoading && activities.length === 0 ? (
-                <LoadingState label="Loading activity…" />
-              ) : activities.length === 0 ? (
-                <EmptyState
-                  compact
-                  icon="walk-outline"
-                  title="No activity logged yet."
-                  subtitle="Log your walk, run, cycle or more."
-                >
-                  <Button label="Add Activity" icon="add" variant="outline" onPress={() => setActivityOpen(true)} />
-                </EmptyState>
-              ) : (
-                <View style={styles.list}>
-                  {activities.map((a) => (
-                    <Card key={a.id} style={styles.activityRow}>
-                      <IconBadge name="walk-outline" bg={colors.tealSoft} color={colors.teal} size={36} rounded={false} />
-                      <View style={styles.activityText}>
-                        <Text style={typography.bodyStrong} numberOfLines={1}>
-                          {a.name}
-                        </Text>
-                        <Text style={typography.small} numberOfLines={1}>
-                          {a.duration_min} min
-                          {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
-                          {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
-                        </Text>
-                      </View>
-                      <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={14} accessibilityLabel="Delete activity">
-                        <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                      </Pressable>
-                    </Card>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {profile?.meal_tracking_enabled !== false ? (
-            <View style={styles.section}>
-              <SectionHeader
-                title="Meals"
-                {...(meals.length > 0
-                  ? {
-                      actionLabel: "Log",
-                      onAction: () =>
-                        router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never),
-                    }
-                  : {})}
-              />
-              {mealsError ? (
-                <Banner
-                  tone="danger"
-                  message={mealsError}
-                  actionLabel="Retry"
-                  onAction={() => refetchMeals()}
-                  style={styles.block}
-                />
-              ) : null}
-              {mealsLoading && meals.length === 0 ? (
-                <LoadingState label="Loading meals…" />
-              ) : meals.length === 0 ? (
-                <EmptyState
-                  compact
-                  icon="restaurant-outline"
-                  title="No meals logged yet."
-                  subtitle="Tell the coach what you ate — it estimates the calories and protein for you."
-                >
-                  <Button label="Log with coach" icon="sparkles-outline" onPress={() => router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never)} />
-                </EmptyState>
-              ) : (
-                <View style={styles.list}>
-                  {meals.map((m) => (
-                    <Pressable
-                      key={m.id}
-                      style={styles.mealRow}
-                      onPress={() => setEditingMeal(m)}
-                      accessibilityLabel={`${m.title} ${m.calories} calories`}
-                    >
-                      <IconBadge name="restaurant-outline" bg={colors.greenSoft} color={colors.green} size={36} rounded={false} />
-                      <View style={styles.activityText}>
-                        <Text style={typography.bodyStrong} numberOfLines={1}>
-                          {m.title}
-                        </Text>
-                        <Text style={typography.small} numberOfLines={1}>
-                          {m.calories} kcal · {m.protein_g} g protein
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                    </Pressable>
-                  ))}
-                  <Text style={[typography.caption, styles.hint]}>
-                    From meals: {mealTotals.calories} kcal · {mealTotals.protein} g protein
-                  </Text>
-                  {calorieTarget != null || proteinTarget != null ? (
-                    <Text style={[typography.caption, styles.hint]}>
-                      Today: {loggedCalories}
-                      {calorieTarget != null ? ` / ${calorieTarget}` : ""} kcal
-                      {proteinTarget != null
-                        ? ` · ${loggedProtein} / ${proteinTarget} g protein`
-                        : ""}
-                    </Text>
-                  ) : null}
-                </View>
-              )}
-            </View>
-            ) : null}
-          </>
+        {liftsError ? (
+          <Banner tone="danger" message={liftsError} actionLabel="Retry" onAction={() => refetchLifts()} style={styles.block} />
         ) : null}
+        {liftsLoading && lifts.length === 0 ? (
+          <LoadingState label="Loading lifts…" />
+        ) : (
+          <RecentLiftsRow
+            groups={groupedLifts}
+            deltas={liftDeltas}
+            onViewAll={goHistory}
+            onAddLift={goLift}
+          />
+        )}
+
+        <View style={styles.section}>
+          <SectionHeader
+            title="Activity"
+            {...(activities.length > 0 ? { actionLabel: "Add", onAction: () => setActivityOpen(true) } : {})}
+          />
+          {activitiesError ? (
+            <Banner
+              tone="danger"
+              message={activitiesError}
+              actionLabel="Retry"
+              onAction={() => refetchActivities()}
+              style={styles.block}
+            />
+          ) : null}
+          {activitiesLoading && activities.length === 0 ? (
+            <LoadingState label="Loading activity…" />
+          ) : activities.length === 0 ? (
+            <EmptyState
+              compact
+              icon="walk-outline"
+              title="No activity logged yet."
+              subtitle="Log your walk, run, cycle or more."
+            >
+              <Button label="Add Activity" icon="add" variant="outline" onPress={() => setActivityOpen(true)} />
+            </EmptyState>
+          ) : (
+            <View style={styles.list}>
+              {activities.map((a) => (
+                <Card key={a.id} style={styles.activityRow}>
+                  <IconBadge name="walk-outline" bg={colors.tealSoft} color={colors.teal} size={36} rounded={false} />
+                  <View style={styles.activityText}>
+                    <Text style={typography.bodyStrong} numberOfLines={1}>
+                      {a.name}
+                    </Text>
+                    <Text style={typography.small} numberOfLines={1}>
+                      {a.duration_min} min
+                      {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
+                      {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={14} accessibilityLabel="Delete activity">
+                    <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                  </Pressable>
+                </Card>
+              ))}
+            </View>
+          )}
+        </View>
 
         <View style={styles.footerSpace} />
       </ScrollView>
@@ -576,6 +460,20 @@ export default function TodayScreen() {
         onClose={() => setActivityOpen(false)}
         onSubmit={async (payload) => {
           await addActivity(payload);
+        }}
+      />
+
+      <MealsSheet
+        visible={mealsOpen}
+        meals={meals}
+        onClose={() => setMealsOpen(false)}
+        onSelect={(meal) => {
+          setMealsOpen(false);
+          setEditingMeal(meal);
+        }}
+        onLogMeal={() => {
+          setMealsOpen(false);
+          goLogMeal();
         }}
       />
 
@@ -610,14 +508,43 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl },
-    greeting: { marginTop: spacing.md, marginBottom: spacing.sm, gap: 2 },
-    dateStrip: { marginTop: spacing.sm },
-    segment: { marginTop: spacing.md },
     block: { marginTop: spacing.md },
-    grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: spacing.sm, marginTop: spacing.md },
     section: { marginTop: spacing.xxl },
     list: { gap: spacing.sm },
     footerSpace: { height: spacing.xxl },
+
+    dateBlock: { marginTop: spacing.sm, gap: spacing.sm },
+    dateLabel: { ...t.typography.caption, color: t.colors.textDim },
+
+    greetingRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+      marginTop: spacing.lg,
+    },
+    greeting: { flex: 1, gap: 2, minWidth: 0 },
+    encouragement: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      borderRadius: radii.lg,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      maxWidth: 156,
+    },
+    encouragementText: { ...t.typography.caption, color: t.colors.text, flexShrink: 1 },
+
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "space-between",
+      rowGap: spacing.sm,
+      marginTop: spacing.md,
+    },
 
     todayChip: {
       flexDirection: "row",
@@ -658,46 +585,8 @@ const useStyles = makeUseStyles((t) =>
     },
     backTodayText: { fontSize: 13, fontWeight: "600", color: t.colors.primary },
 
-    defaultsHelp: { marginTop: spacing.xs, marginBottom: spacing.md, color: t.colors.textDim },
-    defaultsButton: { marginTop: spacing.xs },
-
-    verdictCard: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.md,
-      backgroundColor: t.colors.surface,
-      borderRadius: radii.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
-      padding: spacing.md,
-      marginTop: spacing.lg,
-    },
-    verdictText: { flex: 1, gap: 2 },
-    verdictLabel: { fontSize: 16, fontWeight: "700", color: t.colors.primary },
-
-    liftCard: { gap: spacing.sm },
-    setChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-    setChip: {
-      backgroundColor: t.colors.surfaceAlt,
-      borderRadius: radii.sm,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 6,
-    },
-    setChipText: { fontSize: 13, fontWeight: "600", color: t.colors.text },
-    hint: { color: t.colors.textMuted },
-
     activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
     activityText: { flex: 1, gap: 2 },
-    mealRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.md,
-      backgroundColor: t.colors.surface,
-      borderRadius: radii.lg,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
-      padding: spacing.md,
-    },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
     errorTitle: { textAlign: "center" },

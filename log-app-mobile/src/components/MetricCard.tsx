@@ -26,6 +26,7 @@ export function MetricCard({
   onToggleLock,
   onSave,
   fieldError,
+  footnote,
 }: {
   field: keyof typeof MAX_DAILY;
   label: string;
@@ -41,6 +42,8 @@ export function MetricCard({
   onToggleLock?: () => void;
   onSave: (value: number | null) => void;
   fieldError?: string;
+  /** Small trend line under the value (e.g. "↓ 1.2 kg this week"). */
+  footnote?: { text: string; tone?: "positive" | "negative" | "neutral" };
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -134,6 +137,25 @@ export function MetricCard({
         <Text style={typography.metricUnit}>{unit}</Text>
       </View>
 
+      {footnote ? (
+        <Text
+          style={[
+            styles.footnote,
+            {
+              color:
+                footnote.tone === "positive"
+                  ? colors.success
+                  : footnote.tone === "negative"
+                    ? colors.blue
+                    : colors.textDim,
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {footnote.text}
+        </Text>
+      ) : null}
+
       {hasTarget ? (
         <View style={styles.progressWrap}>
           <View style={styles.progressRow}>
@@ -174,6 +196,7 @@ const useStyles = makeUseStyles((t) =>
     valueRow: { flexDirection: "row", alignItems: "baseline", gap: 4 },
     input: { flex: 1, padding: 0, minWidth: 40 },
     placeholder: { color: t.colors.textMuted },
+    footnote: { ...t.typography.caption, marginTop: 2 },
     progressWrap: { gap: 4, marginTop: 2 },
     progressRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
     progressTrack: {

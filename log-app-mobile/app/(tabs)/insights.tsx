@@ -21,7 +21,9 @@ import { SegmentedControl, Chip, ChipRow } from "../../src/components/ui/control
 import { useInsights } from "../../src/hooks/useInsights";
 import { useTrends } from "../../src/hooks/useTrends";
 import { useMe } from "../../src/hooks/useMe";
+import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
+import { VERDICT_LABELS } from "../../src/components/VerdictStamp";
 import { formatNumber } from "../../src/utils/derive";
 import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
 import type { TrendRange } from "../../src/api/types";
@@ -112,6 +114,7 @@ export default function InsightsScreen() {
     error: trendsError,
     refetch: refetchTrends,
   } = useTrends(range, nutritionWeeks);
+  const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
   // numbers that read as real zeros (a slow load shouldn't look like a broken streak).
@@ -124,6 +127,18 @@ export default function InsightsScreen() {
   const currentAvg = weightValues.length > 0 ? weightValues[weightValues.length - 1] : null;
   const adherence = trends?.adherence_pct ?? null;
   const trackWeight = profile?.track_weight !== false;
+  // The verdict entry moved here from Today. A call the engine derived from
+  // strength + adherence is usable without weigh-ins, but a weight-tracker with
+  // no trend yet shouldn't be told to "hold".
+  const verdictUsable =
+    verdict != null && (!trackWeight || verdict.weight_trend_kg_per_week != null);
+  const verdictLabel = verdictUsable ? VERDICT_LABELS[verdict.verdict] : null;
+  const verdictNote =
+    verdictUsable && verdict.weight_trend_kg_per_week != null
+      ? `${verdict.weight_trend_kg_per_week > 0 ? "+" : ""}${verdict.weight_trend_kg_per_week.toFixed(2)} kg/week`
+      : verdictUsable
+        ? "From your strength and consistency"
+        : null;
   const bucketSize = trends?.bucket ?? "week";
   const months = trends?.months ?? [];
   const latestMonth = months[0] ?? null;
@@ -235,6 +250,24 @@ export default function InsightsScreen() {
             onAction={refetchTrends}
             style={styles.section}
           />
+        ) : null}
+
+        {/* Weekly verdict entry — moved off Today */}
+        {verdictLabel ? (
+          <Pressable
+            style={styles.verdictCard}
+            onPress={() => router.navigate("/verdict" as never)}
+            accessibilityRole="button"
+            accessibilityLabel={`Weekly verdict: ${verdictLabel}`}
+          >
+            <IconBadge name="ribbon-outline" bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
+            <View style={styles.verdictText}>
+              <Text style={typography.caption}>Weekly verdict</Text>
+              <Text style={styles.verdictLabel}>{verdictLabel}</Text>
+              {verdictNote ? <Text style={typography.small}>{verdictNote}</Text> : null}
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Pressable>
         ) : null}
 
         {/* Consistency summary */}
@@ -762,6 +795,20 @@ const useStyles = makeUseStyles((t) =>
     motivText: { flex: 1, gap: 2 },
     motivSub: { color: t.colors.textDim },
     pressed: { opacity: 0.85 },
+
+    verdictCard: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      padding: spacing.md,
+      ...shadows.card,
+    },
+    verdictText: { flex: 1, gap: 2 },
+    verdictLabel: { fontSize: 16, fontWeight: "700", color: t.colors.primary },
 
     tiles: { flexDirection: "row", gap: spacing.sm },
     tile: {
