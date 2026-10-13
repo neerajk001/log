@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { useSignIn, useSSO } from "@clerk/clerk-expo";
+import { useLocalSearchParams } from "expo-router";
 import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
 import { radii, spacing } from "../src/theme/spacing";
 import { BrandWordmark } from "../src/components/ScreenHeader";
@@ -24,7 +25,9 @@ export default function SignInScreen() {
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
-  const [step, setStep] = useState<Step>("options");
+  // Arriving from the onboarding carousel (`?method=google|email`): start there.
+  const { method } = useLocalSearchParams<{ method?: string }>();
+  const [step, setStep] = useState<Step>(method === "email" ? "email" : "options");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -73,6 +76,17 @@ export default function SignInScreen() {
       setLoading(false);
     }
   }, [startSSOFlow, setActive, loading]);
+
+  // `?method=google` — open the Google flow once, after the screen has painted.
+  const launchedRef = useRef(false);
+  useEffect(() => {
+    if (method !== "google" || !signInLoaded || launchedRef.current) return;
+    const timer = setTimeout(() => {
+      launchedRef.current = true;
+      void handleGoogleSignIn();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [method, signInLoaded, handleGoogleSignIn]);
 
   const handleSendCode = useCallback(async () => {
     if (!signIn || loading || resendCooldown > 0) return;

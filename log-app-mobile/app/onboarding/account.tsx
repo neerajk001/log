@@ -32,21 +32,25 @@ export default function AccountScreen() {
       <View style={[styles.actions, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Create Account"
-          onPress={() => router.replace("/sign-in" as never)}
+          accessibilityLabel="Sign in with Google"
+          onPress={() =>
+            router.replace({ pathname: "/sign-in", params: { method: "google" } } as never)
+          }
           style={({ pressed }) => [styles.cta, pressed ? styles.pressed : null]}
         >
-          <Text style={styles.ctaLabel}>Create Account</Text>
+          <Text style={styles.ctaLabel}>Sign in with Google</Text>
           <Ionicons name="arrow-forward" size={18} color={ON_MINT} />
         </Pressable>
 
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="I Already Have an Account"
-          onPress={() => router.replace("/sign-in" as never)}
+          accessibilityLabel="Sign in with Email"
+          onPress={() =>
+            router.replace({ pathname: "/sign-in", params: { method: "email" } } as never)
+          }
           style={({ pressed }) => [styles.secondary, pressed ? styles.pressed : null]}
         >
-          <Text style={styles.secondaryLabel}>I Already Have an Account</Text>
+          <Text style={styles.secondaryLabel}>Sign in with Email</Text>
         </Pressable>
       </View>
     </View>
