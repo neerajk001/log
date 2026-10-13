@@ -5,7 +5,7 @@ import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
 import { StepScaffold } from "../../src/components/onboarding/StepScaffold";
 import { OptionCard } from "../../src/components/OptionCard";
-import { Banner, Card, IconBadge } from "../../src/components/ui/primitives";
+import { Banner } from "../../src/components/ui/primitives";
 import { useMe } from "../../src/hooks/useMe";
 import { draftToPayload, getDraft, resetDraft } from "../../src/state/onboarding";
 
@@ -15,7 +15,7 @@ import { draftToPayload, getDraft, resetDraft } from "../../src/state/onboarding
  */
 export default function PlanStepScreen() {
   const { completeOnboarding } = useMe();
-  const { colors, typography } = useTheme();
+  const { typography } = useTheme();
   const styles = useStyles();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,42 +38,36 @@ export default function PlanStepScreen() {
       step={3}
       title="Want a training plan?"
       subtitle="You can track everything without one."
-      nextLabel={null}
-      secondary={{
-        label: "Skip for now — add a plan later",
-        onPress: () => finish("later", "/(tabs)/today"),
-        disabled: busy != null,
-        loading: busy === "later",
-      }}
+      nextDisabled={busy != null}
+      onNext={() => finish("later", "/(tabs)/today")}
     >
-      <Card style={styles.hero}>
-        <IconBadge name="list-outline" bg={colors.primarySoft} color={colors.primary} size={44} rounded={false} />
-        <Text style={[typography.small, styles.heroText]}>
-          A plan tells you what to lift each session. Without one you can still log lifts and get
-          your weekly verdict.
-        </Text>
-      </Card>
-
       {error ? <Banner tone="danger" message={error} /> : null}
 
       <OptionCard
-        icon="sparkles-outline"
+        icon="barbell-outline"
         accent
         title="Build one for me"
-        subtitle="Answer 3 quick steps and the coach writes it"
+        subtitle="Answer 3 quick steps and the coach writes it for you"
         disabled={busy != null}
         onPress={() => finish("coach", "/coach/onboarding")}
       />
       <OptionCard
-        icon="cloud-upload-outline"
+        icon="document-text-outline"
         title="I already have a plan"
         subtitle="Import a file, or paste and type it in"
         disabled={busy != null}
         onPress={() => finish("import", "/plan/import")}
       />
+      <OptionCard
+        icon="leaf-outline"
+        title="Skip for now"
+        subtitle="Add a plan later. You can still log your workouts and get weekly insights"
+        disabled={busy != null}
+        onPress={() => finish("later", "/(tabs)/today")}
+      />
 
       <View style={styles.note}>
-        <Text style={typography.caption}>
+        <Text style={typography.small}>
           Goal, experience and training days are only asked if you build a plan.
         </Text>
       </View>
@@ -81,10 +75,8 @@ export default function PlanStepScreen() {
   );
 }
 
-const useStyles = makeUseStyles((t) =>
+const useStyles = makeUseStyles(() =>
   StyleSheet.create({
-    hero: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    heroText: { flex: 1, color: t.colors.textDim },
     note: { paddingHorizontal: spacing.xs },
   }),
 );

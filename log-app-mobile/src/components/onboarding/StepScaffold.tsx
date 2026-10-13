@@ -49,7 +49,8 @@ export function StepScaffold({
         <OnboardingProgress step={step} total={total} />
 
         <View style={styles.header}>
-          <Text style={typography.h2}>{title}</Text>
+          <Text style={typography.small}>{`Step ${step} of ${total}`}</Text>
+          <Text style={[typography.h1, styles.title]}>{title}</Text>
           {subtitle ? <Text style={[typography.small, styles.subtitle]}>{subtitle}</Text> : null}
         </View>
 
@@ -74,7 +75,14 @@ export function StepScaffold({
             style={styles.flex}
           />
           {nextLabel && onNext ? (
-            <Button label={nextLabel} onPress={onNext} disabled={nextDisabled} style={styles.flex} />
+            <Button
+              label={nextLabel}
+              onPress={onNext}
+              disabled={nextDisabled}
+              icon="arrow-forward"
+              iconPosition="trailing"
+              style={styles.flex}
+            />
           ) : null}
         </View>
       </View>
@@ -87,14 +95,13 @@ const useStyles = makeUseStyles((t) =>
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { paddingHorizontal: spacing.screen, paddingBottom: spacing.xl, gap: spacing.lg },
     header: { gap: spacing.xs },
+    title: { marginTop: spacing.md },
     subtitle: { color: t.colors.textDim },
     body: { gap: spacing.md },
     footer: {
       gap: spacing.sm,
       paddingHorizontal: spacing.screen,
       paddingTop: spacing.md,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.colors.border,
     },
     footerRow: { flexDirection: "row", gap: spacing.sm },
     flex: { flex: 1 },

@@ -39,6 +39,7 @@ export function Button({
   onPress,
   variant = "primary",
   icon,
+  iconPosition = "leading",
   size = "md",
   loading = false,
   disabled = false,
@@ -48,6 +49,8 @@ export function Button({
   onPress?: () => void;
   variant?: ButtonVariant;
   icon?: IoniconName;
+  /** Which side the icon sits on (e.g. a trailing arrow on "Next"). */
+  iconPosition?: "leading" | "trailing";
   size?: "md" | "sm";
   loading?: boolean;
   disabled?: boolean;
@@ -79,10 +82,15 @@ export function Button({
         <ActivityIndicator size="small" color={textColor} />
       ) : (
         <>
-          {icon ? <Ionicons name={icon} size={iconSize} color={textColor} /> : null}
+          {icon && iconPosition === "leading" ? (
+            <Ionicons name={icon} size={iconSize} color={textColor} />
+          ) : null}
           <Text style={[typography.button, { color: textColor }]} numberOfLines={1}>
             {label}
           </Text>
+          {icon && iconPosition === "trailing" ? (
+            <Ionicons name={icon} size={iconSize} color={textColor} />
+          ) : null}
         </>
       )}
     </Pressable>

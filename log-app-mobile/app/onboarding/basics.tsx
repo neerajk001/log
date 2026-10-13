@@ -1,13 +1,21 @@
 import { useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { StepScaffold } from "../../src/components/onboarding/StepScaffold";
-import { SegmentedControl, TextField } from "../../src/components/ui/controls";
-import { makeUseStyles } from "../../src/theme/ThemeContext";
-import { spacing } from "../../src/theme/spacing";
+import { TextField } from "../../src/components/ui/controls";
+import type { IoniconName } from "../../src/components/ui/primitives";
+import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
+import { radii, spacing } from "../../src/theme/spacing";
 import { getDraft, setDraft } from "../../src/state/onboarding";
 
 type Sex = "male" | "female" | "other";
+
+const SEX_OPTIONS: { value: Sex; label: string; icon: IoniconName }[] = [
+  { value: "male", label: "Male", icon: "male" },
+  { value: "female", label: "Female", icon: "female" },
+  { value: "other", label: "Other", icon: "male-female" },
+];
 
 /** Step 1 — about you. */
 export default function BasicsScreen() {
@@ -16,6 +24,7 @@ export default function BasicsScreen() {
   const [age, setAge] = useState(d.age);
   const [height, setHeight] = useState(d.height_cm);
   const [weight, setWeight] = useState(d.weight_kg);
+  const { colors, typography } = useTheme();
   const styles = useStyles();
 
   const ready = !!sex && !!age && !!height && !!weight;
@@ -31,31 +40,50 @@ export default function BasicsScreen() {
         router.navigate("/onboarding/appearance" as never);
       }}
     >
-      <SegmentedControl<Sex | "">
-        value={sex ?? ""}
-        onChange={(v) => setSex(v === "" ? null : v)}
-        options={[
-          { value: "male", label: "Male" },
-          { value: "female", label: "Female" },
-          { value: "other", label: "Other" },
-        ]}
+      <View style={styles.sexRow}>
+        {SEX_OPTIONS.map((option) => {
+          const active = sex === option.value;
+          return (
+            <Pressable
+              key={option.value}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              onPress={() => setSex(option.value)}
+              style={[styles.sexCard, active && styles.sexCardActive]}
+            >
+              <Ionicons name={option.icon} size={22} color={active ? colors.primary : colors.textDim} />
+              <Text style={[typography.body, active && styles.sexLabelActive]}>{option.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <TextField
+        label="Age"
+        value={age}
+        onChangeText={setAge}
+        keyboardType="numeric"
+        placeholder="22"
+        unit="years"
       />
-      <TextField label="Age" value={age} onChangeText={setAge} keyboardType="numeric" placeholder="22" />
+
       <View style={styles.row}>
         <TextField
-          label="Height (cm)"
+          label="Height"
           value={height}
           onChangeText={setHeight}
           keyboardType="numeric"
           placeholder="175"
+          unit="cm"
           style={styles.flex}
         />
         <TextField
-          label="Current weight (kg)"
+          label="Current weight"
           value={weight}
           onChangeText={setWeight}
           keyboardType="numeric"
           placeholder="65"
+          unit="kg"
           style={styles.flex}
         />
       </View>
@@ -63,8 +91,21 @@ export default function BasicsScreen() {
   );
 }
 
-const useStyles = makeUseStyles(() =>
+const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
+    sexRow: { flexDirection: "row", gap: spacing.sm },
+    sexCard: {
+      flex: 1,
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.lg,
+      borderRadius: radii.lg,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      backgroundColor: t.colors.surface,
+    },
+    sexCardActive: { borderColor: t.colors.primary, backgroundColor: t.colors.primarySoft },
+    sexLabelActive: { color: t.colors.primary, fontWeight: "700" },
     row: { flexDirection: "row", gap: spacing.sm },
     flex: { flex: 1 },
   }),

@@ -118,6 +118,7 @@ export function TextField({
   multiline = false,
   autoCapitalize = "none",
   error,
+  unit,
   style,
 }: {
   label?: string;
@@ -128,6 +129,8 @@ export function TextField({
   multiline?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   error?: string;
+  /** Unit shown inside the field on the right, e.g. "kg" or "years". */
+  unit?: string;
   style?: StyleProp<ViewStyle>;
 }) {
   const { colors } = useTheme();
@@ -135,17 +138,26 @@ export function TextField({
   return (
     <View style={[styles.field, style]}>
       {label ? <Text style={styles.fieldLabel}>{label}</Text> : null}
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.textMuted}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        autoCapitalize={autoCapitalize}
-        textAlignVertical={multiline ? "top" : "center"}
-        style={[styles.input, multiline && styles.inputMultiline, error ? styles.inputError : null]}
-      />
+      <View
+        style={[
+          styles.inputWrap,
+          multiline && styles.inputWrapMultiline,
+          error ? styles.inputWrapError : null,
+        ]}
+      >
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={colors.textMuted}
+          keyboardType={keyboardType}
+          multiline={multiline}
+          autoCapitalize={autoCapitalize}
+          textAlignVertical={multiline ? "top" : "center"}
+          style={styles.input}
+        />
+        {unit ? <Text style={styles.inputUnit}>{unit}</Text> : null}
+      </View>
       {error ? <Text style={styles.fieldError}>{error}</Text> : null}
     </View>
   );
@@ -305,18 +317,21 @@ const useStyles = makeUseStyles((t) =>
 
     field: { gap: spacing.xs },
     fieldLabel: { ...t.typography.caption, color: t.colors.textDim },
-    input: {
+    inputWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
       backgroundColor: t.colors.surface,
       borderWidth: 1,
       borderColor: t.colors.border,
       borderRadius: radii.md,
       paddingHorizontal: spacing.md,
       height: 48,
-      fontSize: 15,
-      color: t.colors.text,
     },
-    inputMultiline: { height: 120, paddingTop: spacing.md },
-    inputError: { borderColor: t.colors.danger },
+    inputWrapMultiline: { height: 120, alignItems: "stretch", paddingVertical: spacing.md },
+    inputWrapError: { borderColor: t.colors.danger },
+    input: { flex: 1, padding: 0, fontSize: 15, color: t.colors.text },
+    inputUnit: { ...t.typography.small, color: t.colors.textMuted },
     fieldError: { ...t.typography.small, color: t.colors.danger },
 
     backdrop: {
