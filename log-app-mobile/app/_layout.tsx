@@ -43,8 +43,11 @@ function AuthGate() {
     if (isCallback) return;
 
     if (!isSignedIn) {
-      // Welcome is the signed-out entry point.
-      if (!inSignIn && step !== "welcome") router.replace("/onboarding/welcome" as never);
+      // Signed-out entry points: the welcome hero, the intro carousel and the
+      // account screen all sit ahead of sign-in.
+      const inSignedOutOnboarding =
+        first === "onboarding" && ["welcome", "intro", "account"].includes(step);
+      if (!inSignIn && !inSignedOutOnboarding) router.replace("/onboarding/welcome" as never);
       return;
     }
 

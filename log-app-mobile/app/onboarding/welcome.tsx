@@ -47,7 +47,8 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const styles = useStyles();
 
-  const go = () => router.navigate("/sign-in" as never);
+  const start = () => router.navigate("/onboarding/intro" as never);
+  const skip = () => router.navigate("/onboarding/account" as never);
 
   return (
     <ImageBackground source={BG_IMAGE} style={styles.container} resizeMode="cover">
@@ -63,7 +64,7 @@ export default function WelcomeScreen() {
         ]}
       >
         <View style={styles.topRow}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Skip" hitSlop={10} onPress={go}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Skip" hitSlop={10} onPress={skip}>
             <Text style={styles.skip}>Skip</Text>
           </Pressable>
         </View>
@@ -87,7 +88,7 @@ export default function WelcomeScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Get Started"
-          onPress={go}
+          onPress={start}
           style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed]}
         >
           <Text style={styles.ctaLabel}>Get Started</Text>
