@@ -25,8 +25,12 @@ export const config = {
     parsing: process.env.OPENAI_PARSE_MODEL || process.env.OPENAI_MODEL || "gpt-4.1-mini",
     // Short, simple chat turns.
     chatFast: process.env.COACH_FAST_MODEL || "gpt-4.1-mini",
-    // Reasoning-heavy chat and program generation.
+    // Reasoning-heavy chat turns.
     chatSmart: process.env.COACH_MODEL || "gpt-4.1",
+    // Program generation (the coach writing a full plan). A dedicated, strong model:
+    // a wrong split is expensive to undo, and cheaper models tripped the plan
+    // schema. Falls back to the chat model when unset.
+    plan: process.env.COACH_PLAN_MODEL || process.env.COACH_MODEL || "gpt-4.1",
     // Physique photo analysis runs on the cheap vision model (Command Code by
     // default, same family as meal photos) — no longer OpenAI.
     physique:

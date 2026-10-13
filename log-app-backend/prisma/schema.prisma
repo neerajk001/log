@@ -75,6 +75,8 @@ model WorkoutPlan {
   userId     String     @map("user_id") @db.Uuid
   name       String     @db.Text
   source     String     @db.Text
+  /// The coach's "why this program" summary (AI-generated; null for manual/imported plans).
+  rationale  String?    @db.Text
   isActive   Boolean    @default(true) @map("is_active")
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz()
   user       User       @relation(fields: [userId], references: [id])
@@ -88,6 +90,8 @@ model PlanDay {
   id         String     @id @default(uuid()) @db.Uuid
   planId     String     @map("plan_id") @db.Uuid
   dayName    String     @map("day_name") @db.Text
+  /// One line on what this day trains and why (AI-generated; null otherwise).
+  rationale  String?    @db.Text
   dayOrder   Int        @map("day_order")
   exercises  Json       @db.JsonB
   plan       WorkoutPlan @relation(fields: [planId], references: [id])

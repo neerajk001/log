@@ -35,8 +35,10 @@ export function useCoachApi() {
       getDecisions: (limit = 20) =>
         client.get<CoachDecision[]>(`/api/coach/decisions?limit=${limit}`),
       clearDecisions: () => client.del<{ ok: true }>("/api/coach/decisions"),
+      // Plan generation is a long reasoning call; the default 15s client timeout
+      // aborted it and surfaced as a connection error. Give it the AI allowance.
       generatePlan: (body: { goal?: string; notes?: string }) =>
-        client.post<ParsedPlanPreview>("/api/coach/plan", body),
+        client.post<ParsedPlanPreview>("/api/coach/plan", body, { timeoutMs: 120_000 }),
       analyzePhoto: (formData: FormData) =>
         client.postFormData<PhysiqueReading>("/api/coach/analyze", formData),
     }),
@@ -78,6 +80,7 @@ export async function streamCoachChat({
 }): Promise<string> {
   if (!token) throw new Error("Signed out. Please sign in again.");
 
+  const sentAt = Date.now();
   const res = await expoFetch(`${API_BASE_URL}/api/coach/chat/stream`, {
     method: "POST",
     headers: {
@@ -111,6 +114,8 @@ export async function streamCoachChat({
   let buffer = "";
   let full = "";
   let serverError: string | null = null;
+  const headersAt = Date.now();
+  let firstDeltaAt: number | null = null;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -141,10 +146,26 @@ export async function streamCoachChat({
       if (event.proposal) onProposal?.(event.proposal);
       if (typeof event.status === "string" && event.status.length > 0) onStatus?.(event.status);
       if (typeof event.delta === "string" && event.delta.length > 0) {
+        if (firstDeltaAt == null) firstDeltaAt = Date.now();
         full += event.delta;
         onDelta(event.delta);
       }
     }
+  }
+
+  if (__DEV__) {
+    // Client half of the turn timing — pair with the server's "[coach] turn" line
+    // to see how much of the wait is the network vs the model.
+    console.log(
+      "[coach] client turn",
+      JSON.stringify({
+        agent: agent ?? "auto",
+        headersMs: headersAt - sentAt,
+        firstDeltaMs: firstDeltaAt == null ? null : firstDeltaAt - sentAt,
+        totalMs: Date.now() - sentAt,
+        chars: full.length,
+      }),
+    );
   }
 
   if (serverError) throw new Error(serverError);

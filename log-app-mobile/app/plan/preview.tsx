@@ -25,6 +25,8 @@ export default function PlanPreviewScreen() {
   const [days, setDays] = useState<EditableDay[]>(pending?.days ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The coach's "why this program" — read-only, saved with the plan.
+  const planRationale = pending?.rationale ?? undefined;
 
   if (!pending) {
     return (
@@ -62,8 +64,10 @@ export default function PlanPreviewScreen() {
     const payload: CreatePlanInput = {
       name: (name.trim() || "My Workout Plan").slice(0, 200),
       source: pending.source,
+      rationale: planRationale,
       days: days.map((d) => ({
         day_name: d.day_name.trim().slice(0, 200),
+        rationale: d.rationale,
         exercises: d.exercises.map((e) => ({
           name: e.name.trim().slice(0, 120),
           sets: parsePositiveInt(e.sets, 99) ?? 0,
@@ -114,6 +118,13 @@ export default function PlanPreviewScreen() {
           </View>
         </Card>
 
+        {planRationale ? (
+          <Card style={styles.whyCard}>
+            <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+            <Text style={[typography.small, styles.whyText]}>{planRationale}</Text>
+          </Card>
+        ) : null}
+
         <TextField label="Plan name" value={name} onChangeText={setName} placeholder="My Workout Plan" autoCapitalize="words" />
 
         <PlanDaysEditor days={days} onChange={setDays} />
@@ -137,5 +148,7 @@ const useStyles = makeUseStyles((t) =>
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
     summary: { flexDirection: "row", alignItems: "center", gap: spacing.md },
     summaryText: { flex: 1, gap: 2 },
+    whyCard: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+    whyText: { flex: 1 },
   }),
 );

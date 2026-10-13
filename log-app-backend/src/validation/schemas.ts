@@ -122,10 +122,14 @@ export const planExerciseSchema = z.object({
 
 export const planDaySchema = z.object({
   day_name: z.string().min(1).max(200),
+  /** The coach's one-line "why this day" (absent on manual/imported plans). */
+  rationale: z.string().max(500).optional(),
   exercises: z.array(planExerciseSchema).min(1).max(50),
 });
 
 export const parsedPlanSchema = z.object({
+  /** The coach's "why this program" summary (absent on manual/imported plans). */
+  rationale: z.string().max(800).optional(),
   days: z.array(planDaySchema).min(1).max(14),
 });
 

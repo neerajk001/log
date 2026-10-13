@@ -82,10 +82,13 @@ export async function apiFetch<T = unknown>(
   const url = `${API_BASE_URL}${path}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    timeoutMs ?? REQUEST_TIMEOUT_MS,
-  );
+  // Track the timeout ourselves: React Native's abort error is not reliably named
+  // "AbortError", so a timed-out AI call used to surface as "can't reach the server".
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs ?? REQUEST_TIMEOUT_MS);
 
   let res: Response;
   try {
@@ -98,8 +101,8 @@ export async function apiFetch<T = unknown>(
         ...fetchOptions?.headers,
       },
     });
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
+  } catch {
+    if (timedOut) {
       throw new ApiError(0, "NETWORK_ERROR", "Request timed out. Check your connection.");
     }
     throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
@@ -183,11 +186,12 @@ export function useApiClient() {
             return data;
           }),
         ),
-      post: <T = unknown>(path: string, body: unknown) =>
+      post: <T = unknown>(path: string, body: unknown, opts?: { timeoutMs?: number }) =>
         wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current(), {
             method: "POST",
             body: JSON.stringify(body),
+            timeoutMs: opts?.timeoutMs,
           }).then((data) => {
             invalidateForWrite(path);
             return data;

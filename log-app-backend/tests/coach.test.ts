@@ -692,8 +692,11 @@ describe("coach proposals", () => {
       {
         id: "p1",
         name: "PPL",
+        rationale: null,
         is_active: true,
-        days: [{ day_name: "Push", exercises: [{ name: "Bench", sets: 3, reps: "8" }] }],
+        days: [
+          { day_name: "Push", rationale: null, exercises: [{ name: "Bench", sets: 3, reps: "8" }] },
+        ],
       },
     ]);
   });
@@ -1069,9 +1072,11 @@ describe("generateCoachPlan", () => {
                   {
                     type: "output_text",
                     text: JSON.stringify({
+                      rationale: "You train 3 days, so this is a focused full-body split.",
                       days: [
                         {
                           day_name: "Push",
+                          rationale: "Pressing strength for the upper body.",
                           exercises: [{ name: "Bench Press", sets: 3, reps: "8" }],
                         },
                       ],
@@ -1090,8 +1095,11 @@ describe("generateCoachPlan", () => {
 
     expect(url).toBe("https://ai.test/v1/responses");
     expect(url).not.toContain("api.openai.com");
-    expect(body.model).toBe(config.models.chatSmart);
+    expect(body.model).toBe(config.models.plan);
     expect(plan.days).toHaveLength(1);
+    // The "why" survives generation and parsing.
+    expect(plan.rationale).toContain("full-body split");
+    expect(plan.days[0].rationale).toBe("Pressing strength for the upper body.");
   });
 });
 

@@ -106,6 +106,8 @@ export interface PlanExercise {
 export interface PlanDay {
   id: string;
   day_name: string;
+  /** The coach's one-line "why this day" (absent on manual/imported plans). */
+  rationale?: string | null;
   day_order: number;
   exercises: PlanExercise[];
 }
@@ -114,13 +116,17 @@ export interface WorkoutPlan {
   id: string;
   name: string;
   source: "manual" | "ai_parsed";
+  /** The coach's "why this program" summary (absent on manual/imported plans). */
+  rationale?: string | null;
   is_active: boolean;
   created_at: string;
   days: PlanDay[];
 }
 
 export interface ParsedPlanPreview {
-  days: { day_name: string; exercises: PlanExercise[] }[];
+  /** The coach's "why this program" summary. */
+  rationale?: string | null;
+  days: { day_name: string; rationale?: string | null; exercises: PlanExercise[] }[];
 }
 
 export interface PlanTodayExercise extends PlanExercise {
@@ -145,7 +151,9 @@ export interface PlanToday {
 export interface CreatePlanInput {
   name: string;
   source: "manual" | "ai_parsed";
-  days: { day_name: string; exercises: PlanExercise[] }[];
+  /** Omitted = leave the stored rationale untouched (it's coach-authored). */
+  rationale?: string | null;
+  days: { day_name: string; rationale?: string | null; exercises: PlanExercise[] }[];
   /** Defaults to true server-side; a duplicate sends false so a copy doesn't take over. */
   is_active?: boolean;
 }
@@ -335,7 +343,13 @@ export type CoachProposal =
       plan_name: string;
       name: string;
       source: "manual" | "ai_parsed";
-      days: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+      /** The coach's "why this program", carried through to the preview. */
+      rationale?: string;
+      days: {
+        day_name: string;
+        rationale?: string;
+        exercises: { name: string; sets: number; reps: string }[];
+      }[];
       summary: string;
     }
   | { kind: "plan_activate"; plan_id: string; plan_name: string }

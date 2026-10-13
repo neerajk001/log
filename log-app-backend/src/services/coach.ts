@@ -103,12 +103,16 @@ const PLAN_SYSTEM = `You design structured workout programs and return them as J
 
 Output ONLY a JSON object, no surrounding text and no markdown fences, matching exactly:
 {
+  "rationale": "string",
   "days": [
-    { "day_name": "string", "exercises": [ { "name": "string", "sets": number, "reps": "string", "weight_kg": number } ] }
+    { "day_name": "string", "rationale": "string", "exercises": [ { "name": "string", "sets": number, "reps": "string", "weight_kg": number } ] }
   ]
 }
 
 Rules:
+- Top-level "rationale": 2-3 sentences, plain and motivating, on why this split fits the
+  athlete's goal, experience and days per week. Speak to them ("you"), never about them.
+- Each day's "rationale": one short sentence on what the day trains and why it sits there.
 - Respect the athlete's available training days, experience, and equipment.
 - "day_name" is a label like "Push", "Pull", "Legs", "Upper", "Lower", "Full Body".
 - "reps" preserves notation as a string (e.g. "5", "8-12").
@@ -750,6 +754,10 @@ const COACH_TOOLS = [
       properties: {
         plan: { type: "string", description: "Plan name or id; omit for the active plan." },
         day_name: { type: "string", description: "The one day to change, e.g. 'Lower'." },
+        day_rationale: {
+          type: "string",
+          description: "New one-line why for day_name (optional).",
+        },
         exercises: {
           type: "array",
           description: "New exercises for day_name.",
@@ -770,6 +778,10 @@ const COACH_TOOLS = [
             type: "object",
             properties: {
               day_name: { type: "string" },
+              rationale: {
+                type: "string",
+                description: "One line on what this day trains and why.",
+              },
               exercises: {
                 type: "array",
                 items: {
@@ -787,6 +799,10 @@ const COACH_TOOLS = [
           },
         },
         name: { type: "string", description: "New plan name." },
+        rationale: {
+          type: "string",
+          description: "The plan's why-this-program summary (optional).",
+        },
         summary: { type: "string", description: "One short sentence for the athlete." },
       },
     },
@@ -1075,7 +1091,13 @@ export type CoachProposal =
       plan_name: string;
       name: string;
       source: string;
-      days: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+      /** The coach's "why this program", carried through to the preview. */
+      rationale?: string;
+      days: {
+        day_name: string;
+        rationale?: string;
+        exercises: { name: string; sets: number; reps: string }[];
+      }[];
       summary: string;
     }
   | { kind: "plan_activate"; plan_id: string; plan_name: string }
@@ -1126,8 +1148,15 @@ interface PlanWithDays {
   id: string;
   name: string;
   source: string;
+  rationale: string | null;
   isActive: boolean;
-  planDays: { id: string; dayName: string; dayOrder: number; exercises: unknown }[];
+  planDays: {
+    id: string;
+    dayName: string;
+    rationale: string | null;
+    dayOrder: number;
+    exercises: unknown;
+  }[];
 }
 
 /** Resolve a plan by exact id, exact name, or partial name; the active plan when no ref. */
@@ -1159,9 +1188,11 @@ function serializePlanSummary(plan: PlanWithDays) {
   return {
     id: plan.id,
     name: plan.name,
+    rationale: plan.rationale ?? null,
     is_active: plan.isActive,
     days: plan.planDays.map((d) => ({
       day_name: d.dayName,
+      rationale: d.rationale ?? null,
       exercises: d.exercises as unknown as { name: string; sets: number; reps: string }[],
     })),
   };
@@ -1537,12 +1568,17 @@ export async function executeCoachTool(
         const plan = await resolvePlan(userId, ref);
         if ("error" in plan) return plan;
 
-        const existingDays = plan.planDays.map((d) => ({
+        const existingDays: {
+          day_name: string;
+          rationale?: string;
+          exercises: { name: string; sets: number; reps: string }[];
+        }[] = plan.planDays.map((d) => ({
           day_name: d.dayName,
+          rationale: d.rationale ?? undefined,
           exercises: d.exercises as unknown as { name: string; sets: number; reps: string }[],
         }));
 
-        let nextDays: { day_name: string; exercises: { name: string; sets: number; reps: string }[] }[];
+        let nextDays: typeof existingDays;
         if (Array.isArray(args.days)) {
           nextDays = args.days as typeof nextDays;
         } else if (
@@ -1551,17 +1587,23 @@ export async function executeCoachTool(
           Array.isArray(args.exercises)
         ) {
           const target = args.day_name.trim();
-          const patched = {
-            day_name: target,
-            exercises: args.exercises as { name: string; sets: number; reps: string }[],
-          };
+          const exercises = args.exercises as { name: string; sets: number; reps: string }[];
+          const patchedRationale =
+            typeof args.day_rationale === "string" && args.day_rationale.trim()
+              ? args.day_rationale.trim().slice(0, 500)
+              : undefined;
           const idx = existingDays.findIndex(
             (d) => d.day_name.toLowerCase() === target.toLowerCase(),
           );
           nextDays =
             idx >= 0
-              ? existingDays.map((d, i) => (i === idx ? patched : d))
-              : [...existingDays, patched];
+              ? existingDays.map((d, i) =>
+                  // Keep the day's existing why unless the coach supplied a new one.
+                  i === idx
+                    ? { day_name: target, rationale: patchedRationale ?? d.rationale, exercises }
+                    : d,
+                )
+              : [...existingDays, { day_name: target, rationale: patchedRationale, exercises }];
         } else {
           return {
             error: "Provide day_name + exercises to change one day, or days to replace the whole plan.",
@@ -1574,6 +1616,10 @@ export async function executeCoachTool(
         }
         const newName =
           typeof args.name === "string" && args.name.trim() ? args.name.trim().slice(0, 200) : plan.name;
+        const rationale =
+          typeof args.rationale === "string" && args.rationale.trim()
+            ? args.rationale.trim().slice(0, 800)
+            : plan.rationale ?? undefined;
         const summary =
           typeof args.summary === "string" && args.summary.trim()
             ? args.summary.trim().slice(0, 300)
@@ -1585,6 +1631,7 @@ export async function executeCoachTool(
             plan_name: plan.name,
             name: newName,
             source: plan.source,
+            ...(rationale ? { rationale } : {}),
             days: parsed.data.days,
             summary,
           },
@@ -1976,6 +2023,8 @@ export async function runCoachChatStream(
   signal?: AbortSignal,
   dismissedMeal?: DismissedMeal,
 ): Promise<string> {
+  const turnStart = Date.now();
+  const stages: Record<string, number> = {};
   let session = sessionId
     ? await prisma.coachSession.findFirst({ where: { id: sessionId, userId } })
     : null;
@@ -2001,8 +2050,10 @@ export async function runCoachChatStream(
     session = await prisma.coachSession.update({ where: { id: session.id }, data: { agent } });
   }
   handlers.onSession?.(session.id);
+  stages.session = Date.now() - turnStart;
 
   // Route first, so the context can be built for the agent that will actually run.
+  const contextStart = Date.now();
   const agentId = routeAgent(message, agent);
   const [context, recent] = await Promise.all([
     buildAthleteContext(userId, today, agentId === "meal" ? "meal" : "full"),
@@ -2013,7 +2064,9 @@ export async function runCoachChatStream(
       select: { role: true, content: true, responseId: true },
     }),
   ]);
+  stages.context = Date.now() - contextStart;
 
+  const persistStart = Date.now();
   await prisma.coachMessage.create({
     data: { userId, sessionId: session.id, role: "user", content: message },
   });
@@ -2021,6 +2074,7 @@ export async function runCoachChatStream(
     where: { id: session.id },
     data: { updatedAt: new Date() },
   });
+  stages.persistUserMessage = Date.now() - persistStart;
 
   const { baseUrl, apiKey } = aiEndpoint();
   if (!apiKey) {
@@ -2067,6 +2121,17 @@ export async function runCoachChatStream(
   let totalOutput = 0;
   const usedTools: string[] = [];
   const startedAt = Date.now();
+  // Per-round and per-tool timings, so a slow meal turn can be traced to the
+  // model vs a lookup instead of guessed at.
+  const roundTimings: {
+    round: number;
+    ms: number;
+    ttftMs: number | null;
+    calls: string[];
+    inputTokens: number;
+    outputTokens: number;
+  }[] = [];
+  const toolTimings: { name: string; ms: number }[] = [];
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     if (signal?.aborted) break;
@@ -2084,23 +2149,37 @@ export async function runCoachChatStream(
     };
 
     let result: StreamRound;
+    const roundStart = Date.now();
+    let firstDeltaAt: number | null = null;
+    const onDelta = (delta: string) => {
+      if (firstDeltaAt == null) firstDeltaAt = Date.now();
+      handlers.onDelta(delta);
+    };
     try {
       result = await streamRound(
         baseUrl,
         apiKey,
         { ...baseBody, input, ...(previousId ? { previous_response_id: previousId } : {}) },
         signal,
-        handlers.onDelta,
+        onDelta,
       );
     } catch (err) {
       // Chaining can fail if the stored response is gone — retry once from full history.
       if (round === 0 && previousId) {
         previousId = null;
-        result = await streamRound(baseUrl, apiKey, { ...baseBody, input: convo }, signal, handlers.onDelta);
+        result = await streamRound(baseUrl, apiKey, { ...baseBody, input: convo }, signal, onDelta);
       } else {
         throw err;
       }
     }
+    roundTimings.push({
+      round,
+      ms: Date.now() - roundStart,
+      ttftMs: firstDeltaAt == null ? null : firstDeltaAt - roundStart,
+      calls: result.calls.map((c) => c.name),
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
+    });
 
     full += result.text;
     if (result.responseId) lastResponseId = result.responseId;
@@ -2131,12 +2210,16 @@ export async function runCoachChatStream(
 
     // Independent lookups run together: a turn that wants the day's meals *and* a food
     // lookup shouldn't pay for them one after the other.
+    const toolStart = Date.now();
     const settled = await Promise.all(
       result.calls.map(async (call) => {
+        const callStart = Date.now();
         const output = await executeCoachTool(userId, call.name, call.args, today);
+        toolTimings.push({ name: call.name, ms: Date.now() - callStart });
         return { call, output, proposal: extractProposal(output) };
       }),
     );
+    stages.tools = (stages.tools ?? 0) + (Date.now() - toolStart);
 
     const outputs: unknown[] = [];
     for (const { call, output, proposal } of settled) {
@@ -2176,7 +2259,12 @@ export async function runCoachChatStream(
     JSON.stringify({
       model,
       agent: agentId,
-      ms: Date.now() - startedAt,
+      modelMs: Date.now() - startedAt,
+      totalMs: Date.now() - turnStart,
+      preModelMs: startedAt - turnStart,
+      stages,
+      rounds: roundTimings,
+      toolCalls: toolTimings,
       chained: Boolean(storedResponseId),
       tools: usedTools,
       contextChars: context.length,
@@ -2283,17 +2371,21 @@ export async function generateCoachPlan(
     .filter(Boolean)
     .join("\n\n");
 
+  // Reasoning tokens share `max_output_tokens`, so leave headroom for both the
+  // model's thinking and the plan JSON — a reply cut off mid-object fails the schema.
   const raw = await callModel(
     instructions,
     [{ role: "user", content: [{ type: "input_text", text: "Create the program as JSON." }] }],
-    2500,
-    { json: true, model: config.models.chatSmart },
+    6000,
+    { json: true, model: config.models.plan },
   );
 
   try {
     return parsePlanOutput(raw);
   } catch (err) {
     if (err instanceof PlanParseError) {
+      // The model's raw reply is the diagnosis; the athlete gets plain copy.
+      console.error("[coach] plan generation failed:", err.message, "raw:", raw.slice(0, 500));
       throw new AppError(422, "PLAN_GENERATION_FAILED", err.message);
     }
     throw err;

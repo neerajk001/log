@@ -92,10 +92,12 @@ export function ProposalCard({
       editingPlanId: proposal.kind === "plan_update" ? proposal.plan_id : undefined,
       name: proposal.kind === "plan_update" ? proposal.name : "",
       source: proposal.kind === "plan_update" ? proposal.source : "manual",
+      rationale: proposal.kind === "plan_update" ? proposal.rationale : undefined,
       days:
         proposal.kind === "plan_update"
           ? proposal.days.map((d) => ({
               day_name: d.day_name,
+              rationale: d.rationale,
               exercises: d.exercises.map((e) => ({
                 name: e.name,
                 sets: String(e.sets),

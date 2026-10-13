@@ -1,17 +1,20 @@
 import * as WebBrowser from "expo-web-browser";
 import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { tokenCache } from "@clerk/clerk-expo/token-cache";
-import { Stack, useRouter, useSegments } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { PostHogProvider, usePostHog } from "posthog-react-native";
 import { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, View } from "react-native";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeContext";
 import { loadHapticsPref } from "../src/hooks/useHaptics";
 import { useMe } from "../src/hooks/useMe";
 import { isDevPreview } from "../src/state/onboarding";
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+const POSTHOG_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? "";
+const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST;
 
 // Hold the splash screen until the persisted theme preference has loaded,
 // so the app never flashes the wrong theme on cold start.
@@ -109,9 +112,37 @@ function ThemedRoot() {
   return (
     <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
       <StatusBar style={isDark ? "light" : "dark"} />
+      <AndroidBackToExit />
       <AuthGate />
     </ClerkProvider>
   );
+}
+
+function PostHogScreenTracker() {
+  const posthog = usePostHog();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (pathname) posthog.screen(pathname);
+  }, [posthog, pathname]);
+
+  return null;
+}
+
+function AndroidBackToExit() {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (router.canGoBack()) return false;
+      BackHandler.exitApp();
+      return true;
+    });
+    return () => sub.remove();
+  }, [router]);
+
+  return null;
 }
 
 export default function RootLayout() {
@@ -122,7 +153,20 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
-      <ThemedRoot />
+      <PostHogProvider
+        apiKey={POSTHOG_KEY}
+        autocapture={{ captureScreens: false }}
+        options={{
+          host: POSTHOG_HOST,
+          enableSessionReplay: true,
+          errorTracking: {
+            autocapture: { uncaughtExceptions: true, unhandledRejections: true },
+          },
+        }}
+      >
+        <PostHogScreenTracker />
+        <ThemedRoot />
+      </PostHogProvider>
     </ThemeProvider>
   );
 }

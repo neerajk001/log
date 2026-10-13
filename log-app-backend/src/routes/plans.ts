@@ -59,11 +59,13 @@ function serializePlan(plan: {
   id: string;
   name: string;
   source: string;
+  rationale: string | null;
   isActive: boolean;
   createdAt: Date;
   planDays: {
     id: string;
     dayName: string;
+    rationale: string | null;
     dayOrder: number;
     exercises: Prisma.JsonValue;
   }[];
@@ -72,11 +74,13 @@ function serializePlan(plan: {
     id: plan.id,
     name: plan.name,
     source: plan.source,
+    rationale: plan.rationale ?? null,
     is_active: plan.isActive,
     created_at: plan.createdAt.toISOString(),
     days: plan.planDays.map((day) => ({
       id: day.id,
       day_name: day.dayName,
+      rationale: day.rationale ?? null,
       day_order: day.dayOrder,
       exercises: day.exercises as unknown as PlanExercise[],
     })),
@@ -151,7 +155,7 @@ router.post(
   validate(createPlanSchema),
   async (req, res: Response, next: NextFunction) => {
     try {
-      const { name, source, days, is_active } = req.body as CreatePlanInput;
+      const { name, source, rationale, days, is_active } = req.body as CreatePlanInput;
       const activate = is_active ?? true;
 
       const plan = await prisma.$transaction(async (tx) => {
@@ -167,10 +171,12 @@ router.post(
             userId: req.userId,
             name,
             source,
+            rationale: rationale ?? null,
             isActive: activate,
             planDays: {
               create: days.map((day, index) => ({
                 dayName: day.day_name,
+                rationale: day.rationale ?? null,
                 dayOrder: index + 1,
                 exercises: day.exercises as unknown as Prisma.InputJsonValue,
               })),
@@ -291,7 +297,7 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const planId = req.params.id as string;
-      const { name, source, days } = req.body as CreatePlanInput;
+      const { name, source, rationale, days } = req.body as CreatePlanInput;
 
       const existing = await prisma.workoutPlan.findFirst({
         where: { id: planId, userId: req.userId },
@@ -310,7 +316,8 @@ router.put(
 
         const updated = await tx.workoutPlan.updateMany({
           where: { id: planId, userId: req.userId },
-          data: { name, source },
+          // `rationale` is left untouched when the payload omits it (it's coach-authored).
+          data: { name, source, rationale },
         });
         if (updated.count === 0) {
           throw new AppError(404, "NOT_FOUND", "Plan not found");
@@ -327,6 +334,8 @@ router.put(
         for (const [index, day] of days.entries()) {
           const data = {
             dayName: day.day_name,
+            // Omitted = keep whatever the day already had.
+            rationale: day.rationale,
             dayOrder: index + 1,
             exercises: day.exercises as unknown as Prisma.InputJsonValue,
           };

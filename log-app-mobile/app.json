@@ -19,7 +19,10 @@
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.neerajkk01.log"
+      "package": "com.neerajkk01.log",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -47,7 +50,9 @@
           "photosPermission": "Log uses your photos so you can add a meal or a check-in picture.",
           "cameraPermission": "Log uses the camera so you can snap a meal or a check-in photo."
         }
-      ]
+      ],
+      "expo-localization",
+      "posthog-react-native/expo"
     ],
     "experiments": {
       "typedRoutes": true,

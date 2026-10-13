@@ -15,6 +15,8 @@ export interface EditableExercise {
 
 export interface EditableDay {
   day_name: string;
+  /** The coach's one-line "why this day". Carried through edits; not editable here. */
+  rationale?: string;
   exercises: EditableExercise[];
 }
 

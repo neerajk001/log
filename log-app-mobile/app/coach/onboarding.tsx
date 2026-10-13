@@ -67,10 +67,15 @@ function orderGoals(selected: string[]): string[] {
 }
 
 function toEditableDays(
-  days: { day_name: string; exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[] }[],
+  days: {
+    day_name: string;
+    rationale?: string | null;
+    exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[];
+  }[],
 ): EditableDay[] {
   return days.map((d) => ({
     day_name: d.day_name,
+    rationale: d.rationale ?? undefined,
     exercises: d.exercises.map((e) => ({
       name: e.name,
       sets: String(e.sets),
@@ -82,10 +87,15 @@ function toEditableDays(
 
 /** Optional plan-builder quiz — the AI coach uses these answers to write your plan. */
 export default function CoachOnboardingScreen() {
-  const { profile, loading, save } = useCoachProfile();
+  const { profile, loading, loaded, save } = useCoachProfile();
   const styles = useStyles();
 
-  if (loading) {
+  // Only the first load is worth a full-screen spinner. "Generate my plan" saves
+  // the answers first, and that write invalidates the coach cache, re-running the
+  // hook — so gating on `loading` alone unmounted the wizard mid-flow and sent the
+  // athlete back to the first question with their answers gone. A background
+  // refresh (loading, but already loaded once) must not replace the wizard.
+  if (loading && !loaded) {
     return (
       <View style={styles.container}>
         <View style={styles.padded}>
@@ -166,7 +176,12 @@ function PlanBuilderWizard({
         goal: goals.length ? orderGoals(goals).join(", ") : undefined,
         notes: notes.trim() || undefined,
       });
-      setPendingPlan({ name: "AI Coach Plan", source: "ai_parsed", days: toEditableDays(result.days) });
+      setPendingPlan({
+        name: "AI Coach Plan",
+        source: "ai_parsed",
+        rationale: result.rationale ?? undefined,
+        days: toEditableDays(result.days),
+      });
       router.navigate("/plan/preview" as never);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't generate a plan. Try again.");

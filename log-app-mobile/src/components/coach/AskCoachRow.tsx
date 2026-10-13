@@ -17,12 +17,15 @@ export function AskCoachRow({
   question,
   hint,
   icon = "sparkles-outline",
+  compact = false,
 }: {
   agent: AgentId;
   label: string;
   question?: string;
   hint?: string;
   icon?: IoniconName;
+  /** A slim text link instead of a full bordered row — for nesting inside a card. */
+  compact?: boolean;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -31,16 +34,34 @@ export function AskCoachRow({
   // Hidden when the athlete turned the AI coach off during onboarding.
   if (profile?.ai_coach_enabled === false) return null;
 
+  const open = () =>
+    router.navigate({
+      pathname: "/coach/new",
+      params: { agent, ...(question ? { q: question } : {}) },
+    } as never);
+
+  if (compact) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={open}
+        hitSlop={8}
+        style={({ pressed }) => [styles.compact, pressed && styles.pressed]}
+      >
+        <Ionicons name={icon} size={15} color={colors.primary} />
+        <Text style={styles.compactText} numberOfLines={1}>
+          {label}
+        </Text>
+      </Pressable>
+    );
+  }
+
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={() =>
-        router.navigate({
-          pathname: "/coach/new",
-          params: { agent, ...(question ? { q: question } : {}) },
-        } as never)
-      }
+      onPress={open}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <IconBadge name={icon} bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
@@ -71,5 +92,7 @@ const useStyles = makeUseStyles((t) =>
     },
     pressed: { opacity: 0.85 },
     text: { flex: 1, gap: 2 },
+    compact: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", paddingVertical: 4 },
+    compactText: { flexShrink: 1, fontSize: 13, fontWeight: "600", color: t.colors.primary },
   }),
 );
