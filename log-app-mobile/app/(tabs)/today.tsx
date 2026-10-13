@@ -583,7 +583,7 @@ const useStyles = makeUseStyles((t) =>
     },
     backTodayText: { fontSize: 13, fontWeight: "600", color: t.colors.primary },
 
-    activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderColor: t.colors.cardBorder },
     activityText: { flex: 1, gap: 2 },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },

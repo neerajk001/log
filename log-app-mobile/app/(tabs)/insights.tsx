@@ -795,7 +795,7 @@ const useStyles = makeUseStyles((t) =>
       backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
+      borderColor: t.colors.cardBorder,
       padding: spacing.md,
     },
     verdictText: { flex: 1, gap: 2 },

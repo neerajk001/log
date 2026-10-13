@@ -87,7 +87,7 @@ const useStyles = makeUseStyles((t) =>
       backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
+      borderColor: t.colors.cardBorder,
       padding: spacing.md,
     },
     pressed: { opacity: 0.85 },

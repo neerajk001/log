@@ -248,7 +248,7 @@ export function NutritionCard({
 
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
-    card: { gap: spacing.lg, borderColor: t.colors.border },
+    card: { gap: spacing.lg, borderColor: t.colors.cardBorder },
     header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     title: { fontSize: 17, fontWeight: "700", color: t.colors.text },

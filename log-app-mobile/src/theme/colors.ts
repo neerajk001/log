@@ -2,13 +2,18 @@
  * Theme palettes. Every scheme exposes the SAME token keys (`Palette`), so
  * components never branch on theme — they read tokens via `useTheme()`.
  *
- * - `light`: the current light palette (unchanged).
- * - `dark`: soft charcoal dark, aligned with `design-system.md`
- *   (`graphite` bg, `chalk` text, `rustSoft` accent-on-dark).
- * - `trueBlack`: pure-black backgrounds for max contrast / OLED.
+ * The app family is the mint-on-black brand system first established on the
+ * onboarding screens (`src/theme/brand.ts`):
  *
- * Rules carried over from the design system: the rust/orange family is the
- * only action color; green is reserved for positive-trend data.
+ * - `dark`: the brand surface — near-black "ink" backgrounds, mint action
+ *   color, warm off-white text. This is the canonical look.
+ * - `trueBlack`: the same family with pure-black backgrounds for OLED.
+ * - `light`: a light counterpart for daylight use; the action color stays in
+ *   the green family but darkens so text/icons remain legible on white.
+ *
+ * Rules carried over from the design system: a single accent (mint in the
+ * dark family, green on light) drives actions, navigation and progress;
+ * accent hues (blue/purple/amber/…) are reserved for metric badges and tags.
  */
 
 export type Scheme = "light" | "dark" | "trueBlack";
@@ -18,61 +23,67 @@ export type ThemePreference = "system" | Scheme;
 
 export const THEME_STORAGE_KEY = "log.theme-preference";
 
+/** Mint brand constants shared by the dark family. */
+const MINT = "#BEE3B6";
+const ON_MINT = "#0C150C";
+
 const light = {
-  // Surfaces
-  bg: "#F6F6F4",
+  // Surfaces — warm off-white with a faint green cast
+  bg: "#F4F6F2",
   surface: "#FFFFFF",
-  surfaceAlt: "#F1F2F4",
-  border: "#EAEAEC",
-  borderStrong: "#DEDFE2",
+  surfaceAlt: "#EDF1EA",
+  border: "#E3E8DE",
+  borderStrong: "#D1D8CB",
+  /** Minimal card outline — a low-opacity tint of the action color. */
+  cardBorder: "rgba(47,133,90,0.22)",
 
   // Text
-  text: "#14161A",
-  textDim: "#8A8F98",
-  textMuted: "#B4B8BF",
+  text: "#151A16",
+  textDim: "#68756D",
+  textMuted: "#9BA69E",
   onPrimary: "#FFFFFF",
 
-  // Brand
-  primary: "#F0552A",
-  primarySoft: "#FDECE6",
-  primarySoftBorder: "#F8D6C8",
+  // Brand — green action color for daylight contrast
+  primary: "#2F855A",
+  primarySoft: "#E4F2E9",
+  primarySoftBorder: "#C6E2D2",
 
   // Semantic
-  success: "#22A06B",
-  successSoft: "#E8F7EF",
+  success: "#2F9E68",
+  successSoft: "#E4F5EC",
   danger: "#E5484D",
   dangerSoft: "#FDECEC",
-  warning: "#E08A00",
-  warningSoft: "#FDF3E2",
+  warning: "#D98A00",
+  warningSoft: "#FBF2E0",
 
   // Accent pairs (icon badges, metrics)
   blue: "#3B82F6",
   blueSoft: "#E8F1FE",
-  orange: "#F0552A",
-  orangeSoft: "#FEECE8",
-  green: "#22A06B",
-  greenSoft: "#E8F7EF",
+  orange: "#E07A3F",
+  orangeSoft: "#FBEDE4",
+  green: "#2F9E68",
+  greenSoft: "#E4F5EC",
   purple: "#7C5CFC",
   purpleSoft: "#EFEBFE",
   pink: "#EC4899",
   pinkSoft: "#FCE9F3",
   teal: "#0E9AA5",
   tealSoft: "#E4F5F7",
-  amber: "#E08A00",
-  amberSoft: "#FDF3E2",
+  amber: "#D98A00",
+  amberSoft: "#FBF2E0",
 
   // Chart palette
-  chartBar: "#C7D2FE",
-  chartBarActive: "#4F7BF7",
-  chart1: "#6366F1",
-  chart2: "#8B5CF6",
+  chartBar: "#CFE3D6",
+  chartBarActive: "#2F855A",
+  chart1: "#2F855A",
+  chart2: "#7C5CFC",
   chart3: "#3B82F6",
-  chart4: "#34C759",
+  chart4: "#0E9AA5",
   chart5: "#EC4899",
-  chartTrack: "#EEF0F4",
+  chartTrack: "#E8EDE5",
 
   // Tags
-  tagNeutralBg: "#EEF2F7",
+  tagNeutralBg: "#EDF1EA",
   tagNeutralText: "#64748B",
 
   // Misc
@@ -87,61 +98,63 @@ export type Palette = {
 export const lightColors: Palette = { ...light };
 
 export const darkColors: Palette = {
-  // Surfaces — graphite family from design-system.md
-  bg: "#15171B",
-  surface: "#1E2227",
-  surfaceAlt: "#262B32",
-  border: "#2C313A",
-  borderStrong: "#3D434E",
+  // Surfaces — the brand "ink" family
+  bg: "#0A0B0B",
+  surface: "#15191B",
+  surfaceAlt: "#1E2325",
+  border: "#242B2D",
+  borderStrong: "#394143",
+  /** Minimal card outline — a low-opacity tint of the mint action color. */
+  cardBorder: "rgba(190,227,182,0.16)",
 
-  // Text — chalk family; muted maps to `steel`
-  text: "#ECE8E0",
-  textDim: "#9A978F",
-  textMuted: "#5B6470",
-  onPrimary: "#FFFFFF",
+  // Text — warm off-white, dimmed greys
+  text: "#F2F3F0",
+  textDim: "#A9B0AE",
+  textMuted: "#7C8482",
+  onPrimary: ON_MINT,
 
-  // Brand — rustSoft stays readable on dark fills of primary
-  primary: "#F0552A",
-  primarySoft: "#3A2117",
-  primarySoftBorder: "#5C3323",
+  // Brand — mint action color, tinted translucent surfaces
+  primary: MINT,
+  primarySoft: "rgba(190,227,182,0.12)",
+  primarySoftBorder: "rgba(190,227,182,0.50)",
 
-  // Semantic — brightened text hues on tinted dark surfaces
-  success: "#3DD68C",
-  successSoft: "#0F2E22",
-  danger: "#FF6369",
-  dangerSoft: "#3A1D1F",
-  warning: "#F5A524",
-  warningSoft: "#33230A",
+  // Semantic — mint for positive, muted coral/amber for alerts
+  success: MINT,
+  successSoft: "rgba(190,227,182,0.12)",
+  danger: "#F08A7A",
+  dangerSoft: "rgba(240,138,122,0.14)",
+  warning: "#E9C46A",
+  warningSoft: "rgba(233,196,106,0.14)",
 
   // Accent pairs
-  blue: "#60A5FA",
-  blueSoft: "#16294D",
-  orange: "#F0703F",
-  orangeSoft: "#3A2117",
-  green: "#3DD68C",
-  greenSoft: "#0F2E22",
-  purple: "#9D86FF",
-  purpleSoft: "#241D4D",
-  pink: "#F472B6",
-  pinkSoft: "#3B1A2E",
-  teal: "#2DD4BF",
-  tealSoft: "#0C2B2E",
-  amber: "#F5A524",
-  amberSoft: "#33230A",
+  blue: "#5B9BF5",
+  blueSoft: "rgba(91,155,245,0.14)",
+  orange: "#F0954A",
+  orangeSoft: "rgba(240,149,74,0.14)",
+  green: MINT,
+  greenSoft: "rgba(190,227,182,0.12)",
+  purple: "#9B86F5",
+  purpleSoft: "rgba(155,134,245,0.14)",
+  pink: "#F58FB4",
+  pinkSoft: "rgba(245,143,180,0.14)",
+  teal: "#5BD6C4",
+  tealSoft: "rgba(91,214,196,0.14)",
+  amber: "#E9C46A",
+  amberSoft: "rgba(233,196,106,0.14)",
 
   // Chart palette
-  chartBar: "#3A4356",
-  chartBarActive: "#6B93FF",
-  chart1: "#818CF8",
-  chart2: "#A78BFA",
-  chart3: "#60A5FA",
-  chart4: "#3DD68C",
-  chart5: "#F472B6",
-  chartTrack: "#23272E",
+  chartBar: "#3A4245",
+  chartBarActive: MINT,
+  chart1: MINT,
+  chart2: "#9B86F5",
+  chart3: "#5B9BF5",
+  chart4: "#5BD6C4",
+  chart5: "#F58FB4",
+  chartTrack: "#242B2D",
 
   // Tags
-  tagNeutralBg: "#23272E",
-  tagNeutralText: "#94A3B8",
+  tagNeutralBg: "#1E2325",
+  tagNeutralText: "#A9B0AE",
 
   // Misc
   overlay: "rgba(0,0,0,0.6)",
@@ -155,55 +168,57 @@ export const trueBlackColors: Palette = {
   surfaceAlt: "#161618",
   border: "#232326",
   borderStrong: "#333336",
+  /** Minimal card outline — a low-opacity tint of the mint action color. */
+  cardBorder: "rgba(190,227,182,0.16)",
 
   // Text — neutral whites for max contrast
   text: "#F5F5F4",
   textDim: "#A8A8AE",
   textMuted: "#6E6E73",
-  onPrimary: "#FFFFFF",
+  onPrimary: ON_MINT,
 
-  // Brand
-  primary: "#F0552A",
-  primarySoft: "#2C1A12",
-  primarySoftBorder: "#4A2A1D",
+  // Brand — same mint action color on true black
+  primary: MINT,
+  primarySoft: "rgba(190,227,182,0.12)",
+  primarySoftBorder: "rgba(190,227,182,0.50)",
 
   // Semantic
-  success: "#3DD68C",
-  successSoft: "#0B241B",
-  danger: "#FF6369",
-  dangerSoft: "#2E1618",
-  warning: "#F5A524",
-  warningSoft: "#291C08",
+  success: MINT,
+  successSoft: "rgba(190,227,182,0.12)",
+  danger: "#F08A7A",
+  dangerSoft: "rgba(240,138,122,0.14)",
+  warning: "#E9C46A",
+  warningSoft: "rgba(233,196,106,0.14)",
 
   // Accent pairs
-  blue: "#60A5FA",
-  blueSoft: "#101F3A",
-  orange: "#F0703F",
-  orangeSoft: "#2C1A12",
-  green: "#3DD68C",
-  greenSoft: "#0B241B",
-  purple: "#9D86FF",
-  purpleSoft: "#1B1640",
-  pink: "#F472B6",
-  pinkSoft: "#2E1424",
-  teal: "#2DD4BF",
-  tealSoft: "#082225",
-  amber: "#F5A524",
-  amberSoft: "#291C08",
+  blue: "#5B9BF5",
+  blueSoft: "rgba(91,155,245,0.14)",
+  orange: "#F0954A",
+  orangeSoft: "rgba(240,149,74,0.14)",
+  green: MINT,
+  greenSoft: "rgba(190,227,182,0.12)",
+  purple: "#9B86F5",
+  purpleSoft: "rgba(155,134,245,0.14)",
+  pink: "#F58FB4",
+  pinkSoft: "rgba(245,143,180,0.14)",
+  teal: "#5BD6C4",
+  tealSoft: "rgba(91,214,196,0.14)",
+  amber: "#E9C46A",
+  amberSoft: "rgba(233,196,106,0.14)",
 
   // Chart palette
   chartBar: "#2E2E33",
-  chartBarActive: "#6B93FF",
-  chart1: "#818CF8",
-  chart2: "#A78BFA",
-  chart3: "#60A5FA",
-  chart4: "#3DD68C",
-  chart5: "#F472B6",
+  chartBarActive: MINT,
+  chart1: MINT,
+  chart2: "#9B86F5",
+  chart3: "#5B9BF5",
+  chart4: "#5BD6C4",
+  chart5: "#F58FB4",
   chartTrack: "#1A1A1D",
 
   // Tags
   tagNeutralBg: "#1A1A1D",
-  tagNeutralText: "#94A3B8",
+  tagNeutralText: "#A8A8AE",
 
   // Misc
   overlay: "rgba(0,0,0,0.7)",

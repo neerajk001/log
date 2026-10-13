@@ -121,7 +121,7 @@ export function TodaysWorkoutCard({
 
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
-    card: { overflow: "hidden", borderColor: t.colors.border },
+    card: { overflow: "hidden", borderColor: t.colors.cardBorder },
     top: {
       flexDirection: "row",
       alignItems: "center",

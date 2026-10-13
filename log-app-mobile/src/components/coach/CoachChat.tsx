@@ -369,7 +369,7 @@ const useStyles = makeUseStyles((t) =>
     proposals: { gap: spacing.sm, alignSelf: "stretch" },
     bubble: { maxWidth: "84%", borderRadius: radii.lg, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: 4 },
     bubbleMine: { backgroundColor: t.colors.primary },
-    bubbleTheirs: { backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.border },
+    bubbleTheirs: { backgroundColor: t.colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: t.colors.cardBorder },
     bubbleTextMine: { color: t.colors.onPrimary, lineHeight: 21 },
     bubbleTextTheirs: { color: t.colors.text, lineHeight: 21 },
     paragraphGap: { marginTop: spacing.md },

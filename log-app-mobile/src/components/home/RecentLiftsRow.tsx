@@ -72,7 +72,7 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     section: { marginTop: spacing.xxl },
     row: { gap: spacing.sm, paddingVertical: 2 },
-    liftCard: { width: 112, gap: 2, padding: spacing.md },
+    liftCard: { width: 112, gap: 2, padding: spacing.md, borderColor: t.colors.cardBorder },
     liftName: { color: t.colors.textDim },
     liftCaption: { color: t.colors.textMuted },
   }),

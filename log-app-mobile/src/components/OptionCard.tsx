@@ -89,7 +89,7 @@ const useStyles = makeUseStyles((t) =>
       backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
+      borderColor: t.colors.cardBorder,
     },
     text: { flex: 1, gap: 2 },
     subtitle: { color: t.colors.textDim },

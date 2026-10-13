@@ -105,7 +105,7 @@ const useStyles = makeUseStyles((t) =>
       paddingVertical: spacing.lg,
       borderRadius: radii.lg,
       borderWidth: 1,
-      borderColor: t.colors.border,
+      borderColor: t.colors.cardBorder,
       backgroundColor: t.colors.surface,
     },
     sexCardActive: { borderColor: t.colors.primary, backgroundColor: t.colors.primary },
