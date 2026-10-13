@@ -55,8 +55,12 @@ function AuthGate() {
     if (meLoading && !profile) return;
 
     if (profile?.onboarded_at == null) {
-      // `welcome` is allowed so the dev shortcuts in Settings can preview it.
-      if (!inOnboarding || step === "") {
+      // Dev-only preview: the Settings shortcuts may walk the whole flow.
+      if (__DEV__ && isDevPreview() && inOnboarding) return;
+      // The setup steps are basics → appearance → plan. The pre-auth hero and
+      // carousel (welcome / intro / account) hand over here once signed in.
+      const setupSteps = ["basics", "appearance", "plan"];
+      if (!inOnboarding || !setupSteps.includes(step)) {
         router.replace("/onboarding/basics" as never);
       }
       return;

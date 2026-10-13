@@ -51,7 +51,11 @@ export default function BasicsScreen() {
               onPress={() => setSex(option.value)}
               style={[styles.sexCard, active && styles.sexCardActive]}
             >
-              <Ionicons name={option.icon} size={22} color={active ? colors.primary : colors.textDim} />
+              <Ionicons
+                name={option.icon}
+                size={22}
+                color={active ? colors.onPrimary : colors.textDim}
+              />
               <Text style={[typography.body, active && styles.sexLabelActive]}>{option.label}</Text>
             </Pressable>
           );
@@ -104,8 +108,8 @@ const useStyles = makeUseStyles((t) =>
       borderColor: t.colors.border,
       backgroundColor: t.colors.surface,
     },
-    sexCardActive: { borderColor: t.colors.primary, backgroundColor: t.colors.primarySoft },
-    sexLabelActive: { color: t.colors.primary, fontWeight: "700" },
+    sexCardActive: { borderColor: t.colors.primary, backgroundColor: t.colors.primary },
+    sexLabelActive: { color: t.colors.onPrimary, fontWeight: "700" },
     row: { flexDirection: "row", gap: spacing.sm },
     flex: { flex: 1 },
   }),

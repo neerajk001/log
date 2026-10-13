@@ -12,6 +12,7 @@ import {
   type Scheme,
   type ThemePreference,
 } from "./colors";
+import { brandPalette } from "./brand";
 import { makeTypography, type TypographyScale } from "./typography";
 
 export interface Theme {
@@ -92,6 +93,26 @@ export function useTheme(): ThemeContextValue {
   const theme = use(ThemeContext);
   if (!theme) throw new Error("useTheme must be used inside <ThemeProvider>");
   return theme;
+}
+
+/**
+ * Repaints a subtree in the onboarding brand palette (mint on black). Every
+ * palette key is filled in, so anything using `useTheme()`/`makeUseStyles()`
+ * inside renders in brand colours untouched.
+ */
+export function BrandThemeProvider({ children }: { children: ReactNode }) {
+  const theme = useTheme();
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      ...theme,
+      scheme: "dark",
+      colors: brandPalette,
+      typography: makeTypography(brandPalette),
+      isDark: true,
+    }),
+    [theme],
+  );
+  return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 
 /**
