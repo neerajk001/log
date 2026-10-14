@@ -89,6 +89,14 @@ dayOrder = (whole days since the plan's start date) mod (number of plan days) + 
 
 This is a pure function with no I/O and is unit-testable.
 
+The rotation is only a *default*. `GET /api/plans/:id/today` first calls
+`resolveTrainedPlanDay` with that date's logged sets: if the athlete swapped a
+day mid-session (trained Legs on a Push day), the card and Lift screen show the
+day they actually trained. Sets logged from a plan exercise carry their
+`plan_day_id`, which decides it; free-typed quick logs fall back to matching
+exercise names. Nothing logged → the rotated day stands. The coach's own view of
+the schedule keeps using `resolvePlanDayForDate` directly.
+
 ## Environment variables (backend)
 
 ```

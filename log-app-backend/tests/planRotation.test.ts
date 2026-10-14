@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolvePlanDayForDate, type PlanDayLike } from "../src/services/planRotation";
+import {
+  resolvePlanDayForDate,
+  resolveTrainedPlanDay,
+  type PlanDayLike,
+} from "../src/services/planRotation";
 import { matchPlanDayIds } from "../src/services/planDays";
 
 function days(count: number): PlanDayLike[] {
@@ -44,6 +48,66 @@ describe("resolvePlanDayForDate", () => {
 
   it("returns null when the plan has no days", () => {
     expect(resolvePlanDayForDate(localDate("2026-10-01"), [], localDate("2026-10-02"))).toBeNull();
+  });
+});
+
+/**
+ * The calendar rotation is only a default: once the athlete logs a set, the day they
+ * actually trained should win so the Today card opens the right session for logging.
+ */
+describe("resolveTrainedPlanDay", () => {
+  const plan = [
+    { id: "push", dayOrder: 1, exerciseNames: ["Barbell Bench Press", "Overhead Press"] },
+    { id: "pull", dayOrder: 2, exerciseNames: ["Deadlift", "Barbell Row"] },
+    { id: "legs", dayOrder: 3, exerciseNames: ["Barbell Back Squat", "Leg Press"] },
+  ];
+
+  it("matches the plan day the logged sets were attributed to", () => {
+    expect(
+      resolveTrainedPlanDay(plan, [
+        { exerciseName: "Barbell Back Squat", planDayId: "legs" },
+        { exerciseName: "Leg Press", planDayId: "legs" },
+      ])?.id,
+    ).toBe("legs");
+  });
+
+  it("picks the day with the most attributed sets", () => {
+    expect(
+      resolveTrainedPlanDay(plan, [
+        { exerciseName: "Deadlift", planDayId: "pull" },
+        { exerciseName: "Barbell Back Squat", planDayId: "legs" },
+        { exerciseName: "Leg Press", planDayId: "legs" },
+      ])?.id,
+    ).toBe("legs");
+  });
+
+  it("falls back to exercise names for quick logs with no plan day", () => {
+    expect(
+      resolveTrainedPlanDay(plan, [
+        { exerciseName: "barbell back squat", planDayId: null },
+        { exerciseName: "Leg Press", planDayId: null },
+      ])?.id,
+    ).toBe("legs");
+  });
+
+  it("ignores name matches when any set carries a plan day", () => {
+    expect(
+      resolveTrainedPlanDay(plan, [
+        { exerciseName: "Barbell Bench Press", planDayId: null },
+        { exerciseName: "Overhead Press", planDayId: null },
+        { exerciseName: "Deadlift", planDayId: "pull" },
+      ])?.id,
+    ).toBe("pull");
+  });
+
+  it("returns null when nothing logged matches a plan day", () => {
+    expect(
+      resolveTrainedPlanDay(plan, [{ exerciseName: "Rowing Machine", planDayId: null }]),
+    ).toBeNull();
+  });
+
+  it("returns null when nothing was logged", () => {
+    expect(resolveTrainedPlanDay(plan, [])).toBeNull();
   });
 });
 

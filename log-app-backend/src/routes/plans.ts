@@ -11,7 +11,7 @@ import {
     parsePlanText,
     PlanParseError,
 } from "../services/planParser";
-import { resolvePlanDayForDate } from "../services/planRotation";
+import { resolvePlanDayForDate, resolveTrainedPlanDay } from "../services/planRotation";
 import { matchPlanDayIds } from "../services/planDays";
 import {
     createPlanSchema,
@@ -53,6 +53,10 @@ interface PlanExercise {
   sets: number;
   reps: string;
   weight_kg?: number;
+}
+
+function planExerciseNames(exercises: Prisma.JsonValue): string[] {
+  return ((exercises as unknown as PlanExercise[]) ?? []).map((e) => e.name);
 }
 
 function serializePlan(plan: {
@@ -237,28 +241,31 @@ router.get(
         return;
       }
 
-      const day = resolvePlanDayForDate(
+      const rotatedDay = resolvePlanDayForDate(
         plan.createdAt,
         plan.planDays,
         new Date(`${scopeDate}T00:00:00Z`),
       );
-      if (!day) {
+      if (!rotatedDay) {
         res.json({ plan_id: plan.id, plan_name: plan.name, day: null });
         return;
       }
 
-      const exercises = day.exercises as unknown as PlanExercise[];
-      const exerciseNames = exercises.map((e) => e.name);
-
+      // Every set logged that date, not just the ones the rotation expects — so a day
+      // the athlete swapped mid-session (Legs on a Push day) still shows as Legs.
       const logged = await prisma.liftLog.findMany({
-        where: {
-          userId: req.userId,
-          date: new Date(scopeDate),
-          exerciseName: { in: exerciseNames },
-        },
+        where: { userId: req.userId, date: new Date(scopeDate) },
         orderBy: { createdAt: "asc" },
-        select: { exerciseName: true, weightKg: true, reps: true },
+        select: { exerciseName: true, weightKg: true, reps: true, planDayId: true },
       });
+
+      const trainedDay = resolveTrainedPlanDay(
+        plan.planDays.map((day) => ({ ...day, exerciseNames: planExerciseNames(day.exercises) })),
+        logged,
+      );
+      const day = trainedDay ?? rotatedDay;
+
+      const exercises = day.exercises as unknown as PlanExercise[];
 
       res.json({
         plan_id: plan.id,

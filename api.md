@@ -143,6 +143,12 @@ Resolves which `plan_day` applies to that date based on day rotation logic
 (see `backend.md`), and returns its exercises plus whether each has
 already been logged today.
 
+If the athlete actually trained a different day than the rotation calls for
+(e.g. logged a Legs session on a Push day), that trained day is returned
+instead — sets logged from a plan exercise are attributed by `plan_day_id`,
+quick logs by exercise name. Nothing logged on the date falls back to the
+rotated day.
+
 Response (no active plan day resolves):
 ```json
 { "plan_id": "uuid", "plan_name": "6-Day Strength + Fat Loss", "day": null }
