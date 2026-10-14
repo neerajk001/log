@@ -227,6 +227,7 @@ export function ListRow({
   icon,
   iconBg,
   iconColor,
+  iconRounded = true,
   title,
   subtitle,
   value,
@@ -240,6 +241,8 @@ export function ListRow({
   icon?: IoniconName;
   iconBg?: string;
   iconColor?: string;
+  /** Square off the icon badge — the rounded-square mark the rest of the app uses. */
+  iconRounded?: boolean;
   title: string;
   subtitle?: string;
   value?: string;
@@ -260,7 +263,13 @@ export function ListRow({
       style={({ pressed }) => [styles.listRow, pressed && !disabled && styles.pressed, style]}
     >
       {icon ? (
-        <IconBadge name={icon} bg={iconBg ?? colors.surfaceAlt} color={iconColor ?? colors.text} size={38} />
+        <IconBadge
+          name={icon}
+          bg={iconBg ?? colors.surfaceAlt}
+          color={iconColor ?? colors.text}
+          size={38}
+          rounded={iconRounded}
+        />
       ) : null}
       <View style={styles.listRowText}>
         <Text
