@@ -11,6 +11,7 @@ import { OptionCard } from "../../src/components/OptionCard";
 import { usePlansApi } from "../../src/api/plans";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { ApiError } from "../../src/api/client";
+import { filePart } from "../../src/utils/upload";
 import { emptyDay, type EditableDay } from "../../src/components/PlanDaysEditor";
 
 /** Keep in step with the server's cap (routes/plans.ts) — it sends the file to the model. */
@@ -105,11 +106,10 @@ export default function ImportPlanScreen() {
         return;
       }
       const formData = new FormData();
-      formData.append("file", {
-        uri: file.uri,
-        name: file.name,
-        type: looksPdf ? "application/pdf" : "text/plain",
-      } as unknown as Blob);
+      formData.append(
+        "file",
+        filePart(file.uri, file.name ?? "plan", looksPdf ? "application/pdf" : "text/plain"),
+      );
       const parsed = await api.parsePlanPdfForm(formData);
       goPreview(toEditableDays(parsed.days), "ai_parsed");
     } catch (err) {

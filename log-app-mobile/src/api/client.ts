@@ -42,6 +42,11 @@ function resolveApiBaseUrl(): string {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 export const REQUEST_TIMEOUT_MS = 15000;
+
+if (__DEV__) {
+  // Where every call is actually going — the usual cause of "can't reach the server".
+  console.log(`[api] base url ${API_BASE_URL}`);
+}
 const PDF_UPLOAD_TIMEOUT_MS = 120000;
 
 /**
@@ -90,6 +95,8 @@ export async function apiFetch<T = unknown>(
     controller.abort();
   }, timeoutMs ?? REQUEST_TIMEOUT_MS);
 
+  const method = (fetchOptions?.method ?? "GET").toUpperCase();
+  const startedAt = Date.now();
   let res: Response;
   try {
     res = await fetch(url, {
@@ -101,13 +108,25 @@ export async function apiFetch<T = unknown>(
         ...fetchOptions?.headers,
       },
     });
-  } catch {
+  } catch (err) {
+    // The detail matters: a wrong base URL, a blocked port and an unreadable upload
+    // file all land here, and they look identical from the UI.
+    if (__DEV__) {
+      console.warn(
+        `[api] ${method} ${url} FAILED after ${Date.now() - startedAt}ms (${timedOut ? "timed out" : "network error"}${isFormData ? ", form-data" : ""})`,
+        err,
+      );
+    }
     if (timedOut) {
       throw new ApiError(0, "NETWORK_ERROR", "Request timed out. Check your connection.");
     }
     throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
   } finally {
     clearTimeout(timeout);
+  }
+
+  if (__DEV__) {
+    console.log(`[api] ${method} ${url} -> ${res.status} in ${Date.now() - startedAt}ms`);
   }
 
   if (!res.ok) {

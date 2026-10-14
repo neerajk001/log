@@ -185,6 +185,22 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     [],
   );
 
+  /**
+   * A local-only athlete bubble. The photo path isn't a chat turn (it goes to the meal
+   * analyser, not the model), so the caption they typed has to be shown here or it
+   * vanishes the moment they send it.
+   */
+  const injectUser = useCallback((text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `local-u-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        role: "user",
+        content: text,
+      },
+    ]);
+  }, []);
+
   const injectAssistant = useCallback((text: string, proposal?: CoachProposal) => {
     const id = `local-a-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setMessages((prev) => [
@@ -234,6 +250,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     resolveProposal,
     dismissMealProposal,
     injectAssistant,
+    injectUser,
     refetch: load,
   };
 }

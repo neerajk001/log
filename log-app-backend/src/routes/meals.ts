@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import multer from "multer";
+import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
@@ -27,9 +28,11 @@ const analyzeRateLimit = rateLimit({
   keyGenerator: (req) => req.userId,
 });
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: MAX_IMAGE_BYTES },
   fileFilter: (_req, file, cb) => {
     if (["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
       cb(null, true);
@@ -109,16 +112,52 @@ router.delete(
   },
 );
 
+/**
+ * Multer aborts a too-large body mid-upload; without this the raw MulterError reaches
+ * the client as an opaque failure (and can drop the connection while the phone is
+ * still sending), which reads as "can't reach the server".
+ */
+function receiveImage(req: Request, res: Response, next: NextFunction): void {
+  upload.single("file")(req, res, (err: unknown) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        next(
+          new AppError(
+            413,
+            "FILE_TOO_LARGE",
+            `Image is too large. Maximum size is ${MAX_IMAGE_BYTES / (1024 * 1024)} MB.`,
+          ),
+        );
+        return;
+      }
+      next(new AppError(400, "VALIDATION_ERROR", `Upload rejected: ${err.code}`));
+      return;
+    }
+    next(err);
+  });
+}
+
 router.post(
   "/analyze",
   requireAuth,
   analyzeRateLimit,
-  upload.single("file"),
+  receiveImage,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!req.file) {
         next(new AppError(400, "VALIDATION_ERROR", "An image file is required"));
         return;
+      }
+      if (config.nodeEnv !== "production") {
+        // What actually arrived — the photo path fails on the client, so this is the
+        // other half of the picture.
+        console.log("[meal-analyze]", {
+          user: req.userId,
+          bytes: req.file.size,
+          mime: req.file.mimetype,
+          date: typeof req.body?.date === "string" ? req.body.date : null,
+          hasNote: typeof req.body?.description === "string",
+        });
       }
       const description =
         typeof req.body?.description === "string" ? req.body.description : undefined;

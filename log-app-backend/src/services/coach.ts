@@ -2486,6 +2486,9 @@ Accuracy rules:
 const MEAL_PHOTO_RULES = `
 
 When estimating from a photo:
+- The athlete's own note about the photo is the most reliable signal there is: treat what it states —
+  the dish, the items and the amounts ("2 rotis", "200 g chicken", "cooked in ghee") — as fact, and
+  use the photo only to fill in whatever the note leaves out. Never re-guess a part they stated.
 - List every distinct food and drink you can see, including sides, sauces and drinks.
 - Size each portion from visual cues (plate or bowl size, cutlery, glass, hands, packaging) and say
   which cue you used in "quantity" (e.g. "1 cup cooked rice (side bowl)").

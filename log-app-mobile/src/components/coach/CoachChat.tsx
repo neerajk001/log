@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Pressable,
   StyleSheet,
@@ -23,7 +24,8 @@ import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
 import { useMealsApi } from "../../api/meals";
-import { pickPhoto, preparePhoto, type PhotoSource } from "../../utils/image";
+import { pickPhoto, preparePhoto, type PhotoSource, type UploadPhoto } from "../../utils/image";
+import { filePart } from "../../utils/upload";
 import { todayLocal } from "../../utils/date";
 import type { AgentId, CoachProposal } from "../../api/types";
 
@@ -70,6 +72,7 @@ export function CoachChat({
     resolveProposal,
     dismissMealProposal,
     injectAssistant,
+    injectUser,
     agent,
     setAgent,
   } = useCoachChat(sessionId, initialAgent);
@@ -78,15 +81,28 @@ export function CoachChat({
   const [input, setInput] = useState(initialMessage ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  /** Attached but not sent yet — the composer's text is its caption. */
+  const [pendingPhoto, setPendingPhoto] = useState<UploadPhoto | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
 
   const submit = (text: string) => {
-    if (!text.trim() || streaming) return;
+    const caption = text.trim();
+    const photo = pendingPhoto;
+    if (streaming || photoBusy) return;
+    if (!caption && !photo) return;
     setInput("");
-    send(text);
+    setPendingPhoto(null);
+    if (!photo) {
+      send(text);
+      return;
+    }
+    // Show what they said about the photo, then estimate from it plus the image.
+    if (caption) injectUser(caption);
+    void sendPhoto(photo, caption);
   };
 
-  const addMealPhoto = async (source: PhotoSource) => {
+  /** Picking only attaches the photo — the composer's text is sent as its caption. */
+  const attachPhoto = async (source: PhotoSource) => {
     try {
       const picked = await pickPhoto(source);
       if (!picked) return;
@@ -102,15 +118,21 @@ export function CoachChat({
         name: picked.asset.fileName ?? null,
         mimeType: picked.asset.mimeType ?? null,
       });
+      setPendingPhoto(photo);
+    } catch (err) {
+      injectAssistant(err instanceof Error ? err.message : "Couldn't use that photo.");
+    }
+  };
+
+  const sendPhoto = async (photo: UploadPhoto, caption: string) => {
+    setPhotoBusy(true);
+    try {
       const form = new FormData();
-      form.append("file", {
-        uri: photo.uri,
-        name: photo.name,
-        type: photo.type,
-      } as unknown as Blob);
+      form.append("file", filePart(photo.uri, photo.name, photo.type));
+      // What the athlete says about the photo beats what can be eyeballed from it.
+      if (caption) form.append("description", caption);
       // The athlete's local date, so the estimate knows what's logged today.
       form.append("date", todayLocal());
-      setPhotoBusy(true);
       const analysis = await mealsApi.analyzeMeal(form);
       const proposal: CoachProposal = {
         kind: "meal_log",
@@ -145,8 +167,8 @@ export function CoachChat({
   /** Snap it or pick one — the camera is the point, so it's offered first. */
   const pickMealPhoto = () =>
     Alert.alert("Add a meal photo", "Snap it now, or choose one you already have.", [
-      { text: "Take photo", onPress: () => void addMealPhoto("camera") },
-      { text: "Choose photo", onPress: () => void addMealPhoto("library") },
+      { text: "Take photo", onPress: () => void attachPhoto("camera") },
+      { text: "Choose photo", onPress: () => void attachPhoto("library") },
       { text: "Cancel", style: "cancel" },
     ]);
 
@@ -249,33 +271,56 @@ export function CoachChat({
         }}
       />
 
-      <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
-        <IconButton
-          name={photoBusy ? "hourglass-outline" : "camera-outline"}
-          accessibilityLabel="Log a meal from a photo"
-          size={26}
-          color={photoBusy ? colors.textMuted : colors.text}
-          onPress={photoBusy ? undefined : pickMealPhoto}
-        />
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          placeholder="Ask your coach…"
-          placeholderTextColor={colors.textMuted}
-          style={styles.input}
-          multiline
-        />
-        {streaming ? (
-          <IconButton name="stop-circle" accessibilityLabel="Stop generating" size={30} color={colors.danger} onPress={stop} />
-        ) : (
+      <View style={styles.composer}>
+        {pendingPhoto ? (
+          <View style={styles.attachRow}>
+            <Image source={{ uri: pendingPhoto.uri }} style={styles.attachThumb} />
+            <Text style={styles.attachText} numberOfLines={2}>
+              Add a note about it — what it is or how much — then send.
+            </Text>
+            <Pressable
+              onPress={() => setPendingPhoto(null)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Remove photo"
+            >
+              <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
           <IconButton
-            name="arrow-up-circle"
-            accessibilityLabel="Send message"
-            size={30}
-            color={input.trim() ? colors.primary : colors.textMuted}
-            onPress={() => submit(input)}
+            name={photoBusy ? "hourglass-outline" : "camera-outline"}
+            accessibilityLabel="Log a meal from a photo"
+            size={26}
+            color={photoBusy ? colors.textMuted : colors.text}
+            onPress={photoBusy ? undefined : pickMealPhoto}
           />
-        )}
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder={pendingPhoto ? "What's in it? e.g. 2 rotis, 1 cup dal" : "Ask your coach…"}
+            placeholderTextColor={colors.textMuted}
+            style={styles.input}
+            multiline
+          />
+          {streaming ? (
+            <IconButton name="stop-circle" accessibilityLabel="Stop generating" size={30} color={colors.danger} onPress={stop} />
+          ) : photoBusy ? (
+            <View style={styles.sendBusy}>
+              <ActivityIndicator size="small" color={colors.textMuted} />
+            </View>
+          ) : (
+            <IconButton
+              name="arrow-up-circle"
+              accessibilityLabel="Send message"
+              size={30}
+              color={input.trim() || pendingPhoto ? colors.primary : colors.textMuted}
+              onPress={() => submit(input)}
+            />
+          )}
+        </View>
       </View>
 
       <OverflowMenu
@@ -378,15 +423,32 @@ const useStyles = makeUseStyles((t) =>
     retryRow: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start" },
     retryText: { fontSize: 12, fontWeight: "700", color: t.colors.danger },
 
+    composer: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.colors.border,
+      backgroundColor: t.colors.surface,
+    },
+    attachRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.screen,
+      paddingTop: spacing.sm,
+    },
+    attachThumb: {
+      width: 44,
+      height: 44,
+      borderRadius: radii.sm,
+      backgroundColor: t.colors.surfaceAlt,
+    },
+    attachText: { flex: 1, ...t.typography.caption, color: t.colors.textDim },
+    sendBusy: { width: 30, alignItems: "center", justifyContent: "center" },
     inputRow: {
       flexDirection: "row",
       alignItems: "flex-end",
       gap: spacing.sm,
       paddingHorizontal: spacing.screen,
       paddingTop: spacing.sm,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.colors.border,
-      backgroundColor: t.colors.surface,
     },
     input: {
       flex: 1,

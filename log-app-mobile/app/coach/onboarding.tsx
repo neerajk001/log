@@ -15,6 +15,7 @@ import { useCoachApi } from "../../src/api/coach";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
 import { pickPhoto, preparePhoto, type PhotoSource } from "../../src/utils/image";
+import { filePart } from "../../src/utils/upload";
 import { formatMediumDate } from "../../src/utils/date";
 import type { CoachProfile, CoachProfileInput, PhysiqueReading } from "../../src/api/types";
 import type { EditableDay } from "../../src/components/PlanDaysEditor";
@@ -209,11 +210,7 @@ function PlanBuilderWizard({
           mimeType: picked.asset.mimeType ?? null,
         });
         const form = new FormData();
-        form.append("file", {
-          uri: photo.uri,
-          name: photo.name,
-          type: photo.type,
-        } as unknown as Blob);
+        form.append("file", filePart(photo.uri, photo.name, photo.type));
         if (notes.trim()) form.append("description", notes.trim());
         setBusy("photo");
         setReading(await coachApi.analyzePhoto(form));

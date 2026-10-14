@@ -73,8 +73,16 @@ export async function preparePhoto(asset: {
     }
     const image = await context.renderAsync();
     const saved = await image.saveAsync({ compress: JPEG_QUALITY, format: SaveFormat.JPEG });
+    if (__DEV__) {
+      console.log(`[photo] resized to ${saved.width}x${saved.height} -> ${saved.uri}`);
+    }
     return { uri: saved.uri, name: "photo.jpg", type: "image/jpeg" };
-  } catch {
+  } catch (err) {
+    // The upload uses this URI as-is, so the original picker path (which can be a
+    // ph:// asset on iOS) has to be visible when the upload later fails.
+    if (__DEV__) {
+      console.warn(`[photo] resize failed, uploading the original -> ${original.uri}`, err);
+    }
     return original;
   }
 }
