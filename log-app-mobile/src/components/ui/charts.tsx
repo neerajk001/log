@@ -105,7 +105,17 @@ export function BarChart({
           {tickValues.map((t, i) => (
             <View key={t} style={[styles.gridline, { top: tipZone + (i / tickCount) * barArea }]} />
           ))}
-          {targetTop != null ? <View style={[styles.targetLine, { top: targetTop }]} /> : null}
+          {targetTop != null ? (
+            <>
+              <View style={[styles.targetLine, { top: targetTop }]} />
+              <View style={[styles.targetTag, { top: targetTop - 13 }]}>
+                <Text style={styles.targetTagValue} numberOfLines={1}>
+                  {formatAxisValue(target as number)}
+                </Text>
+                <Text style={styles.targetTagSub}>Target</Text>
+              </View>
+            </>
+          ) : null}
           <View style={[styles.barsLayer, { gap: barGap, height: barArea }]}>{bars}</View>
         </View>
         <View style={[styles.labelRow, { gap: barGap }]}>
@@ -292,6 +302,19 @@ const useStyles = makeUseStyles((t) =>
       borderStyle: "dashed",
       borderColor: t.colors.textMuted,
     },
+    targetTag: {
+      position: "absolute",
+      right: 0,
+      alignItems: "flex-end",
+      backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+      borderRadius: radii.sm,
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+    },
+    targetTagValue: { fontSize: 10, fontWeight: "800", color: t.colors.text },
+    targetTagSub: { fontSize: 9, fontWeight: "600", color: t.colors.textMuted },
     barsLayer: {
       position: "absolute",
       left: 0,

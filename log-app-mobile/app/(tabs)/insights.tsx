@@ -35,7 +35,7 @@ import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { VERDICT_LABELS } from "../../src/components/VerdictStamp";
 import { formatNumber } from "../../src/utils/derive";
 import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
-import type { TrendRange } from "../../src/api/types";
+import type { TrendBucket, TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
@@ -92,6 +92,19 @@ function signedPct(n: number | null): string {
   return `${n > 0 ? "+" : ""}${n}%`;
 }
 
+/** Mean of the buckets that actually hold a value, or null when none do. */
+function windowAverage(
+  buckets: TrendBucket[],
+  pick: (b: TrendBucket) => number | null,
+): number | null {
+  const values = buckets.map(pick).filter((v): v is number => v != null);
+  if (values.length === 0) return null;
+  return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+}
+
+const pickNutrient = (metric: "calories" | "protein") => (b: TrendBucket) =>
+  metric === "calories" ? b.calories : b.protein_g;
+
 /** Short x-axis / bucket label: weekday, day-of-month, or month. */
 function bucketLabel(start: string, bucket: "day" | "week" | "month"): string {
   const d = new Date(`${start}T00:00:00Z`);
@@ -110,6 +123,7 @@ export default function InsightsScreen() {
   const [category, setCategory] = useState<Category>("overview");
   const [nutritionMetric, setNutritionMetric] = useState<"calories" | "protein">("calories");
   const [nutritionWeeks, setNutritionWeeks] = useState(1);
+  const [nutritionDetailOpen, setNutritionDetailOpen] = useState(false);
   const [weightRowsOpen, setWeightRowsOpen] = useState(false);
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -122,15 +136,20 @@ export default function InsightsScreen() {
   const trackWeight = profile?.track_weight !== false;
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
+  // The nutrition window is fetched twice over: the second half is the equally-long
+  // window before it, which is what the "vs previous" readout compares against. The
+  // headline still averages only the buckets the window actually covers.
   const {
     data: trends,
     loading: trendsLoading,
     error: trendsError,
     refetch: refetchTrends,
-  } = useTrends(range, nutritionWeeks);
-  // The bars always show the last seven days, whatever range/window is selected
-  // (when range is 7d this de-dupes to the same cached request).
-  const { data: weekTrends } = useTrends("7d", nutritionWeeks);
+  } = useTrends(range, nutritionWeeks * 2);
+  // The bars always show the last seven days, whatever range/window is selected. The
+  // weeks argument only shapes the nutrition buckets — which this call ignores — so
+  // passing the same value keeps the cache key identical to the fetch above when the
+  // range is 7d, and the two share one request.
+  const { data: weekTrends } = useTrends("7d", nutritionWeeks * 2);
   const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
@@ -161,37 +180,44 @@ export default function InsightsScreen() {
   // The nutrition card keeps its own window of weekly averages, independent of
   // the top range — the 1W / 2W / … control the screen has always had.
   const nutritionBuckets = useMemo(() => trends?.nutrition ?? [], [trends]);
-  const nutritionValues = useMemo(
-    () =>
-      nutritionBuckets
-        .map((b) => (nutritionMetric === "calories" ? b.calories : b.protein_g))
-        .filter((v): v is number => v != null),
-    [nutritionBuckets, nutritionMetric],
+  // The chosen window is the tail of the fetched buckets; the slice before it is the
+  // previous, equally-long window it is compared against.
+  const nutritionCurrent = useMemo(
+    () => nutritionBuckets.slice(-nutritionWeeks),
+    [nutritionBuckets, nutritionWeeks],
   );
-  const nutritionAverage =
-    nutritionValues.length > 0
-      ? Math.round(nutritionValues.reduce((a, b) => a + b, 0) / nutritionValues.length)
+  const nutritionPrevious = useMemo(
+    () => nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks),
+    [nutritionBuckets, nutritionWeeks],
+  );
+  const nutritionAverage = windowAverage(nutritionCurrent, pickNutrient(nutritionMetric));
+  const nutritionPrevAverage = windowAverage(nutritionPrevious, pickNutrient(nutritionMetric));
+  // Change against the previous window of the same length — not against the target,
+  // which the line under the number already covers.
+  const nutritionChangePct =
+    nutritionAverage != null && nutritionPrevAverage != null && nutritionPrevAverage > 0
+      ? Math.round(((nutritionAverage - nutritionPrevAverage) / nutritionPrevAverage) * 100)
       : null;
   const nutritionUnit = nutritionMetric === "calories" ? "kcal" : "g";
+  const nutritionAccent = nutritionMetric === "calories" ? colors.orange : colors.blue;
+  const nutritionAccentSoft = nutritionMetric === "calories" ? colors.orangeSoft : colors.blueSoft;
   const proteinTarget = profile?.protein_target_g ?? null;
   const calorieTarget = profile?.calorie_target ?? null;
   const nutritionTarget = nutritionMetric === "calories" ? calorieTarget : proteinTarget;
   const nutritionDiff =
     nutritionTarget != null && nutritionAverage != null ? nutritionAverage - nutritionTarget : null;
-  const targetDeltaPct =
-    nutritionTarget != null && nutritionAverage != null && nutritionTarget > 0
-      ? Math.round(((nutritionAverage - nutritionTarget) / nutritionTarget) * 100)
-      : null;
   // The average spans the chosen window (weekly averages)…
   const nutritionWindow =
     NUTRITION_WINDOWS.find((w) => w.weeks === nutritionWeeks) ?? NUTRITION_WINDOWS[0];
-  const newestNutritionWeek = nutritionBuckets[nutritionBuckets.length - 1] ?? null;
+  const newestNutritionWeek = nutritionCurrent[nutritionCurrent.length - 1] ?? null;
   const nutritionWindowLabel =
     nutritionWeeks === 1
       ? newestNutritionWeek?.start === startOfWeek(todayLocal())
         ? "This week"
         : "Last week"
       : `Last ${nutritionWindow.phrase}`;
+  const nutritionCompareLabel =
+    nutritionWeeks === 1 ? "vs last week" : `vs previous ${nutritionWindow.phrase}`;
 
   // …but the bars stay on the last 7 days of daily intake, so a wider window
   // fades them (they only cover a week) and only the average follows the filter.
@@ -473,21 +499,45 @@ export default function InsightsScreen() {
         {show.nutrition && show.nutritionHeading ? (
           <Card style={styles.section}>
             <View style={styles.cardHeaderLeft}>
-              <IconBadge name="nutrition-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
+              <IconBadge
+                name="nutrition"
+                bg={nutritionAccent}
+                color={colors.onPrimary}
+                size={34}
+                rounded={false}
+              />
               <View style={styles.cardHeaderText}>
                 <Text style={typography.bodyStrong}>Nutrition</Text>
                 <Text style={typography.caption}>Average · {nutritionWindowLabel}</Text>
               </View>
             </View>
 
-            <SegmentedControl
-              value={nutritionMetric}
-              onChange={setNutritionMetric}
-              options={[
-                { value: "calories", label: "Calories" },
-                { value: "protein", label: "Protein" },
-              ]}
-            />
+            <View style={styles.metricToggle}>
+              {(["calories", "protein"] as const).map((m) => {
+                const active = nutritionMetric === m;
+                const accent = m === "calories" ? colors.orange : colors.blue;
+                return (
+                  <Pressable
+                    key={m}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    onPress={() => setNutritionMetric(m)}
+                    style={[styles.metricPill, active ? { backgroundColor: accent } : null]}
+                  >
+                    <Ionicons
+                      name={m === "calories" ? "flame" : "barbell"}
+                      size={16}
+                      color={active ? colors.onPrimary : colors.textDim}
+                    />
+                    <Text
+                      style={[styles.metricPillText, active ? { color: colors.onPrimary } : null]}
+                    >
+                      {m === "calories" ? "Calories" : "Protein"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
             <ChipRow>
               {NUTRITION_WINDOWS.map((w) => (
@@ -500,46 +550,93 @@ export default function InsightsScreen() {
               ))}
             </ChipRow>
 
-            {nutritionValues.length > 0 ? (
+            {nutritionAverage != null ? (
               <>
                 <View style={styles.metricRow}>
                   <Text style={typography.metric}>
-                    {nutritionAverage != null ? formatNumber(nutritionAverage) : "—"}
+                    {formatNumber(nutritionAverage)}
                     <Text style={typography.metricUnit}> {nutritionUnit}</Text>
                   </Text>
-                  {targetDeltaPct != null ? (
-                    <Tag
-                      label={signedPct(targetDeltaPct)}
-                      bg={targetDeltaPct > 0 ? colors.warningSoft : colors.successSoft}
-                      text={targetDeltaPct > 0 ? colors.warning : colors.success}
-                    />
+                  {nutritionChangePct != null ? (
+                    <View style={styles.changeWrap}>
+                      <View style={[styles.changePill, { backgroundColor: nutritionAccentSoft }]}>
+                        <Ionicons
+                          name={nutritionChangePct > 0 ? "arrow-up" : "arrow-down"}
+                          size={13}
+                          color={nutritionAccent}
+                        />
+                        <Text style={[styles.changeValue, { color: nutritionAccent }]}>
+                          {signedPct(nutritionChangePct)}
+                        </Text>
+                      </View>
+                      <Text style={styles.changeCaption}>{nutritionCompareLabel}</Text>
+                    </View>
                   ) : null}
                 </View>
+
                 <Text style={[typography.small, styles.note]}>
-                  {nutritionTarget != null
-                    ? `Target ${formatNumber(nutritionTarget)} ${nutritionUnit}${
-                        nutritionDiff != null && nutritionDiff !== 0
-                          ? ` · ${formatNumber(Math.abs(nutritionDiff))} ${nutritionUnit} ${
-                              nutritionDiff > 0 ? "over" : "under"
-                            }`
-                          : ""
-                      }`
-                    : "No target set — add one in Settings to compare."}
+                  {nutritionTarget != null ? (
+                    <>
+                      {`Target ${formatNumber(nutritionTarget)} ${nutritionUnit}`}
+                      {nutritionDiff != null && nutritionDiff !== 0 ? (
+                        <Text style={{ color: nutritionAccent }}>
+                          {` · ${formatNumber(Math.abs(nutritionDiff))} ${nutritionUnit} ${
+                            nutritionDiff > 0 ? "over" : "under"
+                          }`}
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : (
+                    "No target set — add one in Settings to compare."
+                  )}
                 </Text>
+
                 <View style={barsDimmed ? styles.chartDimmed : undefined}>
                   <BarChart
                     data={nutritionChart}
                     axis
-                    color={nutritionMetric === "calories" ? colors.orange : colors.blue}
+                    color={nutritionAccent}
                     target={nutritionTarget}
                     unit={nutritionUnit}
                   />
                 </View>
-                <Text style={[typography.caption, styles.note]}>
-                  {barsDimmed
-                    ? `Showing last week · from ${weekLoggedDays} log${weekLoggedDays === 1 ? "" : "s"}`
-                    : `From ${weekLoggedDays} logged day${weekLoggedDays === 1 ? "" : "s"} · completed days only`}
-                </Text>
+
+                <View style={styles.footerRow}>
+                  <Ionicons name="calendar-outline" size={14} color={colors.textDim} />
+                  <Text style={[typography.caption, styles.footerText]} numberOfLines={2}>
+                    {barsDimmed
+                      ? `Showing last week · from ${weekLoggedDays} log${weekLoggedDays === 1 ? "" : "s"}`
+                      : `From ${weekLoggedDays} logged day${weekLoggedDays === 1 ? "" : "s"} · completed days only`}
+                  </Text>
+                  <Pressable
+                    onPress={() => setNutritionDetailOpen((open) => !open)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Daily nutrition breakdown"
+                    accessibilityState={{ expanded: nutritionDetailOpen }}
+                    hitSlop={8}
+                    style={styles.footerLink}
+                  >
+                    <Text style={styles.footerLinkText}>View details</Text>
+                    <Ionicons
+                      name={nutritionDetailOpen ? "chevron-up" : "chevron-forward"}
+                      size={14}
+                      color={colors.primary}
+                    />
+                  </Pressable>
+                </View>
+
+                {nutritionDetailOpen ? (
+                  <View style={styles.detailRows}>
+                    {nutritionChart.map((d) => (
+                      <View key={d.iso} style={styles.detailRow}>
+                        <Text style={[typography.small, styles.detailLabel]}>{d.label}</Text>
+                        <Text style={typography.bodyStrong}>
+                          {d.value > 0 ? `${formatNumber(d.value)} ${nutritionUnit}` : "—"}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
               </>
             ) : (
               <Text style={[typography.small, styles.note]}>
@@ -787,6 +884,57 @@ const useStyles = makeUseStyles((t) =>
     cardHeaderText: { gap: 1, flexShrink: 1 },
     note: { color: t.colors.textDim },
     chartDimmed: { opacity: 0.35 },
+
+    metricToggle: {
+      flexDirection: "row",
+      gap: 3,
+      backgroundColor: t.colors.surfaceAlt,
+      borderRadius: radii.pill,
+      padding: 3,
+    },
+    metricPill: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: spacing.xs,
+      height: 38,
+      borderRadius: radii.pill,
+    },
+    metricPillText: { fontSize: 14, fontWeight: "700", color: t.colors.textDim },
+
+    changeWrap: { alignItems: "flex-end", gap: 2 },
+    changePill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      borderRadius: radii.pill,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 3,
+    },
+    changeValue: { fontSize: 13, fontWeight: "800" },
+    changeCaption: { ...t.typography.caption, fontSize: 10, color: t.colors.textDim },
+
+    footerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: t.colors.surfaceAlt,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    footerText: { flex: 1, color: t.colors.textDim },
+    footerLink: { flexDirection: "row", alignItems: "center", gap: 2 },
+    footerLinkText: { fontSize: 12, fontWeight: "700", color: t.colors.primary },
+    detailRows: { gap: spacing.xs },
+    detailRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    detailLabel: { color: t.colors.text },
 
     verdictCard: {
       flexDirection: "row",
