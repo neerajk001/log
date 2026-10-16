@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useActivityApi } from "../api/activity";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { ActivityLog, ActivityLogCreate } from "../api/types";
 
 /** Activity logs for a single date, with optimistic add/delete. */
@@ -9,18 +10,24 @@ export function useActivity(date: string) {
   const [entries, setEntries] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
 
   const load = useCallback(async () => {
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
-      setEntries(await api.getActivityRange(date, date));
+      const rows = await api.getActivityRange(date, date);
+      // Switching dates fires a new load; a late old response must not win.
+      if (!isCurrent(token)) return;
+      setEntries(rows);
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load activity");
     } finally {
-      setLoading(false);
+      if (isCurrent(token)) setLoading(false);
     }
-  }, [api, date]);
+  }, [api, date, begin, isCurrent]);
 
   useDataSyncOnFocus(["activity"], load);
 

@@ -122,8 +122,26 @@ export function inflightFor(path: string): Promise<unknown> | undefined {
   return inflight.get(path);
 }
 
-export function clearInflight(path: string): void {
+/**
+ * Drops the in-flight entry for `path`. Pass the request itself so a finished
+ * old request can't delete a newer one's dedupe entry — an invalidation drops
+ * the tracker while the old request is still running, and a new caller starts
+ * a fresh request under the same path.
+ */
+export function clearInflight(path: string, request?: Promise<unknown>): void {
+  if (request && inflight.get(path) !== request) return;
   inflight.delete(path);
+}
+
+/**
+ * Monotonic in-memory generation, bumped on every invalidation. An in-flight
+ * GET records the generation it started at and refuses to publish its payload
+ * if the cache was invalidated meanwhile (it may predate a write).
+ */
+let generation = 0;
+
+export function cacheGeneration(): number {
+  return generation;
 }
 
 export function subscribeResources(
@@ -140,6 +158,7 @@ export function subscribeResources(
 /** Drops the affected resources' entries (and any in-flight reads of them). */
 export function invalidateResources(resources: readonly Resource[]): void {
   if (resources.length === 0) return;
+  generation += 1;
   const affected = new Set(resources);
 
   for (const [path, entry] of cache) {
@@ -171,6 +190,7 @@ export function invalidateForWrite(path: string): void {
 }
 
 export function clearAllCache(): void {
+  generation += 1;
   cache.clear();
   inflight.clear();
 }

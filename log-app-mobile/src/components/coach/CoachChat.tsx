@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { PostHogMaskView, usePostHog } from "posthog-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
@@ -26,6 +27,7 @@ import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
 import { useMealsApi } from "../../api/meals";
 import { pickPhoto, preparePhoto, type PhotoSource, type UploadPhoto } from "../../utils/image";
 import { filePart } from "../../utils/upload";
+import { captureTiming } from "../../utils/perf";
 import { todayLocal } from "../../utils/date";
 import type { AgentId, CoachProposal } from "../../api/types";
 
@@ -77,10 +79,13 @@ export function CoachChat({
     setAgent,
   } = useCoachChat(sessionId, initialAgent);
   const mealsApi = useMealsApi();
+  const posthog = usePostHog();
   const insets = useSafeAreaInsets();
   const [input, setInput] = useState(initialMessage ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  /** Synchronous guard: `photoBusy` state only lands on the next render. */
+  const photoBusyRef = useRef(false);
   /** Attached but not sent yet — the composer's text is its caption. */
   const [pendingPhoto, setPendingPhoto] = useState<UploadPhoto | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
@@ -88,7 +93,7 @@ export function CoachChat({
   const submit = (text: string) => {
     const caption = text.trim();
     const photo = pendingPhoto;
-    if (streaming || photoBusy) return;
+    if (streaming || photoBusy || photoBusyRef.current) return;
     if (!caption && !photo) return;
     setInput("");
     setPendingPhoto(null);
@@ -98,6 +103,7 @@ export function CoachChat({
     }
     // Show what they said about the photo, then estimate from it plus the image.
     if (caption) injectUser(caption);
+    photoBusyRef.current = true;
     void sendPhoto(photo, caption);
   };
 
@@ -124,52 +130,75 @@ export function CoachChat({
     }
   };
 
-  const sendPhoto = async (photo: UploadPhoto, caption: string) => {
-    setPhotoBusy(true);
-    try {
-      const form = new FormData();
-      form.append("file", filePart(photo.uri, photo.name, photo.type));
-      // What the athlete says about the photo beats what can be eyeballed from it.
-      if (caption) form.append("description", caption);
-      // The athlete's local date, so the estimate knows what's logged today.
-      form.append("date", todayLocal());
-      const analysis = await mealsApi.analyzeMeal(form);
-      const proposal: CoachProposal = {
-        kind: "meal_log",
-        date: todayLocal(),
-        title: analysis.title,
-        items: analysis.items,
-        calories: analysis.calories,
-        protein_g: analysis.protein_g,
-        // Provenance + confidence travel with the card and are stored on confirm.
-        source: "photo",
-        confidence: analysis.confidence,
-      };
-      const proteinTarget = analysis.day?.protein_target_g ?? null;
-      const proteinLeft =
-        proteinTarget != null
-          ? proteinTarget - ((analysis.day?.protein_g ?? 0) + analysis.protein_g)
-          : null;
-      const leftLine =
-        proteinLeft != null && proteinTarget != null
-          ? proteinLeft > 0
-            ? ` That leaves ${proteinLeft} g of your ${proteinTarget} g protein target.`
-            : ` That puts you ${Math.abs(proteinLeft)} g over your ${proteinTarget} g target.`
-          : "";
-      const text = analysis.question
-        ? `${analysis.question} I've estimated the rest below.`
-        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein.${leftLine} Confirm to log it.${
-            analysis.confidence === "low"
-              ? " I'm not fully sure of the portion — worth a quick check before confirming."
-              : ""
-          }`;
-      injectAssistant(text, proposal);
-    } catch (err) {
-      injectAssistant(err instanceof Error ? err.message : "Couldn't analyze that photo.");
-    } finally {
-      setPhotoBusy(false);
-    }
-  };
+  const sendPhoto = useCallback(
+    async (photo: UploadPhoto, caption: string) => {
+      setPhotoBusy(true);
+      const t0 = Date.now();
+      let confidence: string | null = null;
+      let failed = false;
+      try {
+        const form = new FormData();
+        form.append("file", filePart(photo.uri, photo.name, photo.type));
+        // What the athlete says about the photo beats what can be eyeballed from it.
+        if (caption) form.append("description", caption);
+        // The athlete's local date, so the estimate knows what's logged today.
+        form.append("date", todayLocal());
+        const analysis = await mealsApi.analyzeMeal(form);
+        confidence = analysis.confidence;
+        const proposal: CoachProposal = {
+          kind: "meal_log",
+          date: todayLocal(),
+          title: analysis.title,
+          items: analysis.items,
+          calories: analysis.calories,
+          protein_g: analysis.protein_g,
+          // Provenance + confidence travel with the card and are stored on confirm.
+          source: "photo",
+          confidence: analysis.confidence,
+        };
+        const proteinTarget = analysis.day?.protein_target_g ?? null;
+        const proteinLeft =
+          proteinTarget != null
+            ? proteinTarget - ((analysis.day?.protein_g ?? 0) + analysis.protein_g)
+            : null;
+        const leftLine =
+          proteinLeft != null && proteinTarget != null
+            ? proteinLeft > 0
+              ? ` That leaves ${proteinLeft} g of your ${proteinTarget} g protein target.`
+              : ` That puts you ${Math.abs(proteinLeft)} g over your ${proteinTarget} g target.`
+            : "";
+        const text = analysis.question
+          ? `${analysis.question} I've estimated the rest below.`
+          : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein.${leftLine} Confirm to log it.${
+              analysis.confidence === "low"
+                ? " I'm not fully sure of the portion — worth a quick check before confirming."
+                : ""
+            }`;
+        injectAssistant(text, proposal);
+      } catch (err) {
+        failed = true;
+        // Keep the photo (and caption) on the composer, so retrying doesn't mean
+        // re-picking it from the camera roll.
+        setPendingPhoto(photo);
+        setInput((cur) => (cur.trim() ? cur : caption));
+        injectAssistant(
+          `${
+            err instanceof Error ? err.message : "Couldn't analyze that photo."
+          } The photo is still attached — send it again to retry.`,
+        );
+      } finally {
+        photoBusyRef.current = false;
+        setPhotoBusy(false);
+        // Photo analysis latency + outcome (no image data, no identifiers).
+        captureTiming(posthog, "meal_analyze", {
+          total_ms: Date.now() - t0,
+          confidence: confidence ?? "none",
+          failed: failed ? 1 : 0,
+        });
+      }
+    },
+    [mealsApi, injectAssistant, posthog],
+  );
 
   /** Snap it or pick one — the camera is the point, so it's offered first. */
   const pickMealPhoto = () =>
@@ -210,14 +239,17 @@ export function CoachChat({
 
       {error ? <Banner tone="warning" message={error} /> : null}
 
-      <FlatList
-        ref={listRef}
-        data={messages}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={styles.list}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-        ListEmptyComponent={
+      {/* The chat transcript is free-text health conversation; keep it out of
+          session replays (PostHogMaskView => ph-no-capture). */}
+      <PostHogMaskView style={styles.listMask}>
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(m) => m.id}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          ListEmptyComponent={
           loading ? null : (
             <View style={styles.empty}>
               <IconBadge name="sparkles" bg={colors.primarySoft} color={colors.primary} size={56} rounded={false} />
@@ -277,6 +309,7 @@ export function CoachChat({
           );
         }}
       />
+      </PostHogMaskView>
 
       <View style={styles.composer}>
         {pendingPhoto ? (
@@ -406,6 +439,7 @@ function MessageBody({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg, gap: spacing.sm },
+    listMask: { flex: 1 },
     agentChips: { paddingHorizontal: spacing.screen },
     list: { padding: spacing.screen, gap: spacing.sm, flexGrow: 1 },
 

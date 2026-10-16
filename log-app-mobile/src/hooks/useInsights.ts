@@ -1,8 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLiftLogsApi } from "../api/liftLogs";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useCurrentDate } from "./useCurrentDate";
+import { useLatest } from "./useLatest";
 import type { LiftMetrics } from "../api/types";
-import { addDays, todayLocal } from "../utils/date";
+import { addDays } from "../utils/date";
 import {
   currentWeekInfoFromDates,
   dailySetSeries,
@@ -25,27 +27,32 @@ export function useInsights(rangeDays: number, restDays: number[] = []) {
   const [data, setData] = useState<LiftMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
+
+  // Live date: a midnight rollover rebuilds the window (and re-runs the load).
+  const today = useCurrentDate();
 
   const load = useCallback(async () => {
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
-      const today = todayLocal();
       const from = addDays(today, -(rangeDays - 1));
-      setData(
-        await api.getLiftMetrics(from, today, addDays(from, -rangeDays), addDays(from, -1)),
-      );
+      const result = await api.getLiftMetrics(from, today, addDays(from, -rangeDays), addDays(from, -1));
+      // A range switch fires a new load; a late old response must not win.
+      if (!isCurrent(token)) return;
+      setData(result);
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load lifts");
     } finally {
-      setLoading(false);
+      if (isCurrent(token)) setLoading(false);
     }
-  }, [api, rangeDays]);
+  }, [api, rangeDays, today, begin, isCurrent]);
 
   useDataSyncOnFocus(["lift"], load);
 
   const metrics = useMemo(() => {
-    const today = todayLocal();
     const days = data?.days ?? [];
     const exercises = data?.exercises ?? [];
     const dates = days.map((d) => d.date);
@@ -67,7 +74,7 @@ export function useInsights(rangeDays: number, restDays: number[] = []) {
           ? weeklySetSeries(counts, 13, today)
           : dailySetSeries(counts, rangeDays, today),
     };
-  }, [data, rangeDays, restDays]);
+  }, [data, rangeDays, restDays, today]);
 
   return { loading, error, metrics, refetch: load };
 }

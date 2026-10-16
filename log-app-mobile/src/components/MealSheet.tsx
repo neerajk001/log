@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
+import { PostHogMaskView } from "posthog-react-native";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { spacing } from "../theme/spacing";
 import { useMealsApi } from "../api/meals";
@@ -93,7 +94,8 @@ export function MealSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Edit meal">
-      <View style={styles.body}>
+      {/* Meal names/calories are health data — excluded from session replays. */}
+      <PostHogMaskView style={styles.body}>
         {meal.items.length > 0 ? (
           <View style={styles.items}>
             {meal.items.map((it, i) => (
@@ -143,7 +145,7 @@ export function MealSheet({
           disabled={busy}
           onPress={confirmDelete}
         />
-      </View>
+      </PostHogMaskView>
     </Sheet>
   );
 }

@@ -5,7 +5,7 @@ import { streamCoachChat, useCoachApi } from "../api/coach";
 import { ApiError } from "../api/client";
 import { clearAllCache } from "../api/cache";
 import { captureTiming } from "../utils/perf";
-import type { AgentId, CoachProposal, DismissedMeal } from "../api/types";
+import type { AgentId, CoachProposal, CoachUsage, DismissedMeal } from "../api/types";
 import { todayLocal } from "../utils/date";
 
 /** Asked the moment a meal estimate is dismissed — the answer becomes the correction. */
@@ -44,6 +44,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   const [error, setError] = useState<string | null>(null);
   const [pendingCorrection, setPendingCorrection] = useState<DismissedMeal | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /**
+   * Synchronous in-flight flag: `streaming` state only lands on the next render,
+   * so two taps in the same frame would both pass a state check and fire two
+   * turns. This ref is set before any await, so the second tap sees it.
+   */
+  const streamingRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!initialSessionId) {
@@ -86,6 +92,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   const runStream = useCallback(
     async (message: string, appendUser: boolean, correction?: DismissedMeal | null) => {
       const assistantId = `coach-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      streamingRef.current = true;
       setError(null);
       setStatus(null);
       setStreaming(true);
@@ -105,6 +112,8 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
       let firstDeltaAt: number | null = null;
       let aborted = false;
       let failed = false;
+      /** Server-measured token facts for this turn, captured into analytics. */
+      let usage: CoachUsage | null = null;
 
       try {
         const token = await getToken();
@@ -135,6 +144,9 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
                   : m,
               ),
             );
+          },
+          onUsage: (u) => {
+            usage = u;
           },
         });
         setMessages((prev) =>
@@ -168,6 +180,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
         }
       } finally {
         abortRef.current = null;
+        streamingRef.current = false;
         setStreaming(false);
         setStatus(null);
         // Skip user-stopped turns: they measure impatience, not performance.
@@ -178,6 +191,16 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
             agent,
             failed: failed ? 1 : 0,
           });
+          // Token cost of the turn, straight from the provider's usage report.
+          if (usage != null) {
+            const u: CoachUsage = usage;
+            captureTiming(posthog, "coach_tokens", {
+              input_tokens: u.input_tokens,
+              output_tokens: u.output_tokens,
+              rounds: u.rounds,
+              agent,
+            });
+          }
         }
       }
     },
@@ -187,13 +210,13 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   const send = useCallback(
     (text: string) => {
       const message = text.trim();
-      if (!message || streaming) return;
+      if (!message || streamingRef.current) return;
       // A dismissed meal rides along with the next thing the athlete says.
       const correction = pendingCorrection;
       if (correction) setPendingCorrection(null);
       void runStream(message, true, correction);
     },
-    [runStream, streaming, pendingCorrection],
+    [runStream, pendingCorrection],
   );
 
   const stop = useCallback(() => {
@@ -202,12 +225,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   }, []);
 
   const retry = useCallback(() => {
-    if (streaming) return;
+    if (streamingRef.current) return;
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
     setMessages((prev) => prev.filter((m) => !m.failed));
     void runStream(lastUser.content, false);
-  }, [messages, runStream, streaming]);
+  }, [messages, runStream]);
 
   const resolveProposal = useCallback(
     (messageId: string, proposalId: string, status: "applied" | "dismissed" | "error", note?: string) => {

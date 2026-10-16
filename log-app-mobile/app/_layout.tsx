@@ -214,6 +214,18 @@ export default function RootLayout() {
         options={{
           host: POSTHOG_HOST,
           enableSessionReplay: true,
+          // Verified masking policy (see security.md "Analytics masking"):
+          // everything sensitive is masked by default; the flags are explicit
+          // so a SDK default change can't quietly unmask health data.
+          sessionReplayConfig: {
+            maskAllTextInputs: true,
+            maskAllImages: true,
+            maskAllSandboxedViews: true,
+            // Tap coordinates can reveal a numeric keypad's digits on replay.
+            captureTouches: false,
+            // Console logs must never become analytics events.
+            captureLog: false,
+          },
           errorTracking: {
             autocapture: { uncaughtExceptions: true, unhandledRejections: true },
           },

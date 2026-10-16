@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { router } from "expo-router";
 import { useClerk, useUser } from "@clerk/clerk-expo";
@@ -42,17 +42,45 @@ export default function SettingsScreen() {
   const styles = useStyles();
   const { enabled: haptics, setEnabled: setHaptics } = useHapticsPref();
   const [cacheCleared, setCacheCleared] = useState(false);
+  /** A failed preference save, surfaced instead of silently snapping back. */
+  const [writeError, setWriteError] = useState<string | null>(null);
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const version = Constants.expoConfig?.version ?? "1.0.0";
 
-  const restDays = profile?.rest_days ?? [];
+  const restDays = useMemo(() => profile?.rest_days ?? [], [profile]);
+  // Track the latest intended set so two quick chip taps don't both build on the
+  // same render value (which silently dropped one of the selections).
+  const restDaysRef = useRef(restDays);
+  useEffect(() => {
+    restDaysRef.current = restDays;
+  }, [restDays]);
+
+  /** Every preference write goes through here: success ticks, failure speaks. */
+  const saveSetting = useCallback(
+    async (patch: Parameters<typeof update>[0]) => {
+      setWriteError(null);
+      try {
+        await update(patch);
+        lightTick();
+      } catch (err) {
+        setWriteError(
+          err instanceof Error ? err.message : "Couldn't save that setting. Try again.",
+        );
+        // Snap the optimistic intent (and the control) back to stored truth.
+        void refetch();
+      }
+    },
+    [update, refetch],
+  );
+
   const toggleRestDay = (value: number) => {
-    const next = restDays.includes(value)
-      ? restDays.filter((d) => d !== value)
-      : [...restDays, value].sort((a, b) => a - b);
-    update({ rest_days: next.length > 0 ? next : null }).catch(() => {});
-    lightTick();
+    const current = restDaysRef.current;
+    const next = current.includes(value)
+      ? current.filter((d) => d !== value)
+      : [...current, value].sort((a, b) => a - b);
+    restDaysRef.current = next;
+    void saveSetting({ rest_days: next.length > 0 ? next : null });
   };
 
   return (
@@ -61,6 +89,7 @@ export default function SettingsScreen() {
         <ScreenHeader variant="detail" title="Settings" onBack={() => router.back()} />
 
         {error ? <ErrorState message={error} onRetry={refetch} /> : null}
+        {writeError ? <Banner tone="danger" message={writeError} /> : null}
 
         <Text style={styles.sectionLabel}>Account</Text>
         <Card style={styles.accountCard}>
@@ -188,10 +217,7 @@ export default function SettingsScreen() {
           </View>
           <Switch
             value={profile?.meal_tracking_enabled !== false}
-            onValueChange={(v) => {
-              update({ meal_tracking_enabled: v }).catch(() => {});
-              lightTick();
-            }}
+            onValueChange={(v) => void saveSetting({ meal_tracking_enabled: v })}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.white}
           />
@@ -203,10 +229,7 @@ export default function SettingsScreen() {
           </View>
           <Switch
             value={profile?.ai_coach_enabled !== false}
-            onValueChange={(v) => {
-              update({ ai_coach_enabled: v }).catch(() => {});
-              lightTick();
-            }}
+            onValueChange={(v) => void saveSetting({ ai_coach_enabled: v })}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.white}
           />
@@ -224,10 +247,7 @@ export default function SettingsScreen() {
           </View>
           <Switch
             value={profile?.track_weight !== false}
-            onValueChange={(v) => {
-              update({ track_weight: v }).catch(() => {});
-              lightTick();
-            }}
+            onValueChange={(v) => void saveSetting({ track_weight: v })}
             trackColor={{ false: colors.border, true: colors.primary }}
             thumbColor={colors.white}
           />

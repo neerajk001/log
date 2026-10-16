@@ -149,7 +149,7 @@ export default function InsightsScreen() {
   // weeks argument only shapes the nutrition buckets — which this call ignores — so
   // passing the same value keeps the cache key identical to the fetch above when the
   // range is 7d, and the two share one request.
-  const { data: weekTrends } = useTrends("7d", nutritionWeeks * 2);
+  const { data: weekTrends, refetch: refetchWeek } = useTrends("7d", nutritionWeeks * 2);
   const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
@@ -180,15 +180,22 @@ export default function InsightsScreen() {
   // The nutrition card keeps its own window of weekly averages, independent of
   // the top range — the 1W / 2W / … control the screen has always had.
   const nutritionBuckets = useMemo(() => trends?.nutrition ?? [], [trends]);
+  // The server clamps the requested window at 52 weeks, so 1Y asks for (and gets)
+  // 52 buckets, not 104. The held response is "fresh" only when its bucket count
+  // matches the window on screen: after a window switch the previous window's
+  // buckets must not be relabelled as the new window's numbers.
+  const requestedNutritionBuckets = Math.min(nutritionWeeks * 2, 52);
+  const nutritionFresh =
+    trends != null && nutritionBuckets.length === requestedNutritionBuckets;
   // The chosen window is the tail of the fetched buckets; the slice before it is the
   // previous, equally-long window it is compared against.
   const nutritionCurrent = useMemo(
-    () => nutritionBuckets.slice(-nutritionWeeks),
-    [nutritionBuckets, nutritionWeeks],
+    () => (nutritionFresh ? nutritionBuckets.slice(-nutritionWeeks) : []),
+    [nutritionBuckets, nutritionFresh, nutritionWeeks],
   );
   const nutritionPrevious = useMemo(
-    () => nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks),
-    [nutritionBuckets, nutritionWeeks],
+    () => (nutritionFresh ? nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks) : []),
+    [nutritionBuckets, nutritionFresh, nutritionWeeks],
   );
   const nutritionAverage = windowAverage(nutritionCurrent, pickNutrient(nutritionMetric));
   const nutritionPrevAverage = windowAverage(nutritionPrevious, pickNutrient(nutritionMetric));
@@ -294,6 +301,7 @@ export default function InsightsScreen() {
   const refresh = () => {
     refetch();
     refetchTrends();
+    refetchWeek();
   };
 
   return (
@@ -550,7 +558,9 @@ export default function InsightsScreen() {
               ))}
             </ChipRow>
 
-            {nutritionAverage != null ? (
+            {!nutritionFresh && !trendsError ? (
+              <LoadingState label="Loading your nutrition…" />
+            ) : nutritionAverage != null ? (
               <>
                 <View style={styles.metricRow}>
                   <Text style={typography.metric}>

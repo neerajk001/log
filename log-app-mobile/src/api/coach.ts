@@ -11,6 +11,7 @@ import type {
   CoachProfileInput,
   CoachProposal,
   CoachSession,
+  CoachUsage,
   DismissedMeal,
   ParsedPlanPreview,
   PhysiqueReading,
@@ -63,6 +64,7 @@ export async function streamCoachChat({
   onStatus,
   onSessionId,
   onProposal,
+  onUsage,
   signal,
 }: {
   token: string | null;
@@ -76,6 +78,8 @@ export async function streamCoachChat({
   onStatus?: (status: string) => void;
   onSessionId?: (sessionId: string) => void;
   onProposal?: (proposal: CoachProposal) => void;
+  /** Server-measured token/latency facts for the turn (arrives with `done`). */
+  onUsage?: (usage: CoachUsage) => void;
   signal?: AbortSignal;
 }): Promise<string> {
   if (!token) throw new Error("Signed out. Please sign in again.");
@@ -140,6 +144,7 @@ export async function streamCoachChat({
         status?: string;
         sessionId?: string;
         proposal?: CoachProposal;
+        usage?: CoachUsage;
       };
       try {
         event = JSON.parse(payload) as typeof event;
@@ -149,6 +154,7 @@ export async function streamCoachChat({
       if (event.error) serverError = event.error;
       if (event.sessionId) onSessionId?.(event.sessionId);
       if (event.proposal) onProposal?.(event.proposal);
+      if (event.usage) onUsage?.(event.usage);
       if (typeof event.status === "string" && event.status.length > 0) onStatus?.(event.status);
       if (typeof event.delta === "string" && event.delta.length > 0) {
         if (firstDeltaAt == null) firstDeltaAt = Date.now();

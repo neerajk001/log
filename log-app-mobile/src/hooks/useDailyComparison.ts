@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useDailyLogsApi } from "../api/dailyLogs";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import { addDays } from "../utils/date";
 import type { DailyLog } from "../api/types";
 
@@ -34,10 +35,13 @@ function latestWeight(rows: DailyLog[]): number | null {
 export function useDailyComparison(today: string): DailyComparison {
   const api = useDailyLogsApi();
   const [data, setData] = useState<DailyComparison>({ weightDeltaKg: null, sleepDeltaHours: null });
+  const { begin, isCurrent } = useLatest();
 
   const load = useCallback(async () => {
+    const token = begin();
     try {
       const rows = await api.getDailyLogsRange(addDays(today, -13), today);
+      if (!isCurrent(token)) return;
       const weekStart = addDays(today, -6);
       const thisWeek = rows.filter((r) => r.date >= weekStart && r.date <= today);
       const lastWeek = rows.filter((r) => r.date < weekStart);
@@ -60,7 +64,7 @@ export function useDailyComparison(today: string): DailyComparison {
     } catch {
       // Footnotes are non-critical: keep the last good values on a blip.
     }
-  }, [api, today]);
+  }, [api, today, begin, isCurrent]);
 
   useDataSyncOnFocus(["daily"], load);
 

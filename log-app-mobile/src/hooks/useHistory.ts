@@ -4,6 +4,7 @@ import { useLiftLogsApi } from "../api/liftLogs";
 import { useActivityApi } from "../api/activity";
 import { useCurrentDate } from "./useCurrentDate";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { ActivityLog, DailyLog, LiftLog } from "../api/types";
 import { addDays } from "../utils/date";
 import { groupByDate } from "../utils/derive";
@@ -47,6 +48,13 @@ export function useHistory(rangeDays: number) {
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const pendingRef = useRef(0);
+  // One generation per slice: a range switch must not let a slow old daily
+  // response overwrite the new one, while an in-flight lift load stays valid.
+  // Destructured so the stable callbacks (not a fresh object) land in deps.
+  const { begin: beginDaily, isCurrent: isCurrentDaily } = useLatest();
+  const { begin: beginLift, isCurrent: isCurrentLift } = useLatest();
+  const { begin: beginActivity, isCurrent: isCurrentActivity } = useLatest();
+  const { begin: beginStats, isCurrent: isCurrentStats } = useLatest();
 
   // Live date (not mount-time): a midnight rollover re-runs the loaders, since the
   // window feeds their dependency chain.
@@ -55,19 +63,31 @@ export function useHistory(rangeDays: number) {
   const prevFrom = useMemo(() => addDays(from, -rangeDays), [from, rangeDays]);
   const prevTo = useMemo(() => addDays(from, -1), [from]);
 
-  /** Runs one slice, tracking its own error and the shared loading flag. */
+  /** Runs one slice under its own generation guard, tracking error + loading. */
   const run = useCallback(
-    async (slice: Slice, task: () => Promise<void>, fallback: string) => {
+    async (
+      slice: Slice,
+      begin: () => number,
+      isCurrent: (token: number) => boolean,
+      task: (apply: (fn: () => void) => void) => Promise<void>,
+      fallback: string,
+    ) => {
+      const token = begin();
       setErrors((prev) => ({ ...prev, [slice]: undefined }));
       pendingRef.current += 1;
       setLoading(true);
+      const apply = (fn: () => void) => {
+        if (isCurrent(token)) fn();
+      };
       try {
-        await task();
+        await task(apply);
       } catch (err) {
-        setErrors((prev) => ({
-          ...prev,
-          [slice]: err instanceof Error ? err.message : fallback,
-        }));
+        if (isCurrent(token)) {
+          setErrors((prev) => ({
+            ...prev,
+            [slice]: err instanceof Error ? err.message : fallback,
+          }));
+        }
       } finally {
         pendingRef.current -= 1;
         if (pendingRef.current === 0) setLoading(false);
@@ -80,36 +100,45 @@ export function useHistory(rangeDays: number) {
     () =>
       run(
         "daily",
-        async () => {
-          setDailyLogs(await dailyApi.getDailyLogsRange(from, to));
+        beginDaily,
+        isCurrentDaily,
+        async (apply) => {
+          const rows = await dailyApi.getDailyLogsRange(from, to);
+          apply(() => setDailyLogs(rows));
         },
         "Failed to load your daily values",
       ),
-    [run, dailyApi, from, to],
+    [run, dailyApi, from, to, beginDaily, isCurrentDaily],
   );
 
   const loadLift = useCallback(
     () =>
       run(
         "lift",
-        async () => {
-          setLiftLogs(await liftApi.getLiftLogsRange(from, to));
+        beginLift,
+        isCurrentLift,
+        async (apply) => {
+          const rows = await liftApi.getLiftLogsRange(from, to);
+          apply(() => setLiftLogs(rows));
         },
         "Failed to load your lifts",
       ),
-    [run, liftApi, from, to],
+    [run, liftApi, from, to, beginLift, isCurrentLift],
   );
 
   const loadActivity = useCallback(
     () =>
       run(
         "activity",
-        async () => {
-          setActivityLogs(await activityApi.getActivityRange(from, to));
+        beginActivity,
+        isCurrentActivity,
+        async (apply) => {
+          const rows = await activityApi.getActivityRange(from, to);
+          apply(() => setActivityLogs(rows));
         },
         "Failed to load your activity",
       ),
-    [run, activityApi, from, to],
+    [run, activityApi, from, to, beginActivity, isCurrentActivity],
   );
 
   /**
@@ -120,17 +149,21 @@ export function useHistory(rangeDays: number) {
     () =>
       run(
         "stats",
-        async () => {
+        beginStats,
+        isCurrentStats,
+        async (apply) => {
           const metrics = await liftApi.getLiftMetrics(from, to, prevFrom, prevTo);
-          setRangeStats({
-            workouts: metrics.days.length,
-            totalVolume: metrics.exercises.reduce((sum, e) => sum + e.volume, 0),
-            strengthPct: strengthChangePctFrom(metrics.exercises),
-          });
+          apply(() =>
+            setRangeStats({
+              workouts: metrics.days.length,
+              totalVolume: metrics.exercises.reduce((sum, e) => sum + e.volume, 0),
+              strengthPct: strengthChangePctFrom(metrics.exercises),
+            }),
+          );
         },
         "Failed to load your stats",
       ),
-    [run, liftApi, from, to, prevFrom, prevTo],
+    [run, liftApi, from, to, prevFrom, prevTo, beginStats, isCurrentStats],
   );
 
   // Lift writes move the stats too, so they share one loader.

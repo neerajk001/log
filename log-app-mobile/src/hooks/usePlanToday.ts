@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePlansApi } from "../api/plans";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { PlanToday } from "../api/types";
 
 /**
@@ -16,35 +17,43 @@ export function usePlanToday(scopeDate?: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const firstScope = useRef(scopeDate);
+  const { begin, isCurrent } = useLatest();
 
-  const fetch = useCallback(async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const plans = await api.getActivePlan();
-      const active = plans.find((p) => p.is_active) ?? null;
-      if (!active) {
-        setPlanId(null);
-        setPlanName(null);
-        setDay(null);
-        return;
+  const fetch = useCallback(
+    async (force = false) => {
+      const token = begin();
+      setLoading(true);
+      setError(null);
+      try {
+        const plans = await api.getActivePlan();
+        if (!isCurrent(token)) return;
+        const active = plans.find((p) => p.is_active) ?? null;
+        if (!active) {
+          setPlanId(null);
+          setPlanName(null);
+          setDay(null);
+          return;
+        }
+        setPlanId(active.id);
+        setPlanName(active.name);
+        // Send the athlete's local date: the server's UTC "today" can be a day behind.
+        const today = await api.getPlanToday(active.id, {
+          ...(force ? { force: true } : {}),
+          ...(scopeDate ? { date: scopeDate } : {}),
+        });
+        if (!isCurrent(token)) return;
+        setDay(today.day);
+      } catch (err) {
+        if (!isCurrent(token)) return;
+        setError(err instanceof Error ? err.message : "Failed to load plan");
+      } finally {
+        if (isCurrent(token)) setLoading(false);
       }
-      setPlanId(active.id);
-      setPlanName(active.name);
-      // Send the athlete's local date: the server's UTC "today" can be a day behind.
-      const today = await api.getPlanToday(active.id, {
-        ...(force ? { force: true } : {}),
-        ...(scopeDate ? { date: scopeDate } : {}),
-      });
-      setDay(today.day);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load plan");
-    } finally {
-      setLoading(false);
-    }
-    // `scopeDate` is read inside, so a date change must rebuild this closure —
-    // otherwise a midnight rollover would refetch the old day.
-  }, [api, scopeDate]);
+      // `scopeDate` is read inside, so a date change must rebuild this closure —
+      // otherwise a midnight rollover would refetch the old day.
+    },
+    [api, scopeDate, begin, isCurrent],
+  );
 
   useDataSyncOnFocus(["plans"], fetch);
 

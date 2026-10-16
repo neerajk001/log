@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useCoachApi } from "../api/coach";
 import { useDataSync } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { CoachProfile, CoachProfileInput } from "../api/types";
 
 export function useCoachProfile() {
@@ -11,19 +12,26 @@ export function useCoachProfile() {
   // on for background refreshes (e.g. the save that "Generate my plan" performs).
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
 
   const load = useCallback(async () => {
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
-      setProfile(await api.getProfile());
+      const next = await api.getProfile();
+      if (!isCurrent(token)) return;
+      setProfile(next);
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load your profile");
     } finally {
-      setLoading(false);
-      setLoaded(true);
+      if (isCurrent(token)) {
+        setLoading(false);
+        setLoaded(true);
+      }
     }
-  }, [api]);
+  }, [api, begin, isCurrent]);
 
   useEffect(() => {
     load();
@@ -34,10 +42,12 @@ export function useCoachProfile() {
   const save = useCallback(
     async (data: CoachProfileInput) => {
       const saved = await api.saveProfile(data);
+      // Newer than any in-flight load; don't let a stale GET overwrite it.
+      begin();
       setProfile(saved);
       return saved;
     },
-    [api],
+    [api, begin],
   );
 
   return { profile, loading, loaded, error, save, refetch: load };

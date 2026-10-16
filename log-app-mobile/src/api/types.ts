@@ -295,6 +295,13 @@ export interface CoachMemory {
   updated_at: string;
 }
 
+/** Server-measured cost/latency facts for one coach turn. */
+export interface CoachUsage {
+  input_tokens: number;
+  output_tokens: number;
+  rounds: number;
+}
+
 export interface MealItem {
   name: string;
   quantity?: string;

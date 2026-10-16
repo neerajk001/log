@@ -2,6 +2,7 @@ import { useAuth } from "@clerk/clerk-expo";
 import Constants from "expo-constants";
 import { useEffect, useMemo, useRef } from "react";
 import {
+  cacheGeneration,
   clearAllCache,
   clearInflight,
   inflightFor,
@@ -187,12 +188,16 @@ export function useApiClient() {
           const pending = inflightFor(path);
           if (pending) return pending as Promise<T>;
         }
+        const readGeneration = cacheGeneration();
         const request = wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current()).then((data) => {
-            writeCache(path, data, opts?.ttlMs);
+            // If something invalidated the cache while this read was in flight,
+            // the payload may predate that write — publishing it would resurrect
+            // stale data. The caller still gets the response it asked for.
+            if (cacheGeneration() === readGeneration) writeCache(path, data, opts?.ttlMs);
             return data;
           }),
-        ).finally(() => clearInflight(path));
+        ).finally(() => clearInflight(path, request));
         return trackInflight(path, request);
       },
       put: <T = unknown>(path: string, body: unknown) =>

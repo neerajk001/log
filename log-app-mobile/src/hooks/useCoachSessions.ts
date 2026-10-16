@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import { useCoachApi } from "../api/coach";
 import { useDataSync } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { CoachSession } from "../api/types";
 
 /** Chat history: the user's coach sessions, newest first. */
@@ -10,18 +11,25 @@ export function useCoachSessions() {
   const [sessions, setSessions] = useState<CoachSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
 
   const load = useCallback(async () => {
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
-      setSessions(await api.getSessions());
+      const next = await api.getSessions();
+      // A delete (or a streak of focus refetches) can land while a slow load is
+      // in flight; only the newest response commits.
+      if (!isCurrent(token)) return;
+      setSessions(next);
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load your chats");
     } finally {
-      setLoading(false);
+      if (isCurrent(token)) setLoading(false);
     }
-  }, [api]);
+  }, [api, begin, isCurrent]);
 
   // Refresh whenever the list regains focus (e.g. after a new chat), or when a
   // streamed turn creates/renames one.

@@ -1,4 +1,5 @@
-import { StyleSheet, View } from "react-native";
+import { StyleSheet } from "react-native";
+import { PostHogMaskView } from "posthog-react-native";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { spacing } from "../theme/spacing";
 import { Button, ListRow } from "./ui/primitives";
@@ -27,7 +28,8 @@ export function MealsSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Meals">
-      <View style={styles.body}>
+      {/* Meal names/calories are health data — excluded from session replays. */}
+      <PostHogMaskView style={styles.body}>
         {meals.map((m) => (
           <ListRow
             key={m.id}
@@ -40,7 +42,7 @@ export function MealsSheet({
           />
         ))}
         <Button label="Log a meal" icon="add" onPress={onLogMeal} />
-      </View>
+      </PostHogMaskView>
     </Sheet>
   );
 }

@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react";
 import { useLiftLogsApi } from "../api/liftLogs";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useCurrentDate } from "./useCurrentDate";
+import { useLatest } from "./useLatest";
 import type { LiftLog } from "../api/types";
-import { todayLocal } from "../utils/date";
 
 /**
  * Distinct exercises logged in the recent window (for quick re-entry), plus the top
@@ -16,20 +17,26 @@ export function useRecentExercises(days = 120) {
   const [names, setNames] = useState<string[]>([]);
   const [lastByExercise, setLastByExercise] = useState<Map<string, LiftLog>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
+  // Live "today": at midnight the window moves, so the "Last:" cue must refetch.
+  const today = useCurrentDate();
 
   const load = useCallback(async () => {
+    const token = begin();
     try {
-      const summary = await api.getLiftSummary(days, todayLocal());
+      const summary = await api.getLiftSummary(days, today);
+      if (!isCurrent(token)) return;
       setNames(summary.names);
       setLastByExercise(
         new Map(summary.last_by_exercise.map((log) => [log.exercise_name, log])),
       );
       setError(null);
     } catch (err) {
+      if (!isCurrent(token)) return;
       // Keep the last good names and "Last:" cues — a blip shouldn't wipe them.
       setError(err instanceof Error ? err.message : "Failed to load recent exercises");
     }
-  }, [api, days]);
+  }, [api, days, today, begin, isCurrent]);
 
   useDataSyncOnFocus(["lift"], load);
 
