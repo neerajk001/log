@@ -18,6 +18,22 @@ vi.mock("../src/middleware/auth", () => ({
   },
 }));
 
+/**
+ * Deterministic Clerk stub for app-level tests.
+ *
+ * The real `@clerk/express` middleware builds an AuthenticateContext on every
+ * request and fatally asserts a valid publishable key (keyless environments
+ * throw "Publishable key is missing."), which makes any app-booting test
+ * depend on Clerk key material being present. These suites stub the auth
+ * later (`src/middleware/auth` above), so the middleware is replaced with a
+ * pass-through: routing, validation, SSE and DB behavior — the actual
+ * subjects — stay production code. Production keeps the real middleware.
+ */
+vi.mock("@clerk/express", () => ({
+  clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  getAuth: () => ({ userId: null }),
+}));
+
 const hooks = vi.hoisted(() => ({
   runCoachChatStream: vi.fn(),
 }));

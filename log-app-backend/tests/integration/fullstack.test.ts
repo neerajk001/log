@@ -41,6 +41,21 @@ vi.mock("../../src/middleware/auth", () => ({
   },
 }));
 
+/**
+ * Deterministic Clerk stub for app-level tests.
+ *
+ * The real `@clerk/express` middleware builds an AuthenticateContext on every
+ * request and fatally asserts a valid publishable key (keyless environments
+ * throw "Publishable key is missing."), which makes these DB/route assertions
+ * depend on Clerk key material being present. Auth is stubbed below
+ * (`src/middleware/auth`), so the middleware becomes a pass-through and the
+ * 401 contract is still asserted through the mocked `requireAuth`.
+ */
+vi.mock("@clerk/express", () => ({
+  clerkMiddleware: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  getAuth: () => ({ userId: null }),
+}));
+
 const MEAL_DATE = "2026-10-10";
 const mealBody = (patch: Record<string, unknown> = {}) => ({
   id: randomUUID(),

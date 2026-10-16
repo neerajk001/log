@@ -266,12 +266,16 @@ router.post(
 
     let closed = false;
     const send = (payload: unknown) => {
-      if (!closed) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (!closed && !res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
 
     // A client Stop (or a dropped connection) aborts the upstream model call.
+    // Listen on the RESPONSE, not the request: Node emits `req` 'close' as soon
+    // as the request body is fully read (immediately for these POSTs), which
+    // marked the stream closed before it began and skipped `res.end()` —
+    // hanging the client on every fresh connection (first chat message).
     const controller = new AbortController();
-    req.on("close", () => {
+    res.on("close", () => {
       closed = true;
       controller.abort();
     });
@@ -307,7 +311,9 @@ router.post(
       });
       send({ error: err instanceof Error ? err.message : "The coach failed to reply" });
     } finally {
-      if (!closed) res.end();
+      // Always terminate the response unless it already ended — a real client
+      // disconnect makes this a no-op, but an errored turn must never hang.
+      if (!res.writableEnded) res.end();
     }
   },
 );
