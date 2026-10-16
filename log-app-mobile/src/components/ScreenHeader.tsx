@@ -1,23 +1,38 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { spacing } from "../theme/spacing";
 
-export function BrandWordmark({ size = 22 }: { size?: number }) {
-  const { colors, typography } = useTheme();
+/** Header-sized crop of the Repora emblem (kept small so it isn't a 1 MB import). */
+const REPORA_LOGO = require("../../assets/images/repora-logo.png");
+
+/**
+ * The Repora brand mark. The emblem ships on the brand's black surface, so it
+ * renders as a rounded tile: seamless on the dark/true-black themes and a
+ * deliberate app-icon tile on light.
+ */
+export function BrandWordmark({ size = 28 }: { size?: number }) {
   return (
-    <Text style={[typography.brand, { fontSize: size }]}>
-      <Text>LogMy</Text>
-      <Text style={{ color: colors.primary }}>Lift</Text>
-    </Text>
+    <Image
+      source={REPORA_LOGO}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.28),
+        alignSelf: "flex-start",
+      }}
+      resizeMode="cover"
+      accessibilityRole="image"
+      accessibilityLabel="Repora"
+    />
   );
 }
 
 /**
  * Screen header with three shapes:
- * - `brand`  — LogMyLift wordmark on the left (Today / Lift).
+ * - `brand`  — Repora mark on the left (Today / Lift).
  * - `page`   — large page title with optional subtitle (Insights / History / Plan).
  * - `detail` — back chevron, centered title, optional right action (pushed screens).
  */
