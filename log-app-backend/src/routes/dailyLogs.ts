@@ -34,10 +34,11 @@ router.get("/daily", requireAuth, validate(dailyLogsQuerySchema, "query"), async
     logs.map((l) => ({
       id: l.id,
       date: l.date.toISOString().slice(0, 10),
-      weight_kg: l.weightKg,
+      // Prisma Decimals serialize as strings; the API contract is numbers.
+      weight_kg: l.weightKg == null ? null : Number(l.weightKg),
       calories: l.calories,
       protein_g: l.proteinG,
-      sleep_hours: l.sleepHours,
+      sleep_hours: l.sleepHours == null ? null : Number(l.sleepHours),
     })),
   );
 });
@@ -59,10 +60,10 @@ router.get("/daily/:date", requireAuth, validate(dateParamSchema, "params"), asy
 
   res.json({
     date,
-    weight_kg: log?.weightKg ?? null,
+    weight_kg: log?.weightKg == null ? null : Number(log.weightKg),
     calories: log?.calories ?? null,
     protein_g: log?.proteinG ?? null,
-    sleep_hours: log?.sleepHours ?? null,
+    sleep_hours: log?.sleepHours == null ? null : Number(log.sleepHours),
   });
 });
 
@@ -104,10 +105,10 @@ router.put(
     res.json({
       id: log.id,
       date: log.date.toISOString().slice(0, 10),
-      weight_kg: log.weightKg,
+      weight_kg: log.weightKg == null ? null : Number(log.weightKg),
       calories: log.calories,
       protein_g: log.proteinG,
-      sleep_hours: log.sleepHours,
+      sleep_hours: log.sleepHours == null ? null : Number(log.sleepHours),
     });
   },
 );

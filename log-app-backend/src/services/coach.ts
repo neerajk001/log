@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
+import { incrementCounter } from "../utils/metricRegistry";
 import { parsePlanOutput, PlanParseError } from "./planParser";
 import { resolvePlanDayForDate } from "./planRotation";
 import { decisionsContext, physiqueContext, recordDecision } from "./coachDecisions";
@@ -157,6 +158,30 @@ function topSetByWindow(
 }
 
 /**
+ * The full dossier is ~13 queries over slowly-changing aggregates. Consecutive
+ * turns within a short TTL reuse it instead of paying for every query again.
+ * Only the `full` scope is cached: the meal scope carries today's intake and
+ * must see a meal logged seconds ago. Bounded and oldest-first like the food
+ * cache. Tests reset it (keys outlive mock resets by design).
+ */
+const CONTEXT_CACHE_MS = 60_000;
+const MAX_CONTEXT_CACHE_ENTRIES = 200;
+const athleteContextCache = new Map<string, { at: number; value: string }>();
+
+/** Test hook: drop cached contexts (they key off user+date across cases). */
+export function resetAthleteContextCache(): void {
+  athleteContextCache.clear();
+}
+
+function cacheAthleteContext(key: string, value: string): void {
+  if (athleteContextCache.size >= MAX_CONTEXT_CACHE_ENTRIES) {
+    const oldest = athleteContextCache.keys().next();
+    if (!oldest.done) athleteContextCache.delete(oldest.value);
+  }
+  athleteContextCache.set(key, { at: Date.now(), value });
+}
+
+/**
  * A compact, token-bounded summary of the athlete's profile and last ~4 weeks
  * of data: weight/nutrition averages plus recent daily weights, per-exercise
  * top sets and volume, this-vs-last-week lift trend, activity minutes, recent
@@ -173,6 +198,10 @@ export async function buildAthleteContext(
   // A meal turn only needs targets, today's intake and memory — the rest of the dossier
   // (weights, PRs, plan, adherence) is not just unused, it costs tokens on every turn.
   if (scope === "meal") return buildMealContext(userId, today);
+
+  const cacheKey = `${userId}:${today}`;
+  const cached = athleteContextCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < CONTEXT_CACHE_MS) return cached.value;
 
   const now = new Date(`${today}T00:00:00Z`);
   const since = new Date(now);
@@ -491,8 +520,14 @@ export async function buildAthleteContext(
     }
   }
 
-  if (lines.length === 0) return "No logged data yet.";
-  return [`TODAY: ${today} (the athlete's local date; units: kg, kcal, g, hours)`, ...lines].join("\n");
+  if (lines.length === 0) {
+    const empty = "No logged data yet.";
+    cacheAthleteContext(cacheKey, empty);
+    return empty;
+  }
+  const context = [`TODAY: ${today} (the athlete's local date; units: kg, kcal, g, hours)`, ...lines].join("\n");
+  cacheAthleteContext(cacheKey, context);
+  return context;
 }
 
 /**
@@ -573,6 +608,7 @@ async function callModel(
       });
     } catch {
       if (!lastAttempt) {
+        incrementCounter("coach_provider_retries_total", { kind: "nonstream" });
         console.warn(`[coach] ${host} call failed before responding, retrying once`);
         continue;
       }
@@ -593,6 +629,7 @@ async function callModel(
       );
     }
     if (!res.ok) {
+      incrementCounter("coach_provider_retries_total", { kind: "nonstream" });
       console.warn(`[coach] ${host} error ${res.status}, retrying once`);
       continue;
     }
@@ -629,6 +666,13 @@ export interface CoachUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+}
+
+/** What a single coach turn cost, in provider terms — for the client's telemetry. */
+export interface CoachTurnUsage {
+  input_tokens: number;
+  output_tokens: number;
+  rounds: number;
 }
 
 export type OpenAIEvent =
@@ -2035,6 +2079,7 @@ async function streamRound(
       // Client Stop is never retried — it already got its answer (partial text).
       if (signal?.aborted) return false;
       if (lastAttempt) return false;
+      incrementCounter("coach_provider_retries_total", { kind: "stream" });
       console.warn(`[coach] stream round failed silently (${why}), retrying once`);
       return true;
     };
@@ -2055,6 +2100,7 @@ async function streamRound(
         return { text: "", calls: [], responseId: null, usage: null, incomplete: false };
       }
       if (!lastAttempt) {
+        incrementCounter("coach_provider_retries_total", { kind: "stream" });
         console.warn(`[coach] stream round failed before responding, retrying once`);
         continue;
       }
@@ -2067,6 +2113,7 @@ async function streamRound(
       throw new AppError(502, "COACH_ERROR", "The coach is having trouble right now — try again in a moment.");
     }
     if (!res.ok || !res.body) {
+      incrementCounter("coach_provider_retries_total", { kind: "stream" });
       console.warn(`[coach] ${host} stream error ${res.status}, retrying once`);
       continue;
     }
@@ -2169,6 +2216,8 @@ export async function runCoachChatStream(
     onStatus?: (status: string) => void;
     onSession?: (sessionId: string) => void;
     onProposal?: (proposal: CoachProposal) => void;
+    /** Called once per turn with the provider's token totals (when reported). */
+    onUsage?: (usage: CoachTurnUsage) => void;
   },
   agent?: AgentId,
   signal?: AbortSignal,
@@ -2445,6 +2494,21 @@ export async function runCoachChatStream(
     }),
   );
 
+  // Hand the token facts to the caller (the stream forwards them to the client
+  // with `done`), so cost is visible end-to-end instead of only in VPS logs.
+  handlers.onUsage?.({
+    input_tokens: totalInput,
+    output_tokens: totalOutput,
+    rounds: roundTimings.length,
+  });
+
+  // Same facts, aggregated for the scrape endpoint.
+  incrementCounter("coach_turns_total");
+  incrementCounter("coach_rounds_total", {}, roundTimings.length);
+  incrementCounter("coach_input_tokens_total", {}, totalInput);
+  incrementCounter("coach_output_tokens_total", {}, totalOutput);
+  for (const tool of usedTools) incrementCounter("coach_tool_calls_total", { tool });
+
   const answer = full.trim();
   // Store proposals alongside whatever text was produced — even an empty reply
   // keeps a card the athlete can still confirm after reopening the chat.
@@ -2638,7 +2702,9 @@ export async function analyzePhysique(
   return { headline, assessment };
 }
 
-const MEAL_SYSTEM = `You estimate the calories and protein of a meal from a photo and/or a short description.
+// Exported for the offline meal-accuracy evaluation (evals/runMealEval.ts) —
+// the eval measures the same instructions the photo/chat paths use.
+export const MEAL_SYSTEM = `You estimate the calories and protein of a meal from a photo and/or a short description.
 
 Return ONLY a JSON object, no prose and no markdown fences, matching exactly:
 {

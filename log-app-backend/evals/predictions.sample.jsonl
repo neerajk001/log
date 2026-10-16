@@ -1,0 +1,14 @@
+{"id":"roti-dal","calories":350,"proteinG":15,"items":[{"name":"2 rotis","calories":210,"protein_g":7},{"name":"dal","calories":140,"protein_g":8}],"question":null}
+{"id":"poha","calories":280,"proteinG":6,"items":[{"name":"poha","calories":280,"protein_g":6}],"question":null}
+{"id":"masala-dosa","calories":440,"proteinG":9,"items":[{"name":"masala dosa","calories":380,"protein_g":8},{"name":"coconut chutney","calories":60,"protein_g":1}],"question":null}
+{"id":"chicken-biryani","calories":720,"proteinG":31,"items":[{"name":"chicken biryani","calories":620,"protein_g":28},{"name":"raita","calories":100,"protein_g":3}],"question":null}
+{"id":"paneer-roti","calories":580,"proteinG":22,"items":[{"name":"paneer butter masala","calories":380,"protein_g":16},{"name":"2 rotis","calories":200,"protein_g":6}],"question":null}
+{"id":"idli-sambar","calories":300,"proteinG":8,"items":[{"name":"3 idlis","calories":210,"protein_g":6},{"name":"sambar","calories":90,"protein_g":2}],"question":null}
+{"id":"egg-bhurji-bread","calories":410,"proteinG":19,"items":[{"name":"egg bhurji (2 eggs)","calories":270,"protein_g":14},{"name":"2 bread slices","calories":140,"protein_g":5}],"question":null}
+{"id":"soya-rice","calories":500,"proteinG":27,"items":[{"name":"soya chunks curry","calories":280,"protein_g":22},{"name":"1 cup cooked rice","calories":220,"protein_g":5}],"question":null}
+{"id":"curd-rice","calories":330,"proteinG":10,"items":[{"name":"curd rice","calories":330,"protein_g":10}],"question":null}
+{"id":"chole-bhature","calories":680,"proteinG":19,"items":[{"name":"chole","calories":280,"protein_g":14},{"name":"2 bhature","calories":400,"protein_g":5}],"question":null}
+{"id":"protein-shake","calories":245,"proteinG":29,"items":[{"name":"whey (1 scoop)","calories":120,"protein_g":24},{"name":"300 ml milk","calories":125,"protein_g":5}],"question":null}
+{"id":"chicken-salad","calories":390,"proteinG":43,"items":[{"name":"200 g grilled chicken","calories":330,"protein_g":40},{"name":"side salad","calories":60,"protein_g":3}],"question":null}
+{"id":"thali-ambiguous","calories":1000,"proteinG":28,"items":[{"name":"roti","calories":210,"protein_g":7},{"name":"rice","calories":200,"protein_g":4},{"name":"dal","calories":140,"protein_g":8},{"name":"curry","calories":450,"protein_g":9}],"question":"Was this a veg thali or did it include meat?"}
+{"id":"blurry-plate","calories":300,"proteinG":10,"items":[{"name":"rice","calories":300,"protein_g":10}],"question":"The photo is blurry — can you tell me roughly what was on the plate?"}

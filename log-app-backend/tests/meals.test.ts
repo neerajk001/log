@@ -205,6 +205,19 @@ describe("createMealIdempotent", () => {
     expect(mocks.tx.mealLog.create).not.toHaveBeenCalled();
   });
 
+  it("replays when the stored jsonb reordered the item keys", async () => {
+    // PostgreSQL jsonb does not preserve key order, so the stored items come
+    // back shuffled; a plain JSON.stringify comparison would 409 a real retry.
+    mocks.findUniqueMeal.mockResolvedValue(
+      record({ items: [{ protein_g: 6, quantity: "2 medium", calories: 240, name: "Roti" }] }),
+    );
+
+    const result = await createMealIdempotent(userId, input());
+
+    expect(result.created).toBe(false);
+    expect(result.meal.id).toBe(requestId);
+  });
+
   it.each([
     ["another owner", { userId: "user-2" }, {}],
     ["different calories", {}, { calories: 300 }],

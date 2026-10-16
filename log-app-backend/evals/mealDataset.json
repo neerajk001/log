@@ -1,0 +1,114 @@
+[
+  {
+    "id": "roti-dal",
+    "description": "2 medium rotis with one bowl of dal",
+    "kcal": 358,
+    "proteinG": 16,
+    "items": ["roti", "dal"],
+    "ambiguous": false
+  },
+  {
+    "id": "poha",
+    "description": "One bowl of poha with peanuts and a squeeze of lemon",
+    "kcal": 270,
+    "proteinG": 6,
+    "items": ["poha"],
+    "ambiguous": false
+  },
+  {
+    "id": "masala-dosa",
+    "description": "One masala dosa with coconut chutney",
+    "kcal": 430,
+    "proteinG": 9,
+    "items": ["dosa", "chutney"],
+    "ambiguous": false
+  },
+  {
+    "id": "chicken-biryani",
+    "description": "One plate of chicken biryani with raita",
+    "kcal": 700,
+    "proteinG": 32,
+    "items": ["biryani", "chicken", "raita"],
+    "ambiguous": false
+  },
+  {
+    "id": "paneer-roti",
+    "description": "Paneer butter masala with 2 rotis",
+    "kcal": 600,
+    "proteinG": 24,
+    "items": ["paneer", "roti"],
+    "ambiguous": false
+  },
+  {
+    "id": "idli-sambar",
+    "description": "3 idlis with sambar",
+    "kcal": 290,
+    "proteinG": 8,
+    "items": ["idli", "sambar"],
+    "ambiguous": false
+  },
+  {
+    "id": "egg-bhurji-bread",
+    "description": "Egg bhurji made with 2 eggs and 2 slices of bread",
+    "kcal": 420,
+    "proteinG": 20,
+    "items": ["egg", "bread"],
+    "ambiguous": false
+  },
+  {
+    "id": "soya-rice",
+    "description": "Soya chunks curry with one cup of cooked rice",
+    "kcal": 480,
+    "proteinG": 28,
+    "items": ["soya", "rice"],
+    "ambiguous": false
+  },
+  {
+    "id": "curd-rice",
+    "description": "One bowl of curd rice with a tempering of mustard seeds",
+    "kcal": 320,
+    "proteinG": 9,
+    "items": ["curd", "rice"],
+    "ambiguous": false
+  },
+  {
+    "id": "chole-bhature",
+    "description": "Chole with two bhature",
+    "kcal": 700,
+    "proteinG": 20,
+    "items": ["chole", "bhature"],
+    "ambiguous": false
+  },
+  {
+    "id": "protein-shake",
+    "description": "One scoop of whey protein with 300 ml milk",
+    "kcal": 250,
+    "proteinG": 30,
+    "items": ["whey", "milk"],
+    "ambiguous": false
+  },
+  {
+    "id": "chicken-salad",
+    "description": "200 g grilled chicken breast with a side salad",
+    "kcal": 380,
+    "proteinG": 45,
+    "items": ["chicken", "salad"],
+    "ambiguous": false
+  },
+  {
+    "id": "thali-ambiguous",
+    "description": "A full north Indian thali",
+    "kcal": 900,
+    "proteinG": 30,
+    "items": ["roti", "rice", "dal", "curry"],
+    "ambiguous": true
+  },
+  {
+    "id": "blurry-plate",
+    "description": "Half-eaten plate, very blurry, can't really tell what it was",
+    "kcal": 400,
+    "proteinG": 15,
+    "items": ["rice"],
+    "ambiguous": true
+  }
+]

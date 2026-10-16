@@ -54,6 +54,25 @@ export function serializeMeal(meal: MealRecord) {
   };
 }
 
+/** Recursively sorts object keys so semantically-equal JSON compares equal. */
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeJson);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, entry]) => [key, canonicalizeJson(entry)]),
+    );
+  }
+  return value;
+}
+
+/** Deep JSON equality. `items` is stored as jsonb, which reorders object keys,
+ * so a plain JSON.stringify comparison would 409 a legitimate same-id replay. */
+function sameItems(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonicalizeJson(a)) === JSON.stringify(canonicalizeJson(b));
+}
+
 function sameMealRequest(
   existing: MealRecord & { userId: string },
   userId: string,
@@ -66,7 +85,7 @@ function sameMealRequest(
     existing.calories === input.calories &&
     existing.proteinG === input.protein_g &&
     existing.source === input.source &&
-    JSON.stringify(existing.items) === JSON.stringify(input.items)
+    sameItems(existing.items, input.items)
   );
 }
 

@@ -80,6 +80,11 @@ export const config = {
   cors: {
     allowedOrigins: parseAllowedOrigins(process.env.CORS_ALLOWED_ORIGINS),
   },
+  // GET /metrics is 404 unless METRICS_TOKEN is set; scrapers then send it as a
+  // bearer token. Off by default so no new surface exists without a decision.
+  metrics: {
+    token: process.env.METRICS_TOKEN || "",
+  },
   sentry: {
     dsn: process.env.SENTRY_DSN || "",
     environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || "development",

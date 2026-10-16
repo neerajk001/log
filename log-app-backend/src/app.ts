@@ -2,6 +2,7 @@ import express from "express";
 import compression from "compression";
 import cors from "cors";
 import helmet from "helmet";
+import { timingSafeEqual } from "node:crypto";
 import * as Sentry from "@sentry/node";
 import { clerkMiddleware } from "@clerk/express";
 import { isAllowedOrigin } from "./cors";
@@ -9,6 +10,7 @@ import { errorHandler } from "./middleware/errorHandler";
 import { requestTiming } from "./middleware/requestTiming";
 import { config } from "./config";
 import { checkDatabaseReadiness } from "./db/readiness";
+import { renderMetrics } from "./utils/metricRegistry";
 import usersRouter from "./routes/users";
 import dailyLogsRouter from "./routes/dailyLogs";
 import liftLogsRouter from "./routes/liftLogs";
@@ -77,6 +79,32 @@ app.get("/ready", async (_req, res) => {
     }
     res.status(503).json({ status: "unavailable" });
   }
+});
+
+/** Constant-time bearer-token compare (length mismatch short-circuits safely). */
+function isMetricsAuthorized(header: string | undefined, token: string): boolean {
+  const provided = header?.startsWith("Bearer ") ? header.slice(7) : "";
+  const providedBuf = Buffer.from(provided);
+  const tokenBuf = Buffer.from(token);
+  return providedBuf.length === tokenBuf.length && timingSafeEqual(providedBuf, tokenBuf);
+}
+
+// Prometheus scrape endpoint. Deliberately 404 when METRICS_TOKEN is unset so
+// no new surface exists until an operator opts in; the token is compared in
+// constant time and never logged.
+app.get("/metrics", (req, res) => {
+  if (!config.metrics.token) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Not found" } });
+    return;
+  }
+  if (!isMetricsAuthorized(req.headers.authorization, config.metrics.token)) {
+    res.status(401).json({
+      error: { code: "UNAUTHORIZED", message: "Missing or invalid metrics token" },
+    });
+    return;
+  }
+  res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+  res.send(renderMetrics());
 });
 
 app.use(clerkMiddleware({ secretKey: config.clerk.secretKey }));

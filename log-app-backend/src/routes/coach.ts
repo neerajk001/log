@@ -8,6 +8,7 @@ import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
 import { analyzePhysique, generateCoachPlan, runCoachChatStream } from "../services/coach";
+import { incrementCounter } from "../utils/metricRegistry";
 import { coachChatSchema, coachPlanSchema, coachProfileSchema, idParamSchema } from "../validation/schemas";
 
 const router = Router();
@@ -276,6 +277,7 @@ router.post(
     });
 
     try {
+      let usage: { input_tokens: number; output_tokens: number; rounds: number } | null = null;
       await runCoachChatStream(
         req.userId,
         sessionId ?? null,
@@ -286,14 +288,23 @@ router.post(
           onDelta: (delta) => send({ delta }),
           onStatus: (status) => send({ status }),
           onProposal: (proposal) => send({ proposal }),
+          onUsage: (turnUsage) => {
+            usage = turnUsage;
+          },
         },
         agent,
         controller.signal,
         dismissedMeal,
       );
-      send({ done: true });
+      // Token/latency facts ride with the completion so the client can report
+      // cost without a second endpoint.
+      send({ done: true, ...(usage ? { usage } : {}) });
     } catch (err) {
       // Headers are already sent, so we can't hand this to the error middleware.
+      // Count it by code so failure rate is visible on the dashboard.
+      incrementCounter("coach_failures_total", {
+        code: err instanceof AppError ? err.code : "UNEXPECTED",
+      });
       send({ error: err instanceof Error ? err.message : "The coach failed to reply" });
     } finally {
       if (!closed) res.end();

@@ -79,6 +79,7 @@ import {
   maybeUpdateMemory,
   parseOpenAIDelta,
   parseOpenAIEvent,
+  resetAthleteContextCache,
   routeAgent,
   routeChatModel,
   runCoachChatStream,
@@ -89,6 +90,8 @@ beforeEach(() => {
   // Freeze "today" so the ISO-week lift trend is deterministic.
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+  // The athlete dossier is cached across calls; tests must start cold.
+  resetAthleteContextCache();
   mocks.findUniqueProfile.mockReset().mockResolvedValue(null);
   mocks.findUniqueUser.mockReset().mockResolvedValue(null);
   mocks.findUniqueDaily.mockReset().mockResolvedValue(null);
@@ -1226,6 +1229,63 @@ describe("coach turn latency (perf)", () => {
         where: { userId: "user-1", date: { gte: new Date("2025-10-10T00:00:00Z") } },
       }),
     );
+  });
+
+  it("reuses the athlete dossier between turns within the TTL", async () => {
+    await buildAthleteContext("user-1", "2026-10-09");
+    // Each full build reads the day logs twice (28d + 12-month history).
+    expect(mocks.findManyDaily).toHaveBeenCalledTimes(2);
+
+    await buildAthleteContext("user-1", "2026-10-09");
+
+    expect(mocks.findManyDaily).toHaveBeenCalledTimes(2);
+  });
+
+  it("rebuilds the dossier once the cache TTL has passed", async () => {
+    await buildAthleteContext("user-1", "2026-10-09");
+    vi.setSystemTime(new Date("2026-10-09T12:01:01Z"));
+
+    await buildAthleteContext("user-1", "2026-10-09");
+
+    expect(mocks.findManyDaily).toHaveBeenCalledTimes(4);
+  });
+
+  it("never caches the meal scope — it must see a just-logged meal", async () => {
+    await buildAthleteContext("user-1", "2026-10-09", "meal");
+    await buildAthleteContext("user-1", "2026-10-09", "meal");
+
+    expect(mocks.findUniqueDaily).toHaveBeenCalledTimes(2);
+    expect(mocks.findManyMeals).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports the turn's token usage to the handler", async () => {
+    config.ai.apiKey = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hi." })}\n\n` +
+              `data: ${JSON.stringify({
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  usage: { input_tokens: 1200, output_tokens: 45, total_tokens: 1245 },
+                },
+              })}\n\n` +
+              `data: [DONE]\n\n`,
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+      ),
+    );
+
+    const usage: unknown[] = [];
+    await runCoachChatStream("user-1", null, "hi", "2026-10-09", {
+      onDelta: () => {},
+      onUsage: (u) => usage.push(u),
+    });
+
+    expect(usage).toEqual([{ input_tokens: 1200, output_tokens: 45, rounds: 1 }]);
   });
 
   it("pings status before the first model round so a slow first token isn't dead air", async () => {
