@@ -66,8 +66,9 @@ TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:55432/log_test?sslmo
 Current coverage: meal ledger + idempotency + concurrent creates (atomic
 increment regression), lift replay/conflict/isolation, daily-log upsert +
 isolation, weekly verdict compute/persist/scoping, coach provider-outage SSE
-path (no assistant row stored), and coach session/message isolation across two
-accounts.
+path (no assistant row stored), coach session/message isolation, connection
+recovery when Postgres terminates the pooled backends, and the metrics
+surface.
 
 ## AI evaluations (meal accuracy)
 

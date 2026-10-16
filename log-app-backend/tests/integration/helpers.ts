@@ -23,6 +23,9 @@ if (process.env.VITEST_REQUIRE_DB === "1" && !testDatabaseUrl) {
 // URL the app module is never imported — integration tests skip.
 if (testDatabaseUrl) {
   process.env.DATABASE_URL = testDatabaseUrl;
+  // Deterministic connection protection: ping every reuse so a deliberately
+  // terminated pooled connection is always caught at checkout (not a timing race).
+  process.env.DB_PRE_PING_MS = process.env.DB_PRE_PING_MS ?? "1";
 }
 
 /** describe that skips (instead of failing) with no test database configured. */

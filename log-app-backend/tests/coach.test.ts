@@ -1258,6 +1258,86 @@ describe("coach turn latency (perf)", () => {
     expect(mocks.findManyMeals).toHaveBeenCalledTimes(2);
   });
 
+  it("replays a retry without storing the prompt twice or feeding it twice", async () => {
+    config.ai.apiKey = "test-key";
+    // The first attempt persisted the user message before the model failed.
+    mocks.findManyCoachMessages.mockResolvedValue([
+      { role: "user", content: "hi", responseId: null },
+    ]);
+    const sse = (delta: string) =>
+      new Response(
+        `data: ${JSON.stringify({ type: "response.output_text.delta", delta })}\n\n` +
+          `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })}\n\n` +
+          `data: [DONE]\n\n`,
+        { status: 200, headers: { "content-type": "text/event-stream" } },
+      );
+    let sent: { input?: { role?: string; content?: { text?: string }[] }[] } = {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body ?? "{}"));
+        return sse("Again.");
+      }),
+    );
+
+    const answer = await runCoachChatStream(
+      "user-1",
+      null,
+      "hi",
+      "2026-10-09",
+      { onDelta: () => {} },
+      undefined,
+      undefined,
+      undefined,
+      { retry: true },
+    );
+
+    expect(answer).toBe("Again.");
+    const promptTexts = (sent.input ?? []).flatMap((m) =>
+      (m.content ?? []).map((c) => c.text),
+    );
+    expect(promptTexts.filter((t) => t === "hi")).toHaveLength(1);
+    expect(
+      mocks.createCoachMessage.mock.calls.filter(
+        ([arg]: [{ data?: { role?: string } }]) => arg?.data?.role === "user",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("stores the prompt on a retry that follows a pre-persist failure", async () => {
+    config.ai.apiKey = "test-key";
+    // Nothing stored: the first attempt failed while building context.
+    mocks.findManyCoachMessages.mockResolvedValue([]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hello." })}\n\n` +
+              `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })}\n\n` +
+              `data: [DONE]\n\n`,
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+      ),
+    );
+
+    await runCoachChatStream(
+      "user-1",
+      null,
+      "hi",
+      "2026-10-09",
+      { onDelta: () => {} },
+      undefined,
+      undefined,
+      undefined,
+      { retry: true },
+    );
+
+    expect(mocks.createCoachMessage).toHaveBeenCalledWith({
+      data: { userId: "user-1", sessionId: "sess-1", role: "user", content: "hi" },
+    });
+  });
+
   it("reports the turn's token usage to the handler", async () => {
     config.ai.apiKey = "test-key";
     vi.stubGlobal(

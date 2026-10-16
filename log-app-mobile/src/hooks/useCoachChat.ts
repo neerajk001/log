@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import { usePostHog } from "posthog-react-native";
-import { streamCoachChat, useCoachApi } from "../api/coach";
+import { CoachStreamError, streamCoachChat, useCoachApi } from "../api/coach";
 import { ApiError } from "../api/client";
 import { clearAllCache } from "../api/cache";
 import { captureTiming } from "../utils/perf";
@@ -10,6 +10,18 @@ import { todayLocal } from "../utils/date";
 
 /** Asked the moment a meal estimate is dismissed — the answer becomes the correction. */
 const CORRECTION_PROMPT = "No problem — what was off? Portion, an item, or the numbers?";
+
+/**
+ * Failures worth one automatic retry: transient upstream/transport problems
+ * (provider unreachable, provider errored, empty reply, network drop). A
+ * deterministic failure (validation, rate limit, truncation) is not retried —
+ * repeating it would only burn quota and time.
+ */
+const AUTO_RETRY_CODES = new Set(["COACH_UNREACHABLE", "COACH_ERROR", "COACH_EMPTY", "NETWORK"]);
+
+function isAutoRetryable(err: unknown): boolean {
+  return err instanceof CoachStreamError && AUTO_RETRY_CODES.has(err.code);
+}
 
 export interface ChatProposal {
   id: string;
@@ -90,7 +102,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const runStream = useCallback(
-    async (message: string, appendUser: boolean, correction?: DismissedMeal | null) => {
+    async (
+      message: string,
+      appendUser: boolean,
+      correction?: DismissedMeal | null,
+      isRetry = false,
+    ) => {
       const assistantId = `coach-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       streamingRef.current = true;
       setError(null);
@@ -112,43 +129,74 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
       let firstDeltaAt: number | null = null;
       let aborted = false;
       let failed = false;
+      let retried = false;
       /** Server-measured token facts for this turn, captured into analytics. */
       let usage: CoachUsage | null = null;
+      // A retry must reuse the session attempt 0 created (a fresh session id
+      // arrives mid-stream), or the server would create a second chat.
+      let resolvedSessionId: string | null = sessionId;
 
       try {
-        const token = await getToken();
-        await streamCoachChat({
-          token,
-          message,
-          sessionId,
-          localDate: todayLocal(),
-          agent,
-          dismissedMeal: correction ?? undefined,
-          signal: controller.signal,
-          onSessionId: (id) => setSessionId(id),
-          onDelta: (delta) => {
-            setStatus(null);
-            if (firstDeltaAt == null) firstDeltaAt = Date.now();
-            setMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)),
-            );
-          },
-          onStatus: (next) => setStatus(next),
-          onProposal: (proposal) => {
-            proposalSeq += 1;
-            const id = `${assistantId}-p${proposalSeq}`;
+        // One automatic retry for transient failures. The replayed turn carries
+        // `retry: true`, so the server never stores the prompt twice.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const token = await getToken();
+            await streamCoachChat({
+              token,
+              message,
+              sessionId: resolvedSessionId,
+              localDate: todayLocal(),
+              agent,
+              dismissedMeal: correction ?? undefined,
+              retry: isRetry || attempt > 0,
+              signal: controller.signal,
+              onSessionId: (id) => {
+                resolvedSessionId = id;
+                setSessionId(id);
+              },
+              onDelta: (delta) => {
+                setStatus(null);
+                if (firstDeltaAt == null) firstDeltaAt = Date.now();
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: m.content + delta } : m,
+                  ),
+                );
+              },
+              onStatus: (next) => setStatus(next),
+              onProposal: (proposal) => {
+                proposalSeq += 1;
+                const id = `${assistantId}-p${proposalSeq}`;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, proposals: [...(m.proposals ?? []), { id, proposal }] }
+                      : m,
+                  ),
+                );
+              },
+              onUsage: (u) => {
+                usage = u;
+              },
+            });
+            break;
+          } catch (err) {
+            const autoRetry =
+              attempt === 0 && !controller.signal.aborted && isAutoRetryable(err);
+            if (!autoRetry) throw err;
+            // Wipe whatever the failed attempt left on the bubble and replay.
+            retried = true;
+            firstDeltaAt = null;
+            usage = null;
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantId
-                  ? { ...m, proposals: [...(m.proposals ?? []), { id, proposal }] }
-                  : m,
+                m.id === assistantId ? { ...m, content: "", proposals: [] } : m,
               ),
             );
-          },
-          onUsage: (u) => {
-            usage = u;
-          },
-        });
+            setStatus("Retrying…");
+          }
+        }
         setMessages((prev) =>
           prev.map((m) =>
             m.id === assistantId
@@ -190,6 +238,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
             ...(firstDeltaAt != null ? { first_delta_ms: firstDeltaAt - t0 } : {}),
             agent,
             failed: failed ? 1 : 0,
+            ...(retried ? { retried: 1 } : {}),
           });
           // Token cost of the turn, straight from the provider's usage report.
           if (usage != null) {
@@ -229,7 +278,9 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
     setMessages((prev) => prev.filter((m) => !m.failed));
-    void runStream(lastUser.content, false);
+    // `isRetry` tells the server the prompt is already stored — retrying must
+    // not append the same user message to the transcript a second time.
+    void runStream(lastUser.content, false, null, true);
   }, [messages, runStream]);
 
   const resolveProposal = useCallback(

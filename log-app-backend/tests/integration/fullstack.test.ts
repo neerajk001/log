@@ -320,6 +320,34 @@ describeDb("full-stack API against a real database", () => {
     });
   });
 
+  describe("connection recovery", () => {
+    it("keeps serving reads and writes after Postgres terminates the pool", async () => {
+      const prisma = await testPrisma();
+      const target = await createUser("kill-target");
+
+      // Terminate this app's pooled backends (identified by the pool's
+      // application_name). The query runs on a different pid, so it survives.
+      const killed = await prisma.$queryRawUnsafe<{ killed: bigint }[]>(
+        `SELECT count(pg_terminate_backend(pid))::bigint AS killed
+           FROM pg_stat_activity
+          WHERE application_name = 'log-app-backend' AND pid <> pg_backend_pid()`,
+      );
+      expect(Number(killed[0].killed)).toBeGreaterThan(0);
+
+      // A read recovers via pre-ping/retry; the write proves pre-ping made the
+      // dead-socket path safe even where a replay would be ambiguous.
+      const count = await prisma.user.count();
+      expect(count).toBeGreaterThan(0);
+
+      const updated = await prisma.user.update({
+        where: { id: target },
+        data: { proteinTargetG: 123 },
+        select: { proteinTargetG: true },
+      });
+      expect(updated.proteinTargetG).toBe(123);
+    });
+  });
+
   describe("metrics endpoint", () => {
     it("is off without a token, then demands the bearer token", async () => {
       const { config } = await import("../../src/config");

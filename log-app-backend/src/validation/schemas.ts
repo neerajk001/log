@@ -235,6 +235,12 @@ export const coachChatSchema = z.object({
   /** Explicit agent pick (UI chips). Omit to let the router decide. */
   agent: z.enum(["general", "meal", "training"]).optional(),
   /**
+   * True when the client is replaying a turn that already failed. The server
+   * then stores the user message only if it isn't already the newest stored
+   * turn, so retries never duplicate the prompt in history.
+   */
+  retry: z.boolean().optional(),
+  /**
    * A meal estimate the athlete just dismissed. Carries the estimate back to the
    * model (photo estimates are never stored server-side, so the client has to send
    * it) while `message` holds their reason — so it can re-estimate from the

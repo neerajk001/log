@@ -72,6 +72,7 @@ Starter panels (PromQL):
 | Input tokens/hour | `sum(rate(coach_input_tokens_total[1h])) * 3600` |
 | Output tokens/hour | `sum(rate(coach_output_tokens_total[1h])) * 3600` |
 | Provider retries | `sum(rate(coach_provider_retries_total[10m]))` |
+| DB connection recoveries | `sum by (reason) (rate(db_transient_retries_total[10m]))` |
 | Tool usage (top 5) | `topk(5, sum by (tool) (rate(coach_tool_calls_total[1h])))` |
 | Requests by route | `sum by (route) (rate(http_requests_total[5m]))` |
 

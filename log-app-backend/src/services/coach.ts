@@ -2222,6 +2222,7 @@ export async function runCoachChatStream(
   agent?: AgentId,
   signal?: AbortSignal,
   dismissedMeal?: DismissedMeal,
+  options?: { retry?: boolean },
 ): Promise<string> {
   const turnStart = Date.now();
   const stages: Record<string, number> = {};
@@ -2270,11 +2271,22 @@ export async function runCoachChatStream(
   stages.context = Date.now() - contextStart;
 
   const persistStart = Date.now();
+  // A retry replays a turn whose user message may already be stored (the first
+  // attempt persists it before calling the model). Store it only when it isn't
+  // already the newest stored turn, so a pre-persist failure still records the
+  // prompt — exactly once either way.
+  const newestStored = recent[0];
+  const alreadyStored =
+    options?.retry === true && newestStored?.role === "user" && newestStored.content === message;
   // Independent writes — one round trip instead of two before the first model call.
   await Promise.all([
-    prisma.coachMessage.create({
-      data: { userId, sessionId: session.id, role: "user", content: message },
-    }),
+    ...(alreadyStored
+      ? []
+      : [
+          prisma.coachMessage.create({
+            data: { userId, sessionId: session.id, role: "user", content: message },
+          }),
+        ]),
     prisma.coachSession.update({
       where: { id: session.id },
       data: { updatedAt: new Date() },
@@ -2298,6 +2310,16 @@ export async function runCoachChatStream(
         },
       ] as InputPart[],
     }));
+
+  // On a retry the prompt is already the newest history entry; drop it so the
+  // model neither reads nor bills the same message twice in the replay.
+  if (alreadyStored) {
+    const tail = history[history.length - 1];
+    const tailPart = tail?.content[0];
+    if (tail?.role === "user" && tailPart?.type === "input_text" && tailPart.text === message) {
+      history.pop();
+    }
+  }
 
   const activeAgent = AGENTS[agentId];
   const instructions = `${activeAgent.system}\n\n--- ATHLETE CONTEXT (their real logged data) ---\n${context}`;

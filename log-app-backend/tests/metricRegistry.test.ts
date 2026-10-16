@@ -54,6 +54,7 @@ describe("metricRegistry", () => {
     incrementCounter("coach_tool_calls_total", { tool: "get_meals" });
     incrementCounter("coach_provider_retries_total", { kind: "stream" });
     incrementCounter("coach_failures_total", { code: "COACH_UNREACHABLE" });
+    incrementCounter("db_transient_retries_total", { reason: "pre_ping" });
 
     const out = renderMetrics();
     expect(out).toContain("coach_turns_total 1");
@@ -62,6 +63,7 @@ describe("metricRegistry", () => {
     expect(out).toContain('coach_tool_calls_total{tool="get_meals"} 1');
     expect(out).toContain('coach_provider_retries_total{kind="stream"} 1');
     expect(out).toContain('coach_failures_total{code="COACH_UNREACHABLE"} 1');
+    expect(out).toContain('db_transient_retries_total{reason="pre_ping"} 1');
   });
 
   it("drops all series on reset but keeps the catalogue", () => {

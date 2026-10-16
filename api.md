@@ -303,17 +303,20 @@ Clears the memory.
 
 The only chat endpoint (the older non-streaming `POST /api/coach/chat` was removed).
 
-Body `{ message, sessionId?, localDate?, agent? }`. With no `sessionId` the server creates a
+Body `{ message, sessionId?, localDate?, agent?, retry? }`. With no `sessionId` the server creates a
 chat and emits `data: {"sessionId":"…"}` as the first event; with one, it must
 belong to the caller. `localDate` (YYYY-MM-DD) is the athlete's local date — the
 server runs on UTC, so it is used for "today" and the tool date windows. `agent`
 (`general` | `meal` | `training`) is the explicit UI pick; without it the server
-routes by the message's content. Streams the reply as Server-Sent Events:
-`data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
-something up, `data: {"proposal":{…}}` for a change awaiting confirmation, then
-`data: {"done":true,"usage":{"input_tokens":n,"output_tokens":n,"rounds":n}}`
+routes by the message's content. `retry: true` marks a replayed failed turn: the
+user message is stored only if it isn't already the newest stored turn, so a
+retry never duplicates the prompt in history. Streams the reply as Server-Sent
+Events: `data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach
+looks something up, `data: {"proposal":{…}}` for a change awaiting confirmation,
+then `data: {"done":true,"usage":{"input_tokens":n,"output_tokens":n,"rounds":n}}`
 (the provider's token totals for the turn, so clients can report cost); on
-failure mid-stream `data: {"error":"…"}`. Rate-limited
+failure mid-stream `data: {"error":"…","code":"COACH_…"}` — `error` is always
+user-facing copy, never a raw internal message. Rate-limited
 to 30 requests/hour per user.
 
 `dismissedMeal` (optional) is a meal estimate the athlete just dismissed —

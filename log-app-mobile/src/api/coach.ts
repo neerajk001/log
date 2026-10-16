@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { fetch as expoFetch } from "expo/fetch";
 import { API_BASE_URL, ApiError, useApiClient } from "./client";
-import { invalidateResources } from "./cache";
-import type {
+import { invalidateResources } from "./cache";import type {
   AgentId,
   CoachDecision,
   CoachMemory,
@@ -48,6 +47,22 @@ export function useCoachApi() {
 }
 
 /**
+ * A coach stream failure with the server's error code (`COACH_UNREACHABLE`,
+ * `COACH_ERROR`, `COACH_EMPTY`, `COACH_TRUNCATED`, `COACH_UNAVAILABLE`,
+ * `COACH_UNEXPECTED`, or `NETWORK` for a transport failure). The code is what
+ * lets the UI decide whether a retry is worth it.
+ */
+export class CoachStreamError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+  ) {
+    super(message);
+    this.name = "CoachStreamError";
+  }
+}
+
+/**
  * Streams a coach reply within a chat session. Uses `expo/fetch` (the global fetch
  * here) because it exposes a real `ReadableStream` body with `abort()` — React
  * Native's plain fetch does not. Calls `onDelta` per token, `onStatus` while a tool
@@ -60,6 +75,7 @@ export async function streamCoachChat({
   localDate,
   agent,
   dismissedMeal,
+  retry,
   onDelta,
   onStatus,
   onSessionId,
@@ -74,6 +90,8 @@ export async function streamCoachChat({
   agent?: AgentId;
   /** A meal estimate the athlete just dismissed — carries it back to the model. */
   dismissedMeal?: DismissedMeal;
+  /** True when replaying a failed turn; the server then never duplicates the prompt. */
+  retry?: boolean;
   onDelta: (delta: string) => void;
   onStatus?: (status: string) => void;
   onSessionId?: (sessionId: string) => void;
@@ -85,22 +103,30 @@ export async function streamCoachChat({
   if (!token) throw new Error("Signed out. Please sign in again.");
 
   const sentAt = Date.now();
-  const res = await expoFetch(`${API_BASE_URL}/api/coach/chat/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      Accept: "text/event-stream",
-    },
-    body: JSON.stringify({
-      message,
-      sessionId: sessionId ?? undefined,
-      localDate,
-      agent,
-      dismissedMeal,
-    }),
-    signal,
-  });
+  let res: Awaited<ReturnType<typeof expoFetch>>;
+  try {
+    res = await expoFetch(`${API_BASE_URL}/api/coach/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({
+        message,
+        sessionId: sessionId ?? undefined,
+        localDate,
+        agent,
+        dismissedMeal,
+        retry: retry || undefined,
+      }),
+      signal,
+    });
+  } catch (err) {
+    // A user Stop is not a failure.
+    if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) throw err;
+    throw new CoachStreamError("Can't reach the server. Check your connection.", "NETWORK");
+  }
 
   if (!res.ok || !res.body) {
     // Same 401 contract as the REST client (useApiClient.wrap): an expired session
@@ -123,6 +149,7 @@ export async function streamCoachChat({
   let buffer = "";
   let full = "";
   let serverError: string | null = null;
+  let serverErrorCode = "COACH_ERROR";
   const headersAt = Date.now();
   let firstDeltaAt: number | null = null;
 
@@ -141,6 +168,7 @@ export async function streamCoachChat({
         delta?: string;
         done?: boolean;
         error?: string;
+        code?: string;
         status?: string;
         sessionId?: string;
         proposal?: CoachProposal;
@@ -151,7 +179,10 @@ export async function streamCoachChat({
       } catch {
         continue;
       }
-      if (event.error) serverError = event.error;
+      if (event.error) {
+        serverError = event.error;
+        serverErrorCode = event.code ?? "COACH_ERROR";
+      }
       if (event.sessionId) onSessionId?.(event.sessionId);
       if (event.proposal) onProposal?.(event.proposal);
       if (event.usage) onUsage?.(event.usage);
@@ -179,7 +210,7 @@ export async function streamCoachChat({
     );
   }
 
-  if (serverError) throw new Error(serverError);
+  if (serverError) throw new CoachStreamError(serverError, serverErrorCode);
   // The stream bypasses the API client, so the turn's own writes (a new session,
   // its title) are announced here instead.
   invalidateResources(["coach"]);

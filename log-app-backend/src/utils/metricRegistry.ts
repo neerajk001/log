@@ -56,6 +56,10 @@ const COUNTERS = {
     help: "Coach turns that failed, by error code.",
     labelNames: ["code"],
   },
+  db_transient_retries_total: {
+    help: "Database connection recoveries, by reason (query = retried query, pre_ping = dead socket replaced at checkout).",
+    labelNames: ["reason"],
+  },
 } as const satisfies Record<string, CounterDef>;
 
 const HISTOGRAMS = {

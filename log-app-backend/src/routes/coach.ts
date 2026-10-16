@@ -253,7 +253,7 @@ router.post(
   chatRateLimit,
   validate(coachChatSchema),
   async (req: Request, res: Response) => {
-    const { message, sessionId, localDate, agent, dismissedMeal } = req.body as z.infer<
+    const { message, sessionId, localDate, agent, dismissedMeal, retry } = req.body as z.infer<
       typeof coachChatSchema
     >;
     const today = localDate ?? new Date().toISOString().slice(0, 10);
@@ -299,6 +299,7 @@ router.post(
         agent,
         controller.signal,
         dismissedMeal,
+        { retry: retry === true },
       );
       // Token/latency facts ride with the completion so the client can report
       // cost without a second endpoint.
@@ -306,10 +307,21 @@ router.post(
     } catch (err) {
       // Headers are already sent, so we can't hand this to the error middleware.
       // Count it by code so failure rate is visible on the dashboard.
-      incrementCounter("coach_failures_total", {
-        code: err instanceof AppError ? err.code : "UNEXPECTED",
+      const code = err instanceof AppError ? err.code : "COACH_UNEXPECTED";
+      incrementCounter("coach_failures_total", { code });
+      if (!(err instanceof AppError)) {
+        // Unexpected failures (a transient DB error, a bug) get the full detail
+        // in the server log — the client must never see raw internals like
+        // "Invalid `prisma.…` invocation: …".
+        console.error("[coach] turn failed", err);
+      }
+      send({
+        error:
+          err instanceof AppError
+            ? err.message
+            : "The coach hit an unexpected problem - please try again.",
+        code,
       });
-      send({ error: err instanceof Error ? err.message : "The coach failed to reply" });
     } finally {
       // Always terminate the response unless it already ended — a real client
       // disconnect makes this a no-op, but an errored turn must never hang.

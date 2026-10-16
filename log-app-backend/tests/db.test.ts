@@ -10,6 +10,10 @@ describe("buildPoolOptions", () => {
     expect(opts.connectionTimeoutMillis).toBe(10_000);
     expect(opts.idleTimeoutMillis).toBe(10_000);
     expect(opts.keepAlive).toBe(true);
+    // Probe for dead peers after ~10s instead of the OS default (hours).
+    expect(opts.keepAliveInitialDelayMillis).toBe(10_000);
+    // Lets operators (and the integration suite) identify this app's backends.
+    expect(opts.application_name).toBe("log-app-backend");
   });
 });
 

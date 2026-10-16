@@ -3,6 +3,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool, type PoolConfig } from "pg";
 import { config } from "../config";
 import { normalizeQueryText, slowDbMs } from "../utils/perf";
+import { incrementCounter } from "../utils/metricRegistry";
+import { installPrePing, prePingIdleMs, prePingTimeoutMs } from "./prePing";
+import { runWithRetry } from "./retry";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -67,6 +70,12 @@ export function buildPoolOptions(): PoolConfig {
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 10_000,
     keepAlive: true,
+    // Start TCP keepalive probes after ~10s (the OS default is hours) so a
+    // silently-closed peer is detected while a query waits on it.
+    keepAliveInitialDelayMillis: 10_000,
+    // Visible in pg_stat_activity / Neon dashboards, and lets the integration
+    // suite terminate exactly this app's pooled connections.
+    application_name: "log-app-backend",
   };
 }
 
@@ -79,6 +88,18 @@ export function keepaliveMs(): number {
 }
 
 const pool = globalForPrisma.pgPool ?? new Pool(buildPoolOptions());
+
+// Dead pooled sockets (Neon pooler/network) are caught at checkout: an idle
+// connection is pinged before Prisma may use it — this is what makes WRITES
+// safe on flaky connections, where a retry would be ambiguous.
+installPrePing(pool, {
+  idleMs: prePingIdleMs(),
+  timeoutMs: prePingTimeoutMs(),
+  onUnhealthy: (reason) => {
+    incrementCounter("db_transient_retries_total", { reason: "pre_ping" });
+    console.warn(`[db] pre-ping ${reason}, replacing the pooled connection`);
+  },
+});
 
 // Idle-client backend errors (e.g. a connection that died while pooled) are
 // emitted here. Log and continue — never crash the process, never exit.
@@ -142,9 +163,34 @@ function logIfSlow(startedAt: number, text: unknown): void {
 
 const adapter = new PrismaPg(pool);
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+const basePrisma = globalForPrisma.prisma ?? new PrismaClient({ adapter });
+
+/**
+ * Every model operation gets one retry on a *transient* connection failure
+ * (dead pooled socket, pool/connect timeout) — see db/retry.ts for the policy.
+ * Validation errors and ambiguous write failures are never retried.
+ */
+export const prisma = basePrisma.$extends({
+  name: "transient-db-retry",
+  query: {
+    $allModels: {
+      async $allOperations({ args, query, operation, model }) {
+        const label = `${model}.${operation}`;
+        return runWithRetry(label, () => query(args), {
+          onRetry: (err, attempt) => {
+            incrementCounter("db_transient_retries_total", { reason: "query" });
+            console.warn(
+              `[db] transient failure on ${label} (attempt ${attempt}), retrying`,
+              err instanceof Error ? err.message.split("\n")[0] : err,
+            );
+          },
+        });
+      },
+    },
+  },
+}) as unknown as PrismaClient;
 
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = basePrisma;
   globalForPrisma.pgPool = pool;
 }

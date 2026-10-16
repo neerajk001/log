@@ -216,8 +216,11 @@ describe("POST /api/coach/chat/stream transport", () => {
     await sleep(150);
   }, 15000);
 
-  it("surfaces service failures as an SSE error event, then ends", async () => {
-    hooks.runCoachChatStream.mockRejectedValue(new Error("provider down"));
+  it("surfaces a known (AppError) failure as its friendly message", async () => {
+    const { AppError } = await import("../src/middleware/errorHandler");
+    hooks.runCoachChatStream.mockRejectedValue(
+      new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now - try again."),
+    );
 
     const base = await listen();
     const res = await fetch(`${base}/api/coach/chat/stream`, {
@@ -230,7 +233,34 @@ describe("POST /api/coach/chat/stream transport", () => {
     const { events } = await readStream(res);
     const errors = events.filter((e) => typeof e.payload.error === "string");
     expect(errors).toHaveLength(1);
-    expect(errors[0].payload.error).toContain("provider down");
+    expect(errors[0].payload.error).toContain("can't reach the coach");
+    expect(errors[0].payload.code).toBe("COACH_UNREACHABLE");
+  }, 15000);
+
+  it("never leaks raw internals for unexpected failures", async () => {
+    // Exactly what a transient DB failure looks like from the route's view.
+    hooks.runCoachChatStream.mockRejectedValue(
+      new Error("Invalid `prisma.coachMemory.findUnique()` invocation: Raw query failed"),
+    );
+
+    const base = await listen();
+    const res = await fetch(`${base}/api/coach/chat/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "hi" }),
+    });
+    expect(res.status).toBe(200);
+
+    const text = await res.text();
+    expect(text).not.toContain("prisma");
+    const events = text
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => JSON.parse(line.slice(5).trim()) as { error?: string; code?: string });
+    const errors = events.filter((e) => typeof e.error === "string");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toContain("unexpected problem");
+    expect(errors[0].code).toBe("COACH_UNEXPECTED");
   }, 15000);
 
   it("rejects invalid bodies with 400 before any streaming starts", async () => {
