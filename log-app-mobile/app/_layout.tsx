@@ -5,12 +5,18 @@ import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { PostHogProvider, usePostHog } from "posthog-react-native";
-import { useEffect } from "react";
-import { ActivityIndicator, BackHandler, Platform, StyleSheet, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, View } from "react-native";
 import { ThemeProvider, useTheme } from "../src/theme/ThemeContext";
 import { loadHapticsPref } from "../src/hooks/useHaptics";
 import { useMe } from "../src/hooks/useMe";
+import { clearAllCache } from "../src/api/cache";
+import { Button } from "../src/components/ui/primitives";
 import { isDevPreview } from "../src/state/onboarding";
+import { captureTiming, now } from "../src/utils/perf";
+
+/** Bundle-evaluation time — the earliest startup mark available (approximate). */
+const BOOT_T0 = now();
 
 const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const POSTHOG_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? "";
@@ -21,11 +27,24 @@ const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST;
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AuthGate() {
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded, userId } = useAuth();
   const { colors } = useTheme();
   const segments = useSegments();
   const router = useRouter();
-  const { profile, loading: meLoading } = useMe();
+  const { profile, loading: meLoading, error: meError, refetch: refetchMe } = useMe(isSignedIn === true);
+
+  // The GET cache is module-level and keyed by path, not by account. Without
+  // this, a sign-out (or an account switch) inside a cache TTL lets the next
+  // account on this device read the previous one's /me, meals, plans or logs.
+  const lastUserIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!isLoaded) return;
+    const current = userId ?? null;
+    if (lastUserIdRef.current !== undefined && lastUserIdRef.current !== current) {
+      clearAllCache();
+    }
+    lastUserIdRef.current = current;
+  }, [isLoaded, userId]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -51,6 +70,11 @@ function AuthGate() {
       return;
     }
 
+    // A failed /me is not "not onboarded": routing on an unknown profile would
+    // bounce a fully onboarded athlete back into setup (and rewriting their
+    // answers). Keep them on the retry screen below until the load succeeds.
+    if (meError && !profile) return;
+
     // Signed in — wait for /me before deciding where to send them.
     if (meLoading && !profile) return;
 
@@ -70,13 +94,25 @@ function AuthGate() {
     if (__DEV__ && isDevPreview() && inOnboarding) return;
 
     if (inSignIn || inOnboarding) router.replace("/(tabs)/today" as never);
-  }, [isSignedIn, isLoaded, segments, router, profile, meLoading]);
+  }, [isSignedIn, isLoaded, segments, router, profile, meLoading, meError]);
 
   const waiting = !isLoaded || (isSignedIn && meLoading && !profile);
   if (waiting) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // The profile load failed and there is nothing cached: offer a retry instead
+  // of guessing whether the athlete is onboarded.
+  if (isSignedIn && meError && !profile) {
+    return (
+      <View style={[styles.loading, { backgroundColor: colors.bg }]}>
+        <Text style={[styles.errorTitle, { color: colors.text }]}>Couldn&apos;t load your profile</Text>
+        <Text style={[styles.errorBody, { color: colors.textDim }]}>{meError}</Text>
+        <Button label="Try again" icon="refresh" onPress={() => void refetchMe()} />
       </View>
     );
   }
@@ -111,7 +147,13 @@ function ThemedRoot() {
   if (!CLERK_KEY) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={[styles.errorTitle, { color: colors.text }]}>
+          This build is missing its Clerk key
+        </Text>
+        <Text style={[styles.errorBody, { color: colors.textDim }]}>
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY was not set when the app was built. Rebuild with it
+          configured (see deployment.md).
+        </Text>
       </View>
     );
   }
@@ -128,9 +170,15 @@ function ThemedRoot() {
 function PostHogScreenTracker() {
   const posthog = usePostHog();
   const pathname = usePathname();
+  // Phase 0: cold-start duration to first screen (durations only, no PII).
+  const startupSent = useRef(false);
 
   useEffect(() => {
     if (pathname) posthog.screen(pathname);
+    if (pathname && !startupSent.current) {
+      startupSent.current = true;
+      captureTiming(posthog, "app_startup", { cold_start_ms: Date.now() - BOOT_T0 });
+    }
   }, [posthog, pathname]);
 
   return null;
@@ -183,5 +231,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    gap: 12,
   },
+  errorTitle: { fontSize: 18, fontWeight: "700", textAlign: "center", paddingHorizontal: 24 },
+  errorBody: { fontSize: 14, textAlign: "center", paddingHorizontal: 32 },
 });

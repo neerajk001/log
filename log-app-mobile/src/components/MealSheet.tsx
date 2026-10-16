@@ -4,9 +4,17 @@ import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { spacing } from "../theme/spacing";
 import { useMealsApi } from "../api/meals";
 import { parsePositiveInt } from "../utils/parse";
+import { scaleMealItems } from "../utils/mealMath";
 import { Banner, Button } from "./ui/primitives";
 import { Sheet, TextField } from "./ui/controls";
 import type { MealLog } from "../api/types";
+
+/** Where the numbers came from — an estimate is never presented as verified data. */
+function sourceLabel(source: MealLog["source"]): string {
+  if (source === "photo") return "Estimated from a photo — numbers are approximate.";
+  if (source === "ai") return "Estimated by the coach — numbers are approximate.";
+  return "Logged manually.";
+}
 
 /** View/edit/delete a logged meal. Remount per meal via `key`. */
 export function MealSheet({
@@ -33,9 +41,10 @@ export function MealSheet({
 
   const save = async () => {
     const kcal = parsePositiveInt(calories, 10000);
-    const prot = parsePositiveInt(protein, 1000) ?? 0;
-    if (!title.trim() || kcal == null) {
-      setError("Enter a title and a valid calorie amount.");
+    const proteinText = protein.trim();
+    const prot = proteinText === "" ? 0 : parsePositiveInt(proteinText, 1000);
+    if (!title.trim() || kcal == null || prot == null) {
+      setError("Enter a title and valid calorie/protein amounts.");
       return;
     }
     setBusy(true);
@@ -43,7 +52,9 @@ export function MealSheet({
     try {
       await api.updateMeal(meal.id, {
         title: title.trim().slice(0, 120),
-        items: meal.items,
+        // Re-scale the items so their numbers still add up to the edited totals
+        // — otherwise the detail view and the day's maths quietly disagree.
+        items: scaleMealItems(meal.items, kcal, prot),
         calories: kcal,
         protein_g: prot,
         source: meal.source,
@@ -99,6 +110,8 @@ export function MealSheet({
           </View>
         ) : null}
 
+        <Text style={[typography.caption, styles.sourceNote]}>{sourceLabel(meal.source)}</Text>
+
         <TextField label="Title" value={title} onChangeText={setTitle} autoCapitalize="sentences" />
 
         <View style={styles.row}>
@@ -138,6 +151,7 @@ export function MealSheet({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     body: { gap: spacing.lg, paddingTop: spacing.sm },
+    sourceNote: { color: t.colors.textDim },
     items: { gap: spacing.xs, backgroundColor: t.colors.surfaceAlt, borderRadius: 12, padding: spacing.md },
     itemRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
     itemName: { flex: 1, color: t.colors.text },

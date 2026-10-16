@@ -65,19 +65,31 @@ export function strengthChangePctFrom(exercises: ExerciseMetrics[]): number | nu
   return Math.round(deltas.reduce((a, b) => a + b, 0) / deltas.length);
 }
 
+/**
+ * Hard stop for the streak walk-back. Ten years of days is far beyond any real
+ * streak; the bound exists so a degenerate rest-day config can never spin the
+ * loop forever.
+ */
+const MAX_STREAK_LOOKBACK_DAYS = 3650;
+
 export function workoutStreakFromDates(
   trainedDates: Iterable<string>,
   from: string = todayLocal(),
   restDays: number[] = [],
 ): number {
   const trained = new Set(trainedDates);
+  // A set of every weekday as "rest" leaves no day that can terminate the walk:
+  // treat that degenerate config as no rest days at all (the streak then ends at
+  // the first untrained day). Duplicate-heavy arrays can't get here — a Set
+  // dedupes them first.
   const rest = new Set(restDays);
+  if (rest.size >= 7) rest.clear();
 
   let streak = 0;
   // Today isn't over — an untrained today never breaks the streak.
   let cursor = trained.has(from) ? from : addDays(from, -1);
 
-  for (;;) {
+  for (let i = 0; i < MAX_STREAK_LOOKBACK_DAYS; i++) {
     if (trained.has(cursor)) {
       streak += 1;
       cursor = addDays(cursor, -1);

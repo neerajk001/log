@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
+import * as Crypto from "expo-crypto";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
@@ -72,6 +73,8 @@ export function ProposalCard({
   const styles = useStyles();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** One client id per meal-log proposal: a retry replays instead of duplicating. */
+  const mealLogIdRef = useRef<string | null>(null);
 
   const resolve = (status: "applied" | "dismissed", note?: string) =>
     onResolved(messageId, item.id, status, note);
@@ -165,16 +168,22 @@ export function ProposalCard({
 
   const applyMealLog = async () => {
     if (proposal.kind !== "meal_log") return;
+    // Prefer the id the server stored with the proposal: a card restored after
+    // reopening the chat then replays the same create instead of duplicating
+    // the meal (and its daily totals). Live cards mint one id per card.
+    const id = proposal.id ?? (mealLogIdRef.current ??= Crypto.randomUUID());
     setBusy(true);
     setError(null);
     try {
       await mealsApi.createMeal({
+        id,
         date: proposal.date,
         title: proposal.title,
         items: proposal.items,
         calories: proposal.calories,
         protein_g: proposal.protein_g,
-        source: "ai",
+        // Photo estimates keep their provenance; chat proposals are coach estimates.
+        source: proposal.source ?? "ai",
       });
       resolve("applied", `Logged "${proposal.title}" — ${proposal.calories} kcal, ${proposal.protein_g} g protein.`);
     } catch (err) {
@@ -262,8 +271,21 @@ export function ProposalCard({
         return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — ${proposal.from.weight_kg} kg × ${proposal.from.reps} → ${proposal.to.weight_kg} kg × ${proposal.to.reps}`;
       case "set_delete":
         return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${proposal.weight_kg} kg × ${proposal.reps}`;
-      case "meal_log":
-        return [`${proposal.title} · ${proposal.calories} kcal · ${proposal.protein_g} g protein`, itemLines(proposal.items)].join("\n");
+      case "meal_log": {
+        const provenance =
+          proposal.source === "photo"
+            ? "Estimated from your photo"
+            : "Estimated by your coach";
+        const confidence =
+          proposal.confidence === "low" || proposal.confidence === "medium"
+            ? ` · ${proposal.confidence} confidence`
+            : "";
+        return [
+          `${proposal.title} · ${proposal.calories} kcal · ${proposal.protein_g} g protein`,
+          `${provenance}${confidence}`,
+          itemLines(proposal.items),
+        ].join("\n");
+      }
       case "meal_update":
         return [
           `Update "${proposal.title}" · ${proposal.calories} kcal · ${proposal.protein_g} g protein`,

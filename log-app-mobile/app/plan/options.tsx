@@ -59,7 +59,13 @@ export default function PlanOptionsScreen() {
         is_active: false,
         days: plan.days.map((d) => ({
           day_name: d.day_name,
-          exercises: d.exercises.map((e) => ({ name: e.name, sets: e.sets, reps: e.reps })),
+          rationale: d.rationale ?? undefined,
+          exercises: d.exercises.map((e) => ({
+            name: e.name,
+            sets: e.sets,
+            reps: e.reps,
+            weight_kg: e.weight_kg ?? undefined,
+          })),
         })),
       });
       router.back();

@@ -27,13 +27,16 @@ import { usePlans } from "../../src/hooks/usePlans";
 import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { muscleGroupsForDay } from "../../src/utils/derive";
+import { requestIdForAttempt } from "../../src/utils/parse";
 import { successTick } from "../../src/hooks/useHaptics";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
 interface QuickSet {
   key: string;
-  /** Stable per draft, so retrying a partial failure can't log the set twice. */
+  /** Stable per payload, so retrying a partial failure can't log the set twice. */
   requestId: string;
+  /** The parsed payload the last attempt sent ("weight|reps"), null before any. */
+  lastAttempt: string | null;
   weight: string;
   reps: string;
 }
@@ -41,7 +44,7 @@ interface QuickSet {
 let quickKey = 0;
 function blankQuickSet(): QuickSet {
   quickKey += 1;
-  return { key: `q${quickKey}`, requestId: Crypto.randomUUID(), weight: "", reps: "" };
+  return { key: `q${quickKey}`, requestId: Crypto.randomUUID(), lastAttempt: null, weight: "", reps: "" };
 }
 
 export default function LiftScreen() {
@@ -114,6 +117,7 @@ export default function LiftScreen() {
       .map((q) => ({
         key: q.key,
         requestId: q.requestId,
+        lastAttempt: q.lastAttempt,
         weight: parseFloat(q.weight),
         reps: parseInt(q.reps, 10),
       }))
@@ -124,11 +128,23 @@ export default function LiftScreen() {
       Alert.alert("Enter weight and reps for at least one set.");
       return;
     }
+    // Ids stay stable while the values are unchanged (a retry replays the same
+    // request); editing a row after a failure mints a new id so the old one's
+    // changed-payload 409 can never lock the row. Reminted ids are written back
+    // so the next retry continues from the right request.
+    const prepared = valid.map((q) => ({
+      ...q,
+      ...requestIdForAttempt(q, `${q.weight}|${q.reps}`, () => Crypto.randomUUID()),
+    }));
+    setQuickSets((prev) =>
+      prev.map((q) => {
+        const p = prepared.find((x) => x.key === q.key);
+        return p ? { ...q, requestId: p.requestId, lastAttempt: p.lastAttempt } : q;
+      }),
+    );
     setQuickSaving(true);
-    // Each row carries a stable id, so a retry replays the same request and the
-    // server recognises it instead of logging the set again.
     const results = await Promise.all(
-      valid.map(async (q) => {
+      prepared.map(async (q) => {
         try {
           await addEntry({
             id: q.requestId,

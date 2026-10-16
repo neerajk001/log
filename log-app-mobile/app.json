@@ -17,10 +17,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.neerajkk01.log",
-      "permissions": [
-        "android.permission.RECORD_AUDIO"
-      ]
+      "package": "com.neerajkk01.log"
     },
     "web": {
       "output": "static",

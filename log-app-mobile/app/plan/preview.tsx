@@ -8,7 +8,7 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { PlanDaysEditor, type EditableDay } from "../../src/components/PlanDaysEditor";
 import { Button, Banner, Card, EmptyState } from "../../src/components/ui/primitives";
 import { TextField } from "../../src/components/ui/controls";
-import { parsePositiveInt } from "../../src/utils/parse";
+import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
 import { usePlansApi } from "../../src/api/plans";
 import { clearPendingPlan, getPendingPlan } from "../../src/state/parsedPlan";
 import type { CreatePlanInput } from "../../src/api/types";
@@ -58,6 +58,12 @@ export default function PlanPreviewScreen() {
           setError("Every exercise needs a name (≤120), sets 1–99 and reps (≤20 chars).");
           return;
         }
+        // Weight is optional, but a non-empty one must be a real number —
+        // otherwise the entered value (e.g. 12.5) would vanish silently.
+        if (e.weight.trim() !== "" && parsePositiveNumber(e.weight, 9999) == null) {
+          setError("Weights must be positive numbers, e.g. 12.5 (or left empty).");
+          return;
+        }
       }
     }
 
@@ -72,7 +78,7 @@ export default function PlanPreviewScreen() {
           name: e.name.trim().slice(0, 120),
           sets: parsePositiveInt(e.sets, 99) ?? 0,
           reps: e.reps.trim().slice(0, 20),
-          weight_kg: parsePositiveInt(e.weight, 9999) ?? undefined,
+          weight_kg: parsePositiveNumber(e.weight, 9999) ?? undefined,
         })),
       })),
     };

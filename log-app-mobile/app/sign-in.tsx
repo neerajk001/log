@@ -12,16 +12,19 @@ import {
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { useSignIn, useSSO } from "@clerk/clerk-expo";
+import { usePostHog } from "posthog-react-native";
 import { useLocalSearchParams } from "expo-router";
 import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
 import { radii, spacing } from "../src/theme/spacing";
 import { BrandWordmark } from "../src/components/ScreenHeader";
+import { captureTiming, now } from "../src/utils/perf";
 
 type Step = "options" | "email" | "code";
 
 export default function SignInScreen() {
   const { signIn, isLoaded: signInLoaded, setActive } = useSignIn();
   const { startSSOFlow } = useSSO();
+  const posthog = usePostHog();
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
@@ -48,6 +51,8 @@ export default function SignInScreen() {
     if (loading) return;
     setLoading(true);
     setError("");
+    // Phase 0: login duration only — no email, token or account data.
+    const t0 = now();
     try {
       const result = await startSSOFlow({
         strategy: "oauth_google",
@@ -60,6 +65,7 @@ export default function SignInScreen() {
 
       if (sessionId && activate) {
         await activate({ session: sessionId });
+        captureTiming(posthog, "login_completed", { duration_ms: Date.now() - t0, method: "google" });
       } else if (
         result.authSessionResult?.type === "cancel" ||
         result.authSessionResult?.type === "dismiss"
@@ -75,7 +81,9 @@ export default function SignInScreen() {
     } finally {
       setLoading(false);
     }
-  }, [startSSOFlow, setActive, loading]);
+  }, [startSSOFlow, setActive, loading, posthog]);
+
+  // `?method=google` — open the Google flow once, after the screen has painted.
 
   // `?method=google` — open the Google flow once, after the screen has painted.
   const launchedRef = useRef(false);
@@ -120,10 +128,12 @@ export default function SignInScreen() {
     if (!signIn || !setActive) return;
     setLoading(true);
     setError("");
+    const t0 = now();
     try {
       const result = await signIn.attemptFirstFactor({ strategy: "email_code", code: code.trim() });
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
+        captureTiming(posthog, "login_completed", { duration_ms: Date.now() - t0, method: "email" });
       } else {
         setError("Verification incomplete. Try again.");
       }
@@ -133,7 +143,7 @@ export default function SignInScreen() {
     } finally {
       setLoading(false);
     }
-  }, [code, signIn, setActive]);
+  }, [code, signIn, setActive, posthog]);
 
   const handleBack = useCallback(() => {
     setStep("options");

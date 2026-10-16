@@ -11,7 +11,7 @@ import {
 import { Button, Banner, LoadingState, EmptyState } from "../../../src/components/ui/primitives";
 import { usePlans } from "../../../src/hooks/usePlans";
 import { usePlansApi } from "../../../src/api/plans";
-import { parsePositiveInt } from "../../../src/utils/parse";
+import { parsePositiveNumber } from "../../../src/utils/parse";
 import type { CreatePlanInput } from "../../../src/api/types";
 
 function toEditable(
@@ -76,6 +76,11 @@ export default function EditDayScreen() {
         setError("Every exercise needs a name, sets and reps.");
         return;
       }
+      // Weight is optional, but a non-empty one must parse — decimals included.
+      if (e.weight.trim() !== "" && parsePositiveNumber(e.weight, 9999) == null) {
+        setError("Weights must be positive numbers, e.g. 12.5 (or left empty).");
+        return;
+      }
     }
 
     const payload: CreatePlanInput = {
@@ -89,7 +94,7 @@ export default function EditDayScreen() {
                 name: e.name.trim(),
                 sets: parseInt(e.sets, 10),
                 reps: e.reps.trim(),
-                weight_kg: parsePositiveInt(e.weight, 9999) ?? undefined,
+                weight_kg: parsePositiveNumber(e.weight, 9999) ?? undefined,
               })),
             }
           : {

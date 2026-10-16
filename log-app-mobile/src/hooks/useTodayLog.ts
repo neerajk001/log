@@ -115,12 +115,18 @@ export function useTodayLog(activeDate: string) {
 
   const retrySave = useCallback(
     async (field?: DailyField) => {
-      const target = field ?? (Object.keys(retries)[0] as DailyField | undefined);
-      if (!target) return;
-      const value = retries[target];
-      if (value !== undefined) await save(target, value);
+      if (field) {
+        const value = retries[field];
+        if (value !== undefined) await save(field, value);
+        return;
+      }
+      // Banner retry replays every failed field as one queued PUT — retrying
+      // only the first left the rest stranded with no visible affordance.
+      const entries = Object.entries(retries) as [DailyField, number | null][];
+      if (entries.length === 0) return;
+      await saveMany(Object.fromEntries(entries) as DailyPatch);
     },
-    [retries, save],
+    [retries, save, saveMany],
   );
 
   const retry =

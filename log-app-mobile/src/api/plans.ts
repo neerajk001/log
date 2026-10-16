@@ -7,8 +7,11 @@ export function usePlansApi() {
 
   return useMemo(
     () => ({
+      // Text parsing is an AI call; the default 15s client timeout used to abort
+      // it as a connection error (same class as coach plan generation — give it
+      // the AI allowance, matching the PDF path's 120s via postFormData).
       parsePlanText: (text: string) =>
-        client.post<ParsedPlanPreview>("/api/plans/parse", { text }),
+        client.post<ParsedPlanPreview>("/api/plans/parse", { text }, { timeoutMs: 120_000 }),
       parsePlanPdfForm: (formData: FormData) =>
         client.postFormData<ParsedPlanPreview>("/api/plans/parse", formData),
       createPlan: (data: CreatePlanInput) => client.post<WorkoutPlan>("/api/plans", data),

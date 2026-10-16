@@ -6,7 +6,7 @@ import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { radii, shadows, spacing } from "../theme/spacing";
 import { exerciseTypeFor } from "../utils/derive";
 import { muscleTagStyle, typeTagStyle } from "../utils/tags";
-import { parsePositiveInt, parsePositiveNumber } from "../utils/parse";
+import { parsePositiveInt, parsePositiveNumber, requestIdForAttempt } from "../utils/parse";
 import type { LiftLog, LiftLogCreate } from "../api/types";
 import { successTick } from "../hooks/useHaptics";
 import { IconBadge, Tag } from "./ui/primitives";
@@ -18,6 +18,8 @@ type RowStatus = "idle" | "editing" | "saving" | "error";
 interface Draft {
   key: string;
   requestId: string;
+  /** The parsed payload the last attempt sent ("weight|reps"), null before any. */
+  lastAttempt: string | null;
   ordinal: number;
   weight: string;
   reps: string;
@@ -28,6 +30,7 @@ function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
   return {
     key: Crypto.randomUUID(),
     requestId: Crypto.randomUUID(),
+    lastAttempt: null,
     ordinal,
     weight,
     reps,
@@ -156,11 +159,18 @@ export function ExerciseRow({
       const repsNum = parsePositiveInt(draft.reps.trim(), 9999);
       if (weight == null || repsNum == null) return Promise.resolve();
 
-      const requestId = draft.requestId;
+      // Same values => same request id (a lost response replays safely);
+      // edited values => a fresh id, because replaying the old one with a
+      // changed payload is a permanent 409.
+      const { requestId, lastAttempt } = requestIdForAttempt(
+        draft,
+        `${weight}|${repsNum}`,
+        () => Crypto.randomUUID(),
+      );
       const requestScope = scopeKey;
       applyDrafts((current) =>
         current.map((entry) =>
-          entry.key === key ? { ...entry, status: "saving" } : entry,
+          entry.key === key ? { ...entry, status: "saving", requestId, lastAttempt } : entry,
         ),
       );
 
@@ -202,8 +212,10 @@ export function ExerciseRow({
       applyDrafts((current) =>
         current.map((entry) => {
           if (entry.key !== key) return entry;
-          const requestId = entry.status === "error" ? Crypto.randomUUID() : entry.requestId;
-          return { ...entry, ...patch, requestId, status: "editing" };
+          // Keep requestId stable across retries so a timeout-retry replays the
+          // same idempotent request instead of logging the set twice (matches
+          // quick-log in app/(tabs)/lift.tsx and useLiftLogs dedup by id).
+          return { ...entry, ...patch, status: "editing" };
         }),
       );
       clearTimer(key);

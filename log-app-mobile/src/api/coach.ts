@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { fetch as expoFetch } from "expo/fetch";
-import { API_BASE_URL, useApiClient } from "./client";
+import { API_BASE_URL, ApiError, useApiClient } from "./client";
 import { invalidateResources } from "./cache";
 import type {
   AgentId,
@@ -99,6 +99,11 @@ export async function streamCoachChat({
   });
 
   if (!res.ok || !res.body) {
+    // Same 401 contract as the REST client (useApiClient.wrap): an expired session
+    // must sign out, not surface as a chat-bubble error. The caller maps it.
+    if (res.status === 401) {
+      throw new ApiError(401, "UNAUTHORIZED", "Signed out. Please sign in again.");
+    }
     let text = `The coach failed to reply (${res.status})`;
     try {
       const body = (await res.json()) as { error?: { message?: string } };

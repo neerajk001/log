@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { useVerdictApi } from "../api/verdict";
 import { useDataSyncOnFocus } from "./useDataSync";
 import type { VerdictResponse } from "../api/types";
+import { todayLocal } from "../utils/date";
 
 export function useWeeklyVerdict() {
   const api = useVerdictApi();
@@ -13,7 +14,8 @@ export function useWeeklyVerdict() {
     setLoading(true);
     setError(null);
     try {
-      const result = await api.getWeeklyVerdict();
+      // The athlete's local date — the server's UTC week can be a day off near midnight.
+      const result = await api.getWeeklyVerdict(todayLocal());
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load verdict");

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
+import { usePostHog } from "posthog-react-native";
 import { streamCoachChat, useCoachApi } from "../api/coach";
+import { ApiError } from "../api/client";
+import { clearAllCache } from "../api/cache";
+import { captureTiming } from "../utils/perf";
 import type { AgentId, CoachProposal, DismissedMeal } from "../api/types";
 import { todayLocal } from "../utils/date";
 
@@ -29,7 +33,8 @@ export interface ChatMessage {
 /** Coach chat for one session (or a fresh one when `initialSessionId` is absent). */
 export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) {
   const api = useCoachApi();
-  const { getToken } = useAuth();
+  const { getToken, signOut } = useAuth();
+  const posthog = usePostHog();
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
   const [agent, setAgent] = useState<AgentId>(initialAgent ?? "general");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -51,7 +56,19 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
     try {
       const res = await api.getSessionMessages(initialSessionId);
       setAgent(res.agent);
-      setMessages(res.messages.map((m) => ({ id: m.id, role: m.role, content: m.content })));
+      setMessages(
+        res.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          // Proposals persisted with the turn come back as live cards, so a
+          // reopened chat can still confirm what the coach prepared.
+          proposals: (m.proposals ?? []).map((proposal, i) => ({
+            id: proposal.id ?? `${m.id}-p${i + 1}`,
+            proposal,
+          })),
+        })),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load this chat");
     } finally {
@@ -83,6 +100,11 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
       const controller = new AbortController();
       abortRef.current = controller;
       let proposalSeq = 0;
+      // Phase 0: client-side turn timing (durations + agent only — never content).
+      const t0 = Date.now();
+      let firstDeltaAt: number | null = null;
+      let aborted = false;
+      let failed = false;
 
       try {
         const token = await getToken();
@@ -97,6 +119,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
           onSessionId: (id) => setSessionId(id),
           onDelta: (delta) => {
             setStatus(null);
+            if (firstDeltaAt == null) firstDeltaAt = Date.now();
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + delta } : m)),
             );
@@ -124,10 +147,20 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
           // Stopped by the user — keep whatever streamed.
+          aborted = true;
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
           );
         } else {
+          // Mirror useApiClient.wrap: an expired session signs out (clearing the
+          // signed-out user's cache) instead of looking like "coach didn't reply".
+          if (err instanceof ApiError && err.status === 401) {
+            clearAllCache();
+            try {
+              await signOut();
+            } catch {}
+          }
+          failed = true;
           setError(err instanceof Error ? err.message : "The coach didn't reply.");
           setMessages((prev) =>
             prev.map((m) => (m.id === assistantId ? { ...m, streaming: false, failed: true } : m)),
@@ -137,9 +170,18 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
         abortRef.current = null;
         setStreaming(false);
         setStatus(null);
+        // Skip user-stopped turns: they measure impatience, not performance.
+        if (!aborted) {
+          captureTiming(posthog, "coach_turn", {
+            total_ms: Date.now() - t0,
+            ...(firstDeltaAt != null ? { first_delta_ms: firstDeltaAt - t0 } : {}),
+            agent,
+            failed: failed ? 1 : 0,
+          });
+        }
       }
     },
-    [getToken, sessionId, agent],
+    [getToken, signOut, posthog, sessionId, agent],
   );
 
   const send = useCallback(

@@ -141,6 +141,9 @@ export function CoachChat({
         items: analysis.items,
         calories: analysis.calories,
         protein_g: analysis.protein_g,
+        // Provenance + confidence travel with the card and are stored on confirm.
+        source: "photo",
+        confidence: analysis.confidence,
       };
       const proteinTarget = analysis.day?.protein_target_g ?? null;
       const proteinLeft =
@@ -155,7 +158,11 @@ export function CoachChat({
           : "";
       const text = analysis.question
         ? `${analysis.question} I've estimated the rest below.`
-        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein.${leftLine} Confirm to log it.`;
+        : `Here's what I make of that: ${analysis.calories} kcal, ${analysis.protein_g} g protein.${leftLine} Confirm to log it.${
+            analysis.confidence === "low"
+              ? " I'm not fully sure of the portion — worth a quick check before confirming."
+              : ""
+          }`;
       injectAssistant(text, proposal);
     } catch (err) {
       injectAssistant(err instanceof Error ? err.message : "Couldn't analyze that photo.");

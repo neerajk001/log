@@ -275,6 +275,8 @@ export interface CoachMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Unconfirmed proposals stored with this turn, rehydrated into confirmation cards. */
+  proposals?: CoachProposal[] | null;
   created_at: string;
 }
 
@@ -311,6 +313,8 @@ export interface MealLog {
 }
 
 export interface MealLogCreate {
+  /** Client-generated id: retrying the same request replays it instead of logging twice. */
+  id?: string;
   date: string;
   title: string;
   items: MealItem[];
@@ -336,7 +340,7 @@ export interface MealAnalysis {
 }
 
 /** A change the coach has prepared and the user must confirm. */
-export type CoachProposal =
+export type CoachProposal = (
   | {
       kind: "plan_update";
       plan_id: string;
@@ -377,6 +381,9 @@ export type CoachProposal =
       items: MealItem[];
       calories: number;
       protein_g: number;
+      /** Where the estimate came from — the photo path marks it "photo". */
+      source?: "ai" | "photo";
+      confidence?: "low" | "medium" | "high";
     }
   | {
       kind: "meal_update";
@@ -394,7 +401,14 @@ export type CoachProposal =
       title: string;
       calories: number;
       protein_g: number;
-    };
+    }
+) & {
+  /**
+   * Server id, stable across reloads: re-confirming a restored meal proposal
+   * replays the same create request instead of logging the meal twice.
+   */
+  id?: string;
+};
 
 /**
  * A meal estimate the athlete dismissed, sent back with their reason so the coach

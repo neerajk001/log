@@ -3,12 +3,13 @@ import { useMeApi } from "../api/me";
 import { useDataSync } from "./useDataSync";
 import type { DailyDefaults, OnboardingInput, UserProfile } from "../api/types";
 
-export function useMe() {
+export function useMe(enabled = true) {
   const api = useMeApi();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const updateQueueRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enabledRef = useRef(enabled);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -23,12 +24,25 @@ export function useMe() {
   }, [api]);
 
   useEffect(() => {
+    enabledRef.current = enabled;
+    if (!enabled) {
+      // Signed out (or otherwise gated): no profile, no wasted 401 fetch — and
+      // no stale previous-user profile flashing on the next sign-in.
+      setProfile(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     load();
-  }, [load]);
+  }, [load, enabled]);
 
   // Prefs changed in Settings (or at the end of onboarding) refresh every reader.
   // No focus hook: this also runs in the root layout, outside any screen.
-  useDataSync(["me"], load);
+  // Gated the same way: invalidations must not fetch while disabled.
+  const syncLoad = useCallback(() => {
+    if (enabledRef.current) load();
+  }, [load]);
+  useDataSync(["me"], syncLoad);
 
   const update = useCallback(
     async (patch: {

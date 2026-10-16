@@ -20,3 +20,27 @@ export function parsePositiveInt(raw: string, max: number): number | null {
   if (!Number.isSafeInteger(num) || num <= 0 || num > max) return null;
   return num;
 }
+
+/**
+ * Idempotency id for a lift-draft attempt.
+ *
+ * The id stays stable while the payload is unchanged, so retrying after a lost
+ * response replays the same row instead of logging the set twice. The moment
+ * the values change, a fresh id is minted: replaying the old id with a
+ * different payload is a 409 the server is right to refuse, and without a new
+ * id the draft would be stuck in that error loop forever.
+ *
+ * `payloadKey` should be built from the parsed numbers (not the raw text), so
+ * "60" and "60.0" count as the same attempt.
+ */
+export function requestIdForAttempt(
+  current: { requestId: string; lastAttempt: string | null },
+  payloadKey: string,
+  mint: () => string,
+): { requestId: string; lastAttempt: string } {
+  const edited = current.lastAttempt != null && current.lastAttempt !== payloadKey;
+  return {
+    requestId: edited ? mint() : current.requestId,
+    lastAttempt: payloadKey,
+  };
+}

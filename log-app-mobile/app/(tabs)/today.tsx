@@ -110,8 +110,8 @@ export default function TodayScreen() {
     error: activitiesError,
     refetch: refetchActivities,
   } = useActivity(activeDate);
-  const { meals, loading: mealsLoading, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
-  const { day, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(activeDate);
+  const { meals, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
+  const { day, error: planError, refetch: refetchPlan } = usePlanToday(activeDate);
   const { lastByExercise } = useRecentExercises(30);
   const { weightDeltaKg, sleepDeltaHours } = useDailyComparison(today);
 
@@ -192,13 +192,23 @@ export default function TodayScreen() {
     router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never);
   }, []);
 
-  const refreshing = loading || liftsLoading || activitiesLoading || mealsLoading || planLoading;
-  const refetchAll = useCallback(() => {
-    refetch();
-    refetchLifts();
-    refetchActivities();
-    refetchMeals();
-    refetchPlan();
+  // Pull-to-refresh owns its own spinner: coupling it to the slowest section's
+  // load state (refreshing = OR of all loadings) pinned the indicator on screen
+  // long after most content was interactive.
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const refetchAll = useCallback(async () => {
+    setManualRefreshing(true);
+    try {
+      await Promise.allSettled([
+        refetch(),
+        refetchLifts(),
+        refetchActivities(),
+        refetchMeals(),
+        refetchPlan(),
+      ]);
+    } finally {
+      setManualRefreshing(false);
+    }
   }, [refetch, refetchLifts, refetchActivities, refetchMeals, refetchPlan]);
 
   /* Week-over-week footnotes only make sense on the live day. */
@@ -232,7 +242,7 @@ export default function TodayScreen() {
       <ScrollView
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refetchAll} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={refetchAll} tintColor={colors.primary} />}
       >
         <ScreenHeader
           variant="brand"
