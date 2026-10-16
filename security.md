@@ -66,3 +66,41 @@
   log dump.
 - Chat history (`coach_messages`) is only ever read/written for the authenticated
   user.
+
+## Analytics masking (session replay)
+
+Session replay records what is on screen, and this app displays health data.
+The policy is **mask by default, then explicitly verify**:
+
+- `app/_layout.tsx` opens PostHog with explicit, pinned replay options:
+  `maskAllTextInputs: true`, `maskAllImages: true`,
+  `maskAllSandboxedViews: true`, `captureTouches: false` (tap coordinates can
+  reveal keypad digits), `captureLog: false` (console logs must never become
+  events). Explicit flags mean an SDK default change cannot silently unmask
+  health data.
+- Free-text health content that inputs masking does not cover is wrapped in
+  `PostHogMaskView` (`ph-no-capture`): the coach chat transcript, the meal
+  editor sheet, and the day's meal list.
+- Analytics events themselves are numbers and enums only — audit the
+  `captureTiming` call sites before adding any property
+  (`src/utils/perf.ts` documents the contract).
+
+**Verification checklist (re-run after any PostHog/native SDK upgrade):**
+
+1. Build a dev/preview client with replay on; open Today, Meal sheet, and the
+   coach chat.
+2. In the PostHog replay, confirm the coach transcript and meal names/calories
+   render as masked blocks (not text).
+3. Confirm weigh-in/meal inputs and any photo attachments are masked
+   placeholders.
+4. Confirm no `console` events appear for the session.
+5. Confirm no touch-dot overlay appears over numeric inputs.
+6. Inspect a few captured events: properties must be durations, counts, token
+   totals and enums — never text, ids or content.
+
+## Metrics endpoint
+
+`GET /metrics` is 404 unless `METRICS_TOKEN` is set and compares the bearer
+token in constant time; expose it only to the scraper (bind it to the scraper's
+IP in Nginx if the VPS is public). The registry carries route patterns, status
+classes, tool names and error codes — no user identifiers or content.

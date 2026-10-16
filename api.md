@@ -311,7 +311,9 @@ server runs on UTC, so it is used for "today" and the tool date windows. `agent`
 routes by the message's content. Streams the reply as Server-Sent Events:
 `data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
 something up, `data: {"proposal":{…}}` for a change awaiting confirmation, then
-`data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`. Rate-limited
+`data: {"done":true,"usage":{"input_tokens":n,"output_tokens":n,"rounds":n}}`
+(the provider's token totals for the turn, so clients can report cost); on
+failure mid-stream `data: {"error":"…"}`. Rate-limited
 to 30 requests/hour per user.
 
 `dismissedMeal` (optional) is a meal estimate the athlete just dismissed —
@@ -351,3 +353,15 @@ the profile + recent data. **Does not persist** — returns the same plan shape 
 `description`. Returns `{ "analysis": "..." }`. The image is sent to the vision
 model **transiently and never stored** (see `docs/security.md`). Rate-limited to
 10/hour per user.
+
+## `GET /metrics`
+
+No Clerk auth. Prometheus text exposition (version 0.0.4) of in-process counters
+and latency histograms: HTTP requests by redacted route/status class + duration,
+coach turns/rounds, provider-reported input/output tokens, tool calls, provider
+retries, and coach failures by code. Labels carry route patterns, status classes,
+tool names and error codes only — never user ids, session ids or content.
+
+**404 unless `METRICS_TOKEN` is set**; scrapers then authenticate with
+`Authorization: Bearer <METRICS_TOKEN>` (constant-time compare). Excluded from
+the request-timing log so scrapes don't pollute it.

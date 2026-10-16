@@ -51,6 +51,35 @@ and supplied at run time through compose `env_file`.
 See `docs/backend.md` for the full list. Set them in `.env` on the VPS,
 never in source control.
 
+### Monitoring
+
+- **Uptime/health:** `/health` (process) and `/ready` (Neon reachable) are
+  used by the deploy gate; point an uptime monitor at `/ready`.
+- **Errors:** set `SENTRY_DSN` and optionally `SENTRY_RELEASE` (the CI deploy
+  can pass the commit SHA) — 500s and readiness failures report there.
+- **Metrics:** set `METRICS_TOKEN` on the VPS, then scrape
+  `https://api.<domain>/metrics` with `Authorization: Bearer <token>`
+  (Prometheus text format; the route 404s while the token is unset). Any
+  Prometheus-compatible collector or Grafana Cloud agent works.
+
+Starter panels (PromQL):
+
+| Panel | Query |
+|---|---|
+| 5xx rate | `sum(rate(http_requests_total{status_class="5xx"}[5m]))` |
+| p95 latency per route | `histogram_quantile(0.95, sum(rate(http_request_duration_ms_bucket[5m])) by (le, route))` |
+| Coach failures by code | `sum by (code) (rate(coach_failures_total[10m]))` |
+| Input tokens/hour | `sum(rate(coach_input_tokens_total[1h])) * 3600` |
+| Output tokens/hour | `sum(rate(coach_output_tokens_total[1h])) * 3600` |
+| Provider retries | `sum(rate(coach_provider_retries_total[10m]))` |
+| Tool usage (top 5) | `topk(5, sum by (tool) (rate(coach_tool_calls_total[1h])))` |
+| Requests by route | `sum by (route) (rate(http_requests_total[5m]))` |
+
+- **Client-side cost/latency:** the mobile app emits PostHog events
+  `coach_turn` (latency), `coach_tokens` (input/output tokens per turn) and
+  `meal_analyze` (photo analysis latency + confidence) — build those into the
+  product dashboards; they carry counts and enums only.
+
 ## Mobile app — Expo
 
 - Development: `npx expo start`, tested via Expo Go or a dev build.
