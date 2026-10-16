@@ -15,7 +15,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
-import { PostHogMaskView, usePostHog } from "posthog-react-native";
+import { usePostHog } from "posthog-react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
@@ -240,16 +240,20 @@ export function CoachChat({
       {error ? <Banner tone="warning" message={error} /> : null}
 
       {/* The chat transcript is free-text health conversation; keep it out of
-          session replays (PostHogMaskView => ph-no-capture). */}
-      <PostHogMaskView style={styles.listMask}>
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          contentContainerStyle={styles.list}
-          keyboardShouldPersistTaps="handled"
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
-          ListEmptyComponent={
+          session replays by marking the list itself ph-no-capture (PostHog
+          checks the accessibility label on any view). No extra wrapper view —
+          wrapping the list in one broke its height on Android. */}
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={(m) => m.id}
+        accessibilityLabel="ph-no-capture"
+        importantForAccessibility="no"
+        collapsable={false}
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        ListEmptyComponent={
           loading ? null : (
             <View style={styles.empty}>
               <IconBadge name="sparkles" bg={colors.primarySoft} color={colors.primary} size={56} rounded={false} />
@@ -309,7 +313,6 @@ export function CoachChat({
           );
         }}
       />
-      </PostHogMaskView>
 
       <View style={styles.composer}>
         {pendingPhoto ? (
@@ -439,7 +442,6 @@ function MessageBody({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg, gap: spacing.sm },
-    listMask: { flex: 1 },
     agentChips: { paddingHorizontal: spacing.screen },
     list: { padding: spacing.screen, gap: spacing.sm, flexGrow: 1 },
 
