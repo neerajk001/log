@@ -5,7 +5,7 @@ import { config } from "../config";
 import { normalizeQueryText, slowDbMs } from "../utils/perf";
 import { incrementCounter } from "../utils/metricRegistry";
 import { installPrePing, prePingIdleMs, prePingTimeoutMs } from "./prePing";
-import { runWithRetry } from "./retry";
+import { operationIsRead, runWithRetry } from "./retry";
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -176,7 +176,11 @@ export const prisma = basePrisma.$extends({
     $allModels: {
       async $allOperations({ args, query, operation, model }) {
         const label = `${model}.${operation}`;
+        // Reads get an extra attempt: the coach context is a ~13-query fan-out,
+        // so one dead connection among many can still fail a whole turn.
+        const maxAttempts = operationIsRead(operation) ? 3 : 2;
         return runWithRetry(label, () => query(args), {
+          maxAttempts,
           onRetry: (err, attempt) => {
             incrementCounter("db_transient_retries_total", { reason: "query" });
             console.warn(

@@ -23,7 +23,17 @@ const CONNECTION_DURING_QUERY_CODES = new Set(["P1017"]);
 
 /** Some pooler/proxy failures arrive as plain errors without a Prisma code. */
 const TRANSIENT_MESSAGE =
-  /server has closed the connection|connection terminated|connection reset|econnreset|socket hang up|prepared statement .* (?:does not exist|already exists)|unexpected end of/i;
+  /server has (?:been )?closed the connection|closed the connection|connection (?:has been |was )?(?:terminated|reset|refused|closed)|econnreset|econnrefused|socket hang up|terminating connection|database system is (?:starting up|shutting down|in recovery)|prepared statement .* (?:does not exist|already exists)|unexpected end of|too many clients/i;
+
+/**
+ * Postgres error codes that mean the connection died, not that the query was
+ * wrong: connection-exception class (08xxx), shutdown class (57P0x) and the
+ * pooler's "too many clients" (53300). The pg adapter passes them through
+ * inside a P2010 message ("Raw query failed. Code: `57P01`. Message: …"), so
+ * they must be read from the text.
+ */
+const CONNECTION_PG_CODE = /^(?:08[0-9A-Z]{3}|57P0[123]|53300)$/i;
+const PG_CODE_IN_MESSAGE = /Raw query failed\. Code: `?([0-9A-Z]{5})`?/i;
 
 const READ_OPERATIONS = new Set([
   "findUnique",
@@ -50,8 +60,14 @@ export function shouldRetryDbOperation(err: unknown, operation: string): boolean
   if (code != null && CONNECTION_SETUP_CODES.has(code)) return true;
 
   const message = err instanceof Error ? err.message : "";
+  // The pg adapter passes driver errors through as Prisma P2010 ("Raw query
+  // failed. Code: `57P01`. Message: …"), so the Postgres code must be read from
+  // the text — that is the shape the production failures actually arrive in.
+  const pgCode = PG_CODE_IN_MESSAGE.exec(message)?.[1] ?? null;
   const duringQuery =
-    (code != null && CONNECTION_DURING_QUERY_CODES.has(code)) || TRANSIENT_MESSAGE.test(message);
+    (code != null && CONNECTION_DURING_QUERY_CODES.has(code)) ||
+    (pgCode != null && CONNECTION_PG_CODE.test(pgCode)) ||
+    TRANSIENT_MESSAGE.test(message);
   // Ambiguous failures: only reads, where a replay cannot duplicate anything.
   return duringQuery && operationIsRead(operation);
 }
