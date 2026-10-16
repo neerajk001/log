@@ -205,9 +205,11 @@ export async function computeTrends(
       orderBy: { date: "asc" },
     }),
     // One row per training day — enough for the monthly workout counts.
+    // Capped at today like every sibling query: future-dated rows must not
+    // inflate the current month's workout count.
     prisma.liftLog.groupBy({
       by: ["date"],
-      where: { userId, date: { gte: historyStart } },
+      where: { userId, date: { gte: historyStart, lte: todayUtcMidnight } },
       _count: { _all: true },
     }),
     prisma.liftLog.findMany({

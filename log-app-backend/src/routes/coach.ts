@@ -29,6 +29,24 @@ const upload = multer({
   },
 });
 
+/**
+ * Maps an over-size physique photo to 413 (same contract as POST /api/meals/analyze).
+ * Without this the raw MulterError reaches the client as an opaque 500.
+ */
+function receiveImage(req: Request, res: Response, next: NextFunction): void {
+  upload.single("file")(req, res, (err: unknown) => {
+    if (err instanceof multer.MulterError) {
+      if (err.code === "LIMIT_FILE_SIZE") {
+        next(new AppError(413, "FILE_TOO_LARGE", "Image is too large. Maximum size is 5 MB."));
+        return;
+      }
+      next(new AppError(400, "VALIDATION_ERROR", `Upload rejected: ${err.code}`));
+      return;
+    }
+    next(err);
+  });
+}
+
 interface ProfileRow {
   goal: string | null;
   weightKg: unknown;
@@ -149,7 +167,7 @@ router.get(
         where: { sessionId: session.id, userId: req.userId },
         orderBy: { createdAt: "asc" },
         take: 200,
-        select: { id: true, role: true, content: true, createdAt: true },
+        select: { id: true, role: true, content: true, proposals: true, createdAt: true },
       });
       res.json({
         agent: session.agent,
@@ -157,6 +175,9 @@ router.get(
           id: m.id,
           role: m.role,
           content: m.content,
+          // Unconfirmed proposals ride with their message so a reopened chat can
+          // still show the confirm/dismiss card.
+          proposals: m.proposals ?? [],
           created_at: m.createdAt.toISOString(),
         })),
       });
@@ -300,7 +321,7 @@ router.post(
   "/analyze",
   requireAuth,
   analyzeRateLimit,
-  upload.single("file"),
+  receiveImage,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!req.file) {

@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../db/client";
+import { AppError } from "../middleware/errorHandler";
 import type { z } from "zod";
 import type { createMealSchema } from "../validation/schemas";
 
@@ -11,7 +12,7 @@ export interface MealItem {
 }
 
 export type MealInput = z.infer<typeof createMealSchema>;
-export type MealUpdateInput = Omit<MealInput, "date">;
+export type MealUpdateInput = Omit<MealInput, "date" | "id">;
 
 interface MealRecord {
   id: string;
@@ -35,6 +36,12 @@ const mealSelect = {
   source: true,
 } satisfies Prisma.MealLogSelect;
 
+/** Lookup shape for idempotency checks — needs the owner to compare. */
+const mealLookupSelect = {
+  ...mealSelect,
+  userId: true,
+} satisfies Prisma.MealLogSelect;
+
 export function serializeMeal(meal: MealRecord) {
   return {
     id: meal.id,
@@ -47,10 +54,35 @@ export function serializeMeal(meal: MealRecord) {
   };
 }
 
+function sameMealRequest(
+  existing: MealRecord & { userId: string },
+  userId: string,
+  input: MealInput,
+): boolean {
+  return (
+    existing.userId === userId &&
+    existing.date.toISOString().slice(0, 10) === input.date &&
+    existing.title === input.title &&
+    existing.calories === input.calories &&
+    existing.proteinG === input.protein_g &&
+    existing.source === input.source &&
+    JSON.stringify(existing.items) === JSON.stringify(input.items)
+  );
+}
+
+function idempotencyConflict(): AppError {
+  return new AppError(409, "IDEMPOTENCY_CONFLICT", "Meal request ID was already used");
+}
+
 /**
  * Adds `delta` to the day's calories/protein on `daily_logs`, clamped at 0 and
  * preserving weight/sleep. This keeps the weekly verdict and adherence (which
  * read `daily_logs.protein_g`) in sync with logged meals.
+ *
+ * The write is a single atomic increment — not find-then-write — so two meals
+ * logged at the same time (two devices, two fast requests) can't read the same
+ * starting total and overwrite each other's delta, which would leave meal rows
+ * the day's totals never count.
  */
 export async function applyDailyDelta(
   userId: string,
@@ -59,19 +91,37 @@ export async function applyDailyDelta(
   client: DailyLogClient = prisma,
 ): Promise<void> {
   const day = new Date(date);
-  const existing = await client.dailyLog.findUnique({
-    where: { userId_date: { userId, date: day } },
-    select: { calories: true, proteinG: true },
-  });
-  const calories = Math.max(0, (existing?.calories ?? 0) + delta.calories);
-  const proteinG = Math.max(0, (existing?.proteinG ?? 0) + delta.protein_g);
 
   await client.dailyLog.upsert({
     where: { userId_date: { userId, date: day } },
-    create: { userId, date: day, calories, proteinG },
-    update: { calories, proteinG },
+    create: {
+      userId,
+      date: day,
+      calories: Math.max(0, delta.calories),
+      proteinG: Math.max(0, delta.protein_g),
+    },
+    update: {
+      calories: { increment: delta.calories },
+      proteinG: { increment: delta.protein_g },
+    },
     select: { id: true },
   });
+
+  // Clamp at zero (e.g. a meal removed after the athlete typed a lower day
+  // total). Conditional, per-field atomic statements — a concurrent positive
+  // increment can never be lost the way it could with a read-modify-write.
+  if (delta.calories < 0) {
+    await client.dailyLog.updateMany({
+      where: { userId, date: day, calories: { lt: 0 } },
+      data: { calories: 0 },
+    });
+  }
+  if (delta.protein_g < 0) {
+    await client.dailyLog.updateMany({
+      where: { userId, date: day, proteinG: { lt: 0 } },
+      data: { proteinG: 0 },
+    });
+  }
 }
 
 export async function listMeals(userId: string, date: string): Promise<MealRecord[]> {
@@ -82,28 +132,72 @@ export async function listMeals(userId: string, date: string): Promise<MealRecor
   });
 }
 
-export async function createMeal(userId: string, input: MealInput): Promise<MealRecord> {
-  return prisma.$transaction(async (tx) => {
-    const meal = await tx.mealLog.create({
-      data: {
-        userId,
-        date: new Date(input.date),
-        title: input.title,
-        items: input.items as unknown as Prisma.InputJsonValue,
-        calories: input.calories,
-        proteinG: input.protein_g,
-        source: input.source,
-      },
-      select: mealSelect,
+/**
+ * Creates a meal and rolls its macros into the day's totals in one transaction.
+ * With a client-supplied `id`, retrying the same request replays the existing
+ * row instead of duplicating it (the response can be lost after the write
+ * succeeded), and reusing the id for a changed payload is a 409 — the same
+ * contract as lift logging. The day-total increment is atomic, so concurrent
+ * meal writes can't overwrite each other's delta.
+ */
+export async function createMealIdempotent(
+  userId: string,
+  input: MealInput,
+): Promise<{ meal: MealRecord; created: boolean }> {
+  if (input.id) {
+    const existing = await prisma.mealLog.findUnique({
+      where: { id: input.id },
+      select: mealLookupSelect,
     });
-    await applyDailyDelta(
-      userId,
-      input.date,
-      { calories: input.calories, protein_g: input.protein_g },
-      tx,
-    );
-    return meal;
-  });
+    if (existing) {
+      if (!sameMealRequest(existing, userId, input)) throw idempotencyConflict();
+      return { meal: existing, created: false };
+    }
+  }
+
+  try {
+    const meal = await prisma.$transaction(async (tx) => {
+      const created = await tx.mealLog.create({
+        data: {
+          ...(input.id ? { id: input.id } : {}),
+          userId,
+          date: new Date(input.date),
+          title: input.title,
+          items: input.items as unknown as Prisma.InputJsonValue,
+          calories: input.calories,
+          proteinG: input.protein_g,
+          source: input.source,
+        },
+        select: mealSelect,
+      });
+      await applyDailyDelta(
+        userId,
+        input.date,
+        { calories: input.calories, protein_g: input.protein_g },
+        tx,
+      );
+      return created;
+    });
+    return { meal, created: true };
+  } catch (err) {
+    // Concurrent replay: two requests with the same id raced past the pre-check;
+    // the loser resolves to the winner's row when the payload matches.
+    if (
+      input.id &&
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      const existing = await prisma.mealLog.findUnique({
+        where: { id: input.id },
+        select: mealLookupSelect,
+      });
+      if (existing && sameMealRequest(existing, userId, input)) {
+        return { meal: existing, created: false };
+      }
+      throw idempotencyConflict();
+    }
+    throw err;
+  }
 }
 
 export async function updateMeal(
@@ -119,8 +213,11 @@ export async function updateMeal(
 
   const date = existing.date.toISOString().slice(0, 10);
   return prisma.$transaction(async (tx) => {
-    const meal = await tx.mealLog.update({
-      where: { id },
+    // Compare-and-swap on the totals that anchor the ledger delta: if another
+    // device changed this meal between the read and the write, the stale delta
+    // would corrupt the day. Refuse instead of guessing.
+    const swapped = await tx.mealLog.updateMany({
+      where: { id, userId, calories: existing.calories, proteinG: existing.proteinG },
       data: {
         title: input.title,
         items: input.items as unknown as Prisma.InputJsonValue,
@@ -128,8 +225,14 @@ export async function updateMeal(
         proteinG: input.protein_g,
         source: input.source,
       },
-      select: mealSelect,
     });
+    if (swapped.count === 0) {
+      throw new AppError(
+        409,
+        "MEAL_CHANGED",
+        "That meal changed while you were editing it. Reopen it and try again.",
+      );
+    }
     await applyDailyDelta(
       userId,
       date,
@@ -139,7 +242,7 @@ export async function updateMeal(
       },
       tx,
     );
-    return meal;
+    return tx.mealLog.findFirstOrThrow({ where: { id }, select: mealSelect });
   });
 }
 
@@ -153,7 +256,17 @@ export async function deleteMeal(userId: string, id: string): Promise<boolean> {
 
   const date = existing.date.toISOString().slice(0, 10);
   await prisma.$transaction(async (tx) => {
-    await tx.mealLog.delete({ where: { id } });
+    // Same compare-and-swap as updateMeal: only subtract the totals we read.
+    const removed = await tx.mealLog.deleteMany({
+      where: { id, userId, calories: existing.calories, proteinG: existing.proteinG },
+    });
+    if (removed.count === 0) {
+      throw new AppError(
+        409,
+        "MEAL_CHANGED",
+        "That meal changed before it could be removed. Reopen it and try again.",
+      );
+    }
     await applyDailyDelta(
       userId,
       date,

@@ -12,7 +12,7 @@ import {
   updateMealSchema,
 } from "../validation/schemas";
 import {
-  createMeal,
+  createMealIdempotent,
   deleteMeal,
   listMeals,
   serializeMeal,
@@ -24,7 +24,9 @@ const router = Router();
 
 const analyzeRateLimit = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 60,
+  // 10/hr per user, matching api.md and security.md — a photo analysis is a
+  // billable vision call and has no legitimate high-frequency use.
+  max: 10,
   keyGenerator: (req) => req.userId,
 });
 
@@ -67,8 +69,8 @@ router.post(
   validate(createMealSchema),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const meal = await createMeal(req.userId, req.body);
-      res.status(201).json(serializeMeal(meal));
+      const { meal, created } = await createMealIdempotent(req.userId, req.body);
+      res.status(created ? 201 : 200).json(serializeMeal(meal));
     } catch (err) {
       next(err);
     }

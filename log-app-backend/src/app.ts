@@ -6,6 +6,7 @@ import * as Sentry from "@sentry/node";
 import { clerkMiddleware } from "@clerk/express";
 import { isAllowedOrigin } from "./cors";
 import { errorHandler } from "./middleware/errorHandler";
+import { requestTiming } from "./middleware/requestTiming";
 import { config } from "./config";
 import { checkDatabaseReadiness } from "./db/readiness";
 import usersRouter from "./routes/users";
@@ -34,17 +35,9 @@ app.use(
   }),
 );
 
-if (config.nodeEnv !== "production") {
-  app.use((req, res, next) => {
-    const startedAt = Date.now();
-    res.on("finish", () => {
-      const ms = Date.now() - startedAt;
-      const user = req.userId ? ` user=${req.userId}` : "";
-      console.log(`[req] ${req.method} ${req.originalUrl} ${res.statusCode} ${ms}ms${user}`);
-    });
-    next();
-  });
-}
+// Phase 0 instrumentation: per-request timing in every env (dev logger folded in).
+// One line per request, redacted path, no PII — aggregate into p50/p95 per endpoint.
+app.use(requestTiming);
 
 app.use(cors({
   origin: (origin, callback) => {

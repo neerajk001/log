@@ -19,7 +19,9 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     return;
   }
 
-  console.error("Unhandled error:", err instanceof Error ? err.message : err);
+  // Log the full error (stack included) — the client only ever sees the
+  // generic copy below, and Sentry gets the event via its own middleware.
+  console.error("Unhandled error:", err);
 
   res.status(500).json({
     error: {

@@ -137,14 +137,18 @@ router.post(
   parseRateLimit,
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
-      if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
-        next(
-          new AppError(
-            400,
-            "VALIDATION_ERROR",
-            `File is too large. Maximum size is ${PLAN_FILE_MAX_BYTES / (1024 * 1024)} MB.`,
-          ),
-        );
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") {
+          next(
+            new AppError(
+              400,
+              "VALIDATION_ERROR",
+              `File is too large. Maximum size is ${PLAN_FILE_MAX_BYTES / (1024 * 1024)} MB.`,
+            ),
+          );
+          return;
+        }
+        next(new AppError(400, "VALIDATION_ERROR", `Upload rejected: ${err.code}`));
         return;
       }
       next(err);
@@ -335,7 +339,9 @@ router.put(
           days.length,
         );
         if (remove.length > 0) {
-          await tx.planDay.deleteMany({ where: { id: { in: remove } } });
+          // Belt-and-braces scoping (ids came from an owned read just above):
+          // a day can only disappear inside its owner's plan.
+          await tx.planDay.deleteMany({ where: { id: { in: remove }, plan: { userId: req.userId } } });
         }
 
         for (const [index, day] of days.entries()) {

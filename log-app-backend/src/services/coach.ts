@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
@@ -208,10 +210,12 @@ export async function buildAthleteContext(
       where: { id: userId },
       select: { proteinTargetG: true, calorieTarget: true, restDays: true, trackWeight: true },
     }),
-    // Lifetime bests, so the coach isn't blind to anything older than the window.
+    // Best-ever sets, so the coach isn't blind to anything older than the window.
+    // Bounded to the same trailing year as the weight history: an unbounded scan
+    // makes every turn pay for the account's lifetime, growing forever.
     prisma.liftLog.groupBy({
       by: ["exerciseName"],
-      where: { userId },
+      where: { userId, date: { gte: yearAgo } },
       _max: { weightKg: true },
     }),
     prisma.dailyLog.findMany({
@@ -534,67 +538,91 @@ async function callModel(
     throw new AppError(503, "COACH_UNAVAILABLE", "The coach is unavailable right now.");
   }
   const promptCache = config.ai.promptCache;
+  const host = hostOf(baseUrl);
 
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: options.model,
-        instructions,
-        input,
-        ...(promptCache ? { prompt_cache_key: PROMPT_CACHE_KEY } : {}),
-        // Reasoning models (e.g. DeepSeek Flash) can be told to skip "thinking".
-        ...(options.thinking === false ? { thinking: { type: "disabled" } } : {}),
-        ...(options.json ? { text: { format: { type: "json_object" } } } : {}),
-        max_output_tokens: maxOutputTokens,
-      }),
-    });
-  } catch {
-    throw new AppError(
-      502,
-      "COACH_UNREACHABLE",
-      "I can't reach the coach right now — try again.",
-    );
+  // One retry of silent failures only (network/timeout throw, HTTP 5xx): the
+  // response is single-shot JSON, so no partial output can exist and nothing can
+  // duplicate. 4xx (auth/billing/rate-limit) and empty-200 are deterministic —
+  // retrying them only burns quota and latency.
+  for (let attempt = 0; attempt < MODEL_ATTEMPTS; attempt++) {
+    const lastAttempt = attempt + 1 >= MODEL_ATTEMPTS;
+    // Bound the wait: without this a slow provider holds the request (and, for
+    // chat, the SSE stream) indefinitely — only a client disconnect aborted it.
+    // Fresh signal per attempt: a fired signal can't be reused.
+    const timeout = AbortSignal.timeout(60000);
+
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/responses`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: options.model,
+          instructions,
+          input,
+          ...(promptCache ? { prompt_cache_key: PROMPT_CACHE_KEY } : {}),
+          // Reasoning models (e.g. DeepSeek Flash) can be told to skip "thinking".
+          ...(options.thinking === false ? { thinking: { type: "disabled" } } : {}),
+          ...(options.json ? { text: { format: { type: "json_object" } } } : {}),
+          max_output_tokens: maxOutputTokens,
+        }),
+        signal: timeout,
+      });
+    } catch {
+      if (!lastAttempt) {
+        console.warn(`[coach] ${host} call failed before responding, retrying once`);
+        continue;
+      }
+      throw new AppError(
+        502,
+        "COACH_UNREACHABLE",
+        "I can't reach the coach right now — try again.",
+      );
+    }
+
+    if (!res.ok && (res.status < 500 || lastAttempt)) {
+      const detail = await res.text().catch(() => "");
+      console.error(`[coach] ${host} error ${res.status}:`, detail.slice(0, 300));
+      throw new AppError(
+        502,
+        "COACH_ERROR",
+        "The coach is having trouble right now — try again in a moment.",
+      );
+    }
+    if (!res.ok) {
+      console.warn(`[coach] ${host} error ${res.status}, retrying once`);
+      continue;
+    }
+
+    const data = (await res.json()) as {
+      usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+      output?: { content?: { type?: string; text?: string }[] }[];
+    };
+    if (data.usage) {
+      console.log(
+        "[coach] usage",
+        JSON.stringify({
+          model: options.model,
+          inputTokens: data.usage.input_tokens,
+          outputTokens: data.usage.output_tokens,
+        }),
+      );
+    }
+    const text = data.output
+      ?.flatMap((item) => item.content ?? [])
+      .find((item) => item.type === "output_text")?.text;
+
+    if (!text || text.trim().length === 0) {
+      throw new AppError(502, "COACH_EMPTY", "The coach didn't send a reply — try again.");
+    }
+    return text.trim();
   }
 
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    const host = hostOf(baseUrl);
-    console.error(`[coach] ${host} error ${res.status}:`, detail.slice(0, 300));
-    throw new AppError(
-      502,
-      "COACH_ERROR",
-      "The coach is having trouble right now — try again in a moment.",
-    );
-  }
-
-  const data = (await res.json()) as {
-    usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
-    output?: { content?: { type?: string; text?: string }[] }[];
-  };
-  if (data.usage) {
-    console.log(
-      "[coach] usage",
-      JSON.stringify({
-        model: options.model,
-        inputTokens: data.usage.input_tokens,
-        outputTokens: data.usage.output_tokens,
-      }),
-    );
-  }
-  const text = data.output
-    ?.flatMap((item) => item.content ?? [])
-    .find((item) => item.type === "output_text")?.text;
-
-  if (!text || text.trim().length === 0) {
-    throw new AppError(502, "COACH_EMPTY", "The coach didn't send a reply — try again.");
-  }
-  return text.trim();
+  // Unreachable: every iteration returns or throws.
+  throw new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now — try again.");
 }
 
 export interface CoachUsage {
@@ -683,6 +711,14 @@ export function parseOpenAIDelta(payload: string): string | null {
 
 const MAX_TOOL_ROUNDS = config.ai.toolRounds;
 const MAX_TOOL_DAYS = 90;
+
+/**
+ * Attempts per model call: first try plus one retry of *silent* failures only
+ * (nothing emitted yet — no delta forwarded, no tool call collected). A round
+ * returns at most once (success or throw), so tools still execute at most once
+ * per round and the client never sees doubled text.
+ */
+const MODEL_ATTEMPTS = 2;
 
 /** Responses-API tool definitions (flat name/parameters, not nested). */
 const COACH_TOOLS = [
@@ -1084,7 +1120,7 @@ function daysAgo(days: number, today: string): Date {
   return d;
 }
 
-export type CoachProposal =
+export type CoachProposal = (
   | {
       kind: "plan_update";
       plan_id: string;
@@ -1142,7 +1178,15 @@ export type CoachProposal =
       title: string;
       calories: number;
       protein_g: number;
-    };
+    }
+) & {
+  /**
+   * Server-generated id: stored with the message so a reopened chat can still
+   * confirm the change, and used by meal proposals as the create-meal
+   * idempotency key (re-confirming a restored card replays, never duplicates).
+   */
+  id: string;
+};
 
 interface PlanWithDays {
   id: string;
@@ -1222,9 +1266,23 @@ interface MealItemDraft {
   protein_g: number;
 }
 
+/** Multipart photo captions bypass `express.json({limit})` — cap what reaches the model prompt. */
+const MAX_PHOTO_DESCRIPTION = 500;
+function cleanDescription(description: string | undefined): string | undefined {
+  const trimmed = description?.trim();
+  return trimmed ? trimmed.slice(0, MAX_PHOTO_DESCRIPTION) : undefined;
+}
+
+/** Strict YYYY-MM-DD + real calendar date (mirrors `dateString` in validation/schemas). */
+function isCalendarDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 /** Validates and normalises a model-supplied list of meal items. */
-function mealItemsFromArgs(raw: unknown): MealItemDraft[] | null {
-  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 30) return null;
+function mealItemsFromArgs(raw: unknown): MealItemDraft[] | null {  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 30) return null;
   const items: MealItemDraft[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") return null;
@@ -1248,7 +1306,18 @@ function mealItemsFromArgs(raw: unknown): MealItemDraft[] | null {
 /* ------------------------------------------------------- food lookup */
 
 const FOOD_CACHE_MS = 24 * 60 * 60 * 1000;
+// Bounded: keys are athlete-controlled query strings, so cap the map and evict
+// oldest-first instead of growing for the life of the process.
+const MAX_FOOD_CACHE_ENTRIES = 500;
 const foodCache = new Map<string, { at: number; data: unknown }>();
+
+function cacheFood(key: string, data: unknown): void {
+  if (foodCache.size >= MAX_FOOD_CACHE_ENTRIES) {
+    const oldest = foodCache.keys().next();
+    if (!oldest.done) foodCache.delete(oldest.value);
+  }
+  foodCache.set(key, { at: Date.now(), data });
+}
 
 function round1(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
@@ -1336,7 +1405,7 @@ async function lookupFood(query: string): Promise<unknown> {
 
     if (results.length > 0) {
       const out = { source: "open_food_facts", results };
-      foodCache.set(key, { at: Date.now(), data: out });
+      cacheFood(key, out);
       return out;
     }
   } catch (err) {
@@ -1364,7 +1433,7 @@ async function lookupFood(query: string): Promise<unknown> {
           .slice(0, 3)
           .map((r) => ({ title: r.title, url: r.url, snippet: r.content }));
         const out = { source: "web", results };
-        foodCache.set(key, { at: Date.now(), data: out });
+        cacheFood(key, out);
         return out;
       }
     } catch {
@@ -1626,6 +1695,7 @@ export async function executeCoachTool(
             : `Update "${plan.name}"`;
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "plan_update",
             plan_id: plan.id,
             plan_name: plan.name,
@@ -1642,14 +1712,14 @@ export async function executeCoachTool(
         const ref = typeof args.plan === "string" ? args.plan : undefined;
         const plan = await resolvePlan(userId, ref);
         if ("error" in plan) return plan;
-        return { __proposal: { kind: "plan_activate", plan_id: plan.id, plan_name: plan.name } };
+        return { __proposal: { id: randomUUID(), kind: "plan_activate", plan_id: plan.id, plan_name: plan.name } };
       }
 
       case "delete_plan": {
         const ref = typeof args.plan === "string" ? args.plan : undefined;
         const plan = await resolvePlan(userId, ref);
         if ("error" in plan) return plan;
-        return { __proposal: { kind: "plan_delete", plan_id: plan.id, plan_name: plan.name } };
+        return { __proposal: { id: randomUUID(), kind: "plan_delete", plan_id: plan.id, plan_name: plan.name } };
       }
 
       case "update_logged_set": {
@@ -1666,6 +1736,7 @@ export async function executeCoachTool(
         }
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "set_update",
             set_id: row.id,
             date: fmtDate(row.date),
@@ -1685,6 +1756,7 @@ export async function executeCoachTool(
         if (!row) return { error: "That logged set wasn't found." };
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "set_delete",
             set_id: row.id,
             date: fmtDate(row.date),
@@ -1755,6 +1827,7 @@ export async function executeCoachTool(
         }
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "meal_log",
             date: dateStr,
             title,
@@ -1778,6 +1851,7 @@ export async function executeCoachTool(
           typeof args.title === "string" && args.title.trim() ? args.title.trim().slice(0, 120) : row.title;
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "meal_update",
             meal_id: row.id,
             date: fmtDate(row.date),
@@ -1798,6 +1872,7 @@ export async function executeCoachTool(
         if (!row) return { error: "That meal wasn't found." };
         return {
           __proposal: {
+            id: randomUUID(),
             kind: "meal_delete",
             meal_id: row.id,
             date: fmtDate(row.date),
@@ -1921,7 +1996,13 @@ interface StreamRound {
   incomplete: boolean;
 }
 
-/** One streaming Responses call; forwards text deltas and collects function calls. */
+/** One streaming Responses call; forwards text deltas and collects function calls.
+ *
+ * Retries silent failures once (fetch throw, HTTP 5xx, inactivity stall or
+ * mid-stream error with zero output so far). Anything already surfaced to the
+ * client (forwarded deltas, collected calls) fails with 502 instead — replaying
+ * it would duplicate visible text or re-execute tools.
+ */
 async function streamRound(
   baseUrl: string,
   apiKey: string,
@@ -1929,72 +2010,142 @@ async function streamRound(
   signal: AbortSignal | undefined,
   onDelta: (delta: string) => void,
 ): Promise<StreamRound> {
-  let res: Response;
-  try {
-    res = await fetch(`${baseUrl}/responses`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      return { text: "", calls: [], responseId: null, usage: null, incomplete: false };
-    }
+  const host = hostOf(baseUrl);
+  const stallMs = config.ai.stallMs;
+
+  for (let attempt = 0; attempt < MODEL_ATTEMPTS; attempt++) {
+    const lastAttempt = attempt + 1 >= MODEL_ATTEMPTS;
+    // Per-round budget: a hung provider must fail the turn (502) instead of holding
+    // the SSE stream open. The client Stop still wins — an abort that came from the
+    // passed-in signal returns the partial text; a timeout throws. Fresh signals
+    // per attempt: a fired signal can't be reused.
+    const timeout = AbortSignal.timeout(90000);
+    // Inactivity watchdog (off when stallMs is 0): aborts a round that yields no
+    // chunk for stallMs. Aborts with a TimeoutError reason so the catch below can
+    // tell a stall from a client Stop.
+    const stall = stallMs > 0 ? new AbortController() : null;
+    const stallReason = new DOMException("StallTimeout", "TimeoutError");
+    const combined = stall
+      ? AbortSignal.any([...(signal ? [signal] : []), timeout, stall.signal])
+      : signal
+        ? AbortSignal.any([signal, timeout])
+        : timeout;
+
+    const retrySilent = (why: string): boolean => {
+      // Client Stop is never retried — it already got its answer (partial text).
+      if (signal?.aborted) return false;
+      if (lastAttempt) return false;
+      console.warn(`[coach] stream round failed silently (${why}), retrying once`);
+      return true;
+    };
+
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/responses`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: combined,
+      });
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        return { text: "", calls: [], responseId: null, usage: null, incomplete: false };
+      }
+      if (!lastAttempt) {
+        console.warn(`[coach] stream round failed before responding, retrying once`);
+        continue;
+      }
       throw new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now — try again.");
-  }
+    }
 
-  if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
-    const host = hostOf(baseUrl);
-    console.error(`[coach] ${host} stream error ${res.status}:`, detail.slice(0, 300));
+    if ((!res.ok || !res.body) && (res.status < 500 || lastAttempt)) {
+      const detail = await res.text().catch(() => "");
+      console.error(`[coach] ${host} stream error ${res.status}:`, detail.slice(0, 300));
       throw new AppError(502, "COACH_ERROR", "The coach is having trouble right now — try again in a moment.");
-  }
+    }
+    if (!res.ok || !res.body) {
+      console.warn(`[coach] ${host} stream error ${res.status}, retrying once`);
+      continue;
+    }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let text = "";
-  let responseId: string | null = null;
-  let usage: CoachUsage | null = null;
-  let incomplete = false;
-  const calls: ToolCall[] = [];
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let responseId: string | null = null;
+    let usage: CoachUsage | null = null;
+    let incomplete = false;
+    const calls: ToolCall[] = [];
 
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const event = parseOpenAIEvent(trimmed.slice(5).trim());
-        if (event.kind === "text") {
-          text += event.delta;
-          onDelta(event.delta);
-        } else if (event.kind === "function-call") {
-          calls.push({ callId: event.callId, name: event.name, args: event.args });
-        } else if (event.kind === "completed") {
-          if (event.responseId) responseId = event.responseId;
-          if (event.usage) usage = event.usage;
-        } else if (event.kind === "incomplete") {
-          incomplete = true;
-          if (event.responseId) responseId = event.responseId;
-          if (event.usage) usage = event.usage;
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+    const armStallTimer = () => {
+      if (!stall) return;
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => stall.abort(stallReason), stallMs);
+    };
+    const clearStallTimer = () => {
+      if (stallTimer) clearTimeout(stallTimer);
+      stallTimer = null;
+    };
+
+    try {
+      armStallTimer();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armStallTimer();
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const event = parseOpenAIEvent(trimmed.slice(5).trim());
+          if (event.kind === "text") {
+            text += event.delta;
+            onDelta(event.delta);
+          } else if (event.kind === "function-call") {
+            calls.push({ callId: event.callId, name: event.name, args: event.args });
+          } else if (event.kind === "completed") {
+            if (event.responseId) responseId = event.responseId;
+            if (event.usage) usage = event.usage;
+          } else if (event.kind === "incomplete") {
+            incomplete = true;
+            if (event.responseId) responseId = event.responseId;
+            if (event.usage) usage = event.usage;
+          }
         }
       }
+    } catch (err) {
+      clearStallTimer();
+      // Client Stop — keep whatever streamed so far. A per-round timeout or stall
+      // mid-stream fails the turn instead, so a truncated reply is never stored
+      // as complete — unless nothing was emitted yet, in which case one silent
+      // retry cannot duplicate anything.
+      if (signal?.aborted) {
+        return { text, calls, responseId, usage, incomplete };
+      }
+      const emitted = text.length > 0 || calls.length > 0;
+      if (err instanceof Error && err.name === "AbortError") {
+        return { text, calls, responseId, usage, incomplete };
+      }
+      if (err instanceof Error && err.name === "TimeoutError") {
+        if (!emitted && retrySilent("stall")) continue;
+        throw new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now — try again.");
+      }
+      if (!emitted && retrySilent("mid-stream error")) continue;
+      throw new AppError(502, "COACH_ERROR", "The coach is having trouble right now — try again in a moment.");
     }
-  } catch (err) {
-    // Client disconnected (Stop) — keep whatever we streamed so far.
-    if (!(err instanceof Error && err.name === "AbortError")) throw err;
+    clearStallTimer();
+
+    return { text, calls, responseId, usage, incomplete };
   }
 
-  return { text, calls, responseId, usage, incomplete };
+  // Unreachable: every iteration returns, continues, or throws.
+  throw new AppError(502, "COACH_UNREACHABLE", "I can't reach the coach right now — try again.");
 }
 
 /**
@@ -2058,7 +2209,10 @@ export async function runCoachChatStream(
   const [context, recent] = await Promise.all([
     buildAthleteContext(userId, today, agentId === "meal" ? "meal" : "full"),
     prisma.coachMessage.findMany({
-      where: { sessionId: session.id },
+      // Defense-in-depth: session ownership was verified above, but scope history
+      // to both session and user (matches GET /sessions/:id/messages) so a future
+      // reorder can never leak cross-user messages.
+      where: { sessionId: session.id, userId },
       orderBy: { createdAt: "desc" },
       take: config.ai.historyTurns,
       select: { role: true, content: true, responseId: true },
@@ -2067,13 +2221,16 @@ export async function runCoachChatStream(
   stages.context = Date.now() - contextStart;
 
   const persistStart = Date.now();
-  await prisma.coachMessage.create({
-    data: { userId, sessionId: session.id, role: "user", content: message },
-  });
-  await prisma.coachSession.update({
-    where: { id: session.id },
-    data: { updatedAt: new Date() },
-  });
+  // Independent writes — one round trip instead of two before the first model call.
+  await Promise.all([
+    prisma.coachMessage.create({
+      data: { userId, sessionId: session.id, role: "user", content: message },
+    }),
+    prisma.coachSession.update({
+      where: { id: session.id },
+      data: { updatedAt: new Date() },
+    }),
+  ]);
   stages.persistUserMessage = Date.now() - persistStart;
 
   const { baseUrl, apiKey } = aiEndpoint();
@@ -2120,6 +2277,8 @@ export async function runCoachChatStream(
   let totalInput = 0;
   let totalOutput = 0;
   const usedTools: string[] = [];
+  /** Proposals prepared this turn — persisted with the reply so a reopened chat can still confirm them. */
+  const proposals: CoachProposal[] = [];
   const startedAt = Date.now();
   // Per-round and per-tool timings, so a slow meal turn can be traced to the
   // model vs a lookup instead of guessed at.
@@ -2132,6 +2291,11 @@ export async function runCoachChatStream(
     outputTokens: number;
   }[] = [];
   const toolTimings: { name: string; ms: number }[] = [];
+
+  // Perceived latency: the client clears status on the first delta, so say
+  // something before the first model round — otherwise a thinking-heavy round
+  // reads as dead air while no token has arrived yet.
+  if (!signal?.aborted) handlers.onStatus?.("Checking your logs…");
 
   for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
     if (signal?.aborted) break;
@@ -2164,8 +2328,13 @@ export async function runCoachChatStream(
         onDelta,
       );
     } catch (err) {
-      // Chaining can fail if the stored response is gone — retry once from full history.
-      if (round === 0 && previousId) {
+      // Chaining can fail if the stored response is gone — retry once from full
+      // history, but only when nothing was forwarded yet. A failure *after* the
+      // first delta must not be replayed: the client already rendered that text,
+      // so a second attempt would duplicate it (and the stored answer would
+      // become partial + full concatenated). streamRound refuses its own retry
+      // in that case; this fallback must honour the same rule.
+      if (round === 0 && previousId && firstDeltaAt == null) {
         previousId = null;
         result = await streamRound(baseUrl, apiKey, { ...baseBody, input: convo }, signal, onDelta);
       } else {
@@ -2224,7 +2393,10 @@ export async function runCoachChatStream(
     const outputs: unknown[] = [];
     for (const { call, output, proposal } of settled) {
       usedTools.push(call.name);
-      if (proposal) handlers.onProposal?.(proposal);
+      if (proposal) {
+        proposals.push(proposal);
+        handlers.onProposal?.(proposal);
+      }
       outputs.push({
         type: "function_call_output",
         call_id: call.callId,
@@ -2274,7 +2446,9 @@ export async function runCoachChatStream(
   );
 
   const answer = full.trim();
-  if (answer.length > 0) {
+  // Store proposals alongside whatever text was produced — even an empty reply
+  // keeps a card the athlete can still confirm after reopening the chat.
+  if (answer.length > 0 || proposals.length > 0) {
     await prisma.coachMessage.create({
       data: {
         userId,
@@ -2282,6 +2456,9 @@ export async function runCoachChatStream(
         role: "assistant",
         content: answer,
         responseId: chaining ? lastResponseId : null,
+        ...(proposals.length > 0
+          ? { proposals: proposals as unknown as Prisma.InputJsonValue }
+          : {}),
       },
     });
   }
@@ -2420,6 +2597,7 @@ export async function analyzePhysique(
   description?: string,
 ): Promise<PhysiqueReading> {
   const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+  const note = cleanDescription(description);
   const raw = await callModel(
     PHYSIQUE_PROMPT,
     [
@@ -2428,7 +2606,7 @@ export async function analyzePhysique(
         content: [
           {
             type: "input_text",
-            text: description ? `The athlete adds: ${description}` : "Read this physique photo.",
+            text: note ? `The athlete adds: ${note}` : "Read this physique photo.",
           },
           { type: "input_image", image_url: dataUrl },
         ],
@@ -2622,9 +2800,12 @@ export async function analyzeMeal(
   description?: string,
   localDate?: string,
 ): Promise<MealAnalysis> {
-  const today = localDate && /^\d{4}-\d{2}-\d{2}$/.test(localDate) ? localDate : fmtDate(new Date());
+  // Optional context hint: garbage falls back to today (same as a missing date),
+  // so an impossible calendar date can never poison the day-context query.
+  const today = localDate && isCalendarDate(localDate) ? localDate : fmtDate(new Date());
   const { day, promptLine: mealContext, memoryLine } = await loadMealDayContext(userId, today);
   const dataUrl = `data:${mimeType};base64,${imageBuffer.toString("base64")}`;
+  const note = cleanDescription(description);
   const raw = await callModel(
     MEAL_PHOTO_SYSTEM,
     [
@@ -2634,7 +2815,7 @@ export async function analyzeMeal(
           {
             type: "input_text",
             text: [
-              description ? `The athlete says: ${description}` : "Estimate this meal.",
+              note ? `The athlete says: ${note}` : "Estimate this meal.",
               mealContext,
               memoryLine,
             ]

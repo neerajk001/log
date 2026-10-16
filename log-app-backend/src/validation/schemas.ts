@@ -40,6 +40,8 @@ export const mealItemSchema = z.object({
 });
 
 export const createMealSchema = z.object({
+  /** Optional client-generated id: retrying the same request replays it instead of logging the meal twice. */
+  id: z.string().uuid().optional(),
   date: dateString,
   title: z.string().min(1).max(120),
   items: z.array(mealItemSchema).min(1).max(30),
@@ -48,7 +50,7 @@ export const createMealSchema = z.object({
   source: z.enum(["ai", "photo", "manual"]),
 });
 
-export const updateMealSchema = createMealSchema.omit({ date: true });
+export const updateMealSchema = createMealSchema.omit({ date: true, id: true });
 
 export const mealDateQuerySchema = z.object({
   date: dateString,

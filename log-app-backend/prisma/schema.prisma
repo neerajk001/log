@@ -163,6 +163,8 @@ model CoachMessage {
   role       String        @db.Text
   content    String        @db.Text
   responseId String?       @map("response_id") @db.Text
+  /// Changes the coach proposed this turn (plan/meal/set), so a reopened chat can still confirm them.
+  proposals  Json?         @db.JsonB
   createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   user       User          @relation(fields: [userId], references: [id])
   session    CoachSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)

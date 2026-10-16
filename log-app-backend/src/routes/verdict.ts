@@ -1,5 +1,7 @@
 import { Router, Response, NextFunction, Request } from "express";
 import { requireAuth } from "../middleware/auth";
+import { validate } from "../middleware/validate";
+import { planTodayQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
 import { recordDecision } from "../services/coachDecisions";
 import {
@@ -43,9 +45,13 @@ function topSetByWeek(
   return max;
 }
 
-router.get("/weekly", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/weekly", requireAuth, validate(planTodayQuerySchema, "query"), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const now = new Date();
+    // The athlete's local date: the server runs on UTC, and near midnight their
+    // "today" (and week) can differ from UTC's. Same optional-`date` contract as
+    // GET /api/plans/:id/today and /api/trends — omitted means server UTC, as before.
+    const { date } = req.query as unknown as { date?: string };
+    const now = date ? new Date(`${date}T00:00:00Z`) : new Date();
     const todayUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
     const currentWeekStart = startOfIsoWeek(todayUtcMidnight);
     const previousWeekStart = addDays(currentWeekStart, -7);
@@ -247,6 +253,9 @@ router.get("/weekly", requireAuth, async (req: Request, res: Response, next: Nex
       }
     } catch {
       // Best-effort: never fail the verdict because the ledger couldn't be written.
+      // Warn (don't swallow silently) so repeated ledger failures are diagnosable.
+      // No user id: prod logs carry no user identifiers (Phase 0 privacy contract).
+      console.warn("[verdict] coach ledger write failed");
     }
 
     res.json({

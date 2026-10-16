@@ -96,6 +96,9 @@ async function parsePlanParts(input: OpenAIInput[]): Promise<ParsedPlan> {
         text: { format: { type: "json_object" } },
         max_output_tokens: 2000,
       }),
+      // Bound the wait: a slow provider must fail fast (friendly copy below),
+      // not hold the /parse request indefinitely.
+      signal: AbortSignal.timeout(60000),
     });
   } catch {
     console.error("[planParser] could not reach api.openai.com");

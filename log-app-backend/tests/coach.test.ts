@@ -769,12 +769,26 @@ describe("coach proposals", () => {
   it("proposes activating and deleting a plan", async () => {
     mocks.findManyPlans.mockResolvedValue([plan({ isActive: false })]);
 
-    expect(
-      await executeCoachTool("user-1", "activate_plan", JSON.stringify({ plan: "PPL" })),
-    ).toEqual({ __proposal: { kind: "plan_activate", plan_id: "p1", plan_name: "PPL" } });
-    expect(
-      await executeCoachTool("user-1", "delete_plan", JSON.stringify({ plan: "PPL" })),
-    ).toEqual({ __proposal: { kind: "plan_delete", plan_id: "p1", plan_name: "PPL" } });
+    const activated = (await executeCoachTool(
+      "user-1",
+      "activate_plan",
+      JSON.stringify({ plan: "PPL" }),
+    )) as { __proposal: { id: string } };
+    const deleted = (await executeCoachTool(
+      "user-1",
+      "delete_plan",
+      JSON.stringify({ plan: "PPL" }),
+    )) as { __proposal: { id: string } };
+
+    expect(activated).toMatchObject({
+      __proposal: { kind: "plan_activate", plan_id: "p1", plan_name: "PPL" },
+    });
+    expect(deleted).toMatchObject({
+      __proposal: { kind: "plan_delete", plan_id: "p1", plan_name: "PPL" },
+    });
+    // Every proposal carries a server id so it can be persisted and replayed.
+    expect(activated.__proposal.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(deleted.__proposal.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("errors when no plan matches the reference", async () => {
@@ -798,13 +812,13 @@ describe("coach proposals", () => {
       reps: 8,
     });
 
-    const result = await executeCoachTool(
+    const result = (await executeCoachTool(
       "user-1",
       "update_logged_set",
       JSON.stringify({ set_id: "s1", weight_kg: 62.5, reps: 8 }),
-    );
+    )) as { __proposal: { id: string } };
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       __proposal: {
         kind: "set_update",
         set_id: "s1",
@@ -814,6 +828,7 @@ describe("coach proposals", () => {
         to: { weight_kg: 62.5, reps: 8 },
       },
     });
+    expect(result.__proposal.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("errors when the target set is not the caller's", async () => {
@@ -829,7 +844,7 @@ describe("coach proposals", () => {
   });
 
   it("proposes a meal with summed totals", async () => {
-    const result = await executeCoachTool(
+    const result = (await executeCoachTool(
       "user-1",
       "log_meal",
       JSON.stringify({
@@ -840,9 +855,9 @@ describe("coach proposals", () => {
         ],
       }),
       "2026-10-10",
-    );
+    )) as { __proposal: { id: string } };
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       __proposal: {
         kind: "meal_log",
         date: "2026-10-10",
@@ -855,6 +870,8 @@ describe("coach proposals", () => {
         protein_g: 14,
       },
     });
+    // The id doubles as the create-meal idempotency key on confirm.
+    expect(result.__proposal.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("lists the day's meals and totals", async () => {
@@ -1041,6 +1058,82 @@ describe("meal analysis request", () => {
     expect(result.calories).toBe(208);
     expect(result.items[0].protein_g).toBe(6);
   });
+
+  it("caps an unbounded photo caption before it reaches the model prompt", async () => {
+    config.ai.baseUrl = "https://ai.test/v1";
+    config.ai.apiKey = "test-key";
+    let promptText = "";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: unknown, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        promptText = String(body?.input?.[0]?.content?.[0]?.text ?? "");
+        return new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify({
+                      title: "Meal",
+                      items: [{ name: "Roti", calories: 208, protein_g: 6 }],
+                      calories: 208,
+                      protein_g: 6,
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }),
+    );
+
+    await analyzeMeal("user-1", Buffer.from("image"), "image/jpeg", "x".repeat(2000));
+
+    expect(promptText).toContain("The athlete says:");
+    expect(promptText).not.toContain("x".repeat(501));
+    expect(promptText).toContain("x".repeat(500));
+  });
+
+  it("falls back to today when the photo date is an impossible calendar date", async () => {
+    config.ai.baseUrl = "https://ai.test/v1";
+    config.ai.apiKey = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            output: [
+              {
+                content: [
+                  {
+                    type: "output_text",
+                    text: JSON.stringify({
+                      title: "Meal",
+                      items: [{ name: "Roti", calories: 208, protein_g: 6 }],
+                      calories: 208,
+                      protein_g: 6,
+                    }),
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    // Frozen "today" is 2026-10-09 (see beforeEach). 2026-13-99 matches
+    // YYYY-MM-DD shape but is not a real date — must not reach the DB query.
+    await analyzeMeal("user-1", Buffer.from("image"), "image/jpeg", undefined, "2026-13-99");
+
+    const queriedDate = mocks.findUniqueDaily.mock.calls[0][0]?.where?.userId_date?.date;
+    expect(queriedDate).toEqual(new Date("2026-10-09T00:00:00Z"));
+  });
 });
 
 describe("generateCoachPlan", () => {
@@ -1112,6 +1205,344 @@ describe("runCoachChatStream sessions", () => {
         onDelta: () => {},
       }),
     ).rejects.toMatchObject({ statusCode: 404, code: "NOT_FOUND" });
+  });
+});
+
+describe("coach turn latency (perf)", () => {
+  const REAL_KEY = config.ai.apiKey;
+
+  afterEach(() => {
+    config.ai.apiKey = REAL_KEY;
+    vi.unstubAllGlobals();
+  });
+
+  it("bounds the lifetime-PR aggregation to the trailing year", async () => {
+    // Frozen today is 2026-10-09: the PR scan must start 2025-10-10, not at -infinity.
+    await buildAthleteContext("user-1", "2026-10-09");
+
+    expect(mocks.groupByLift).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ["exerciseName"],
+        where: { userId: "user-1", date: { gte: new Date("2025-10-10T00:00:00Z") } },
+      }),
+    );
+  });
+
+  it("pings status before the first model round so a slow first token isn't dead air", async () => {
+    config.ai.apiKey = "test-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hello." })}\n\n` +
+              `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })}\n\n` +
+              `data: [DONE]\n\n`,
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          ),
+      ),
+    );
+
+    const events: string[] = [];
+    const answer = await runCoachChatStream("user-1", null, "hi", "2026-10-09", {
+      onDelta: () => events.push("delta"),
+      onStatus: (s) => events.push(`status:${s}`),
+    });
+
+    expect(answer).toBe("Hello.");
+    // The status ping precedes every token …
+    expect(events[0]).toBe("status:Checking your logs…");
+    expect(events).toContain("delta");
+    // … and the user message was still persisted exactly once.
+    expect(mocks.createCoachMessage).toHaveBeenCalledWith({
+      data: { userId: "user-1", sessionId: "sess-1", role: "user", content: "hi" },
+    });
+  });
+});
+
+describe("model call retry (stall strategy)", () => {
+  const REAL_KEY = config.ai.apiKey;
+  const REAL_STALL = config.ai.stallMs;
+  const REAL_CHAINING = config.ai.chaining;
+
+  afterEach(() => {
+    config.ai.apiKey = REAL_KEY;
+    config.ai.stallMs = REAL_STALL;
+    config.ai.chaining = REAL_CHAINING;
+    vi.unstubAllGlobals();
+  });
+
+  const mealJson = () =>
+    new Response(
+      JSON.stringify({
+        output: [
+          {
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify({
+                  title: "Meal",
+                  items: [{ name: "Roti", calories: 208, protein_g: 6 }],
+                  calories: 208,
+                  protein_g: 6,
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+
+  const sseText = (delta: string, id = "resp_1") =>
+    new Response(
+      `data: ${JSON.stringify({ type: "response.output_text.delta", delta })}\n\n` +
+        `data: ${JSON.stringify({ type: "response.completed", response: { id } })}\n\n` +
+        `data: [DONE]\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+
+  it("retries a timed-out meal analysis once, then succeeds", async () => {
+    config.ai.apiKey = "test-key";
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error("timeout"), { name: "TimeoutError" }))
+      .mockResolvedValue(mealJson());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMeal("user-1", Buffer.from("image"), "image/jpeg");
+
+    expect(result.calories).toBe(208);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a 4xx meal analysis (deterministic failure)", async () => {
+    config.ai.apiKey = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "bad key" } }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(analyzeMeal("user-1", Buffer.from("image"), "image/jpeg")).rejects.toMatchObject({
+      statusCode: 502,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a 500 meal analysis once, then succeeds", async () => {
+    config.ai.apiKey = "test-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response("overloaded", { status: 500, headers: { "content-type": "text/plain" } }),
+      )
+      .mockResolvedValue(mealJson());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await analyzeMeal("user-1", Buffer.from("image"), "image/jpeg");
+
+    expect(result.calories).toBe(208);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a silently failed stream round without duplicating visible text", async () => {
+    config.ai.apiKey = "test-key";
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValue(sseText("Hello."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const deltas: string[] = [];
+    const answer = await runCoachChatStream("user-1", null, "hi", "2026-10-09", {
+      onDelta: (d) => deltas.push(d),
+    });
+
+    expect(answer).toBe("Hello.");
+    expect(deltas).toEqual(["Hello."]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry after a partial stream already surfaced text", async () => {
+    config.ai.apiKey = "test-key";
+    const enc = new TextEncoder();
+    async function* partialStream(): AsyncGenerator<Uint8Array> {
+      yield enc.encode(
+        `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hi" })}\n\n`,
+      );
+      throw new Error("boom");
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(partialStream(), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      runCoachChatStream("user-1", null, "hi", "2026-10-09", { onDelta: () => {} }),
+    ).rejects.toMatchObject({ statusCode: 502 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay a chained turn after the first delta (no duplicated text)", async () => {
+    config.ai.apiKey = "test-key";
+    // The dev .env disables chaining; force it on so the stored response id is
+    // used — this is exactly the branch that used to fall back to full history.
+    config.ai.chaining = true;
+    mocks.findFirstSession.mockResolvedValue({ id: "sess-1", agent: "general" });
+    mocks.findManyCoachMessages.mockResolvedValue([
+      { role: "assistant", content: "Earlier reply", responseId: "resp_prev" },
+    ]);
+    const enc = new TextEncoder();
+    async function* partialStream(): AsyncGenerator<Uint8Array> {
+      yield enc.encode(
+        `data: ${JSON.stringify({ type: "response.output_text.delta", delta: "Hi" })}\n\n`,
+      );
+      throw new Error("boom");
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(partialStream(), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const deltas: string[] = [];
+    await expect(
+      runCoachChatStream("user-1", "sess-1", "hi", "2026-10-09", {
+        onDelta: (d) => deltas.push(d),
+      }),
+    ).rejects.toMatchObject({ statusCode: 502 });
+
+    // One attempt only: the partial "Hi" must never be replayed to the client.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(deltas).toEqual(["Hi"]);
+    // The user message persisted; the failed turn stores no assistant row.
+    expect(
+      mocks.createCoachMessage.mock.calls.some(
+        ([arg]: [{ data?: { role?: string } }]) => arg?.data?.role === "assistant",
+      ),
+    ).toBe(false);
+  });
+
+  it("stores proposals with the assistant message so a reopened chat can confirm them", async () => {
+    config.ai.apiKey = "test-key";
+    const functionCall = new Response(
+      `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        item: {
+          type: "function_call",
+          call_id: "call_1",
+          name: "log_meal",
+          arguments: JSON.stringify({
+            title: "Breakfast",
+            items: [{ name: "Roti", calories: 240, protein_g: 6 }],
+          }),
+        },
+      })}\n\n` +
+        `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })}\n\n` +
+        `data: [DONE]\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce(functionCall).mockResolvedValue(sseText("Ready to log it.", "resp_2")),
+    );
+
+    const received: { id: string }[] = [];
+    await runCoachChatStream("user-1", null, "2 rotis", "2026-10-09", {
+      onDelta: () => {},
+      onProposal: (proposal) => received.push(proposal as { id: string }),
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0].id).toMatch(/^[0-9a-f-]{36}$/);
+
+    const assistantCall = mocks.createCoachMessage.mock.calls.find(
+      (call: [{ data: { role: string } }]) => call[0]?.data?.role === "assistant",
+    ) as [{ data: { proposals?: unknown } }] | undefined;
+    expect(assistantCall?.[0].data.proposals).toEqual(received);
+  });
+
+  it("executes tools exactly once across a silent-failure retry", async () => {
+    config.ai.apiKey = "test-key";
+    const functionCall = new Response(
+      `data: ${JSON.stringify({
+        type: "response.output_item.done",
+        item: { type: "function_call", call_id: "call_1", name: "get_plans", arguments: "{}" },
+      })}\n\n` +
+        `data: ${JSON.stringify({ type: "response.completed", response: { id: "resp_1" } })}\n\n` +
+        `data: [DONE]\n\n`,
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("socket hang up"))
+      .mockResolvedValueOnce(functionCall)
+      .mockResolvedValue(sseText("Done.", "resp_2"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const answer = await runCoachChatStream("user-1", null, "show my plans", "2026-10-09", {
+      onDelta: () => {},
+    });
+
+    expect(answer).toBe("Done.");
+    expect(mocks.findManyPlans).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("aborts a stalled silent round and retries when the watchdog is enabled", async () => {
+    vi.useRealTimers();
+    config.ai.apiKey = "test-key";
+    config.ai.stallMs = 30;
+    // A mocked fetch ignores the abort signal, so the hanging body must wire it
+    // up itself — exactly what a real fetch does (abort tears down the body).
+    const hangingBody = (signal?: AbortSignal | null) =>
+      new ReadableStream({
+        start(c) {
+          signal?.addEventListener(
+            "abort",
+            () => {
+              const reason =
+                (signal as AbortSignal).reason instanceof Error
+                  ? (signal as AbortSignal).reason
+                  : new Error("aborted");
+              c.error(reason);
+            },
+            { once: true },
+          );
+        },
+      });
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce((_url: unknown, init?: RequestInit) => {
+        if (!init?.signal?.aborted) {
+          return Promise.resolve(
+            new Response(hangingBody(init?.signal ?? null), {
+              status: 200,
+              headers: { "content-type": "text/event-stream" },
+            }),
+          );
+        }
+        return Promise.reject(
+          Object.assign(new Error("aborted"), { name: "AbortError" }),
+        );
+      })
+      .mockResolvedValue(sseText("Late."));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const answer = await runCoachChatStream("user-1", null, "hi", "2026-10-09", {
+      onDelta: () => {},
+    });
+
+    expect(answer).toBe("Late.");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
