@@ -243,7 +243,9 @@ Returns:
 ## `GET /api/verdict/weekly`
 
 Computes (via `verdictEngine.ts`, see `docs/backend.md`) and returns the
-current week's verdict, persisting a row to `weekly_verdicts`.
+current week's verdict, persisting a row to `weekly_verdicts`. Accepts an
+optional `?date=YYYY-MM-DD` (the athlete's local date — the server runs on UTC
+and near midnight the weeks can differ); omitted means the server's UTC today.
 
 ```json
 {
@@ -297,14 +299,9 @@ Returns the rolling long-term memory (`{ summary, updated_at }`) or `null`.
 
 Clears the memory.
 
-## `POST /api/coach/chat`
-
-Body `{ "message": "..." }`. The server injects a compact, bounded summary of the
-user's profile and last 4 weeks of data (weight, nutrition, top lifts, latest
-verdict, active plan), asks the coach model, persists both turns and returns
-`{ "reply": "..." }`. Rate-limited to 30 requests/hour per user.
-
 ## `POST /api/coach/chat/stream`
+
+The only chat endpoint (the older non-streaming `POST /api/coach/chat` was removed).
 
 Body `{ message, sessionId?, localDate?, agent? }`. With no `sessionId` the server creates a
 chat and emits `data: {"sessionId":"…"}` as the first event; with one, it must
@@ -314,7 +311,8 @@ server runs on UTC, so it is used for "today" and the tool date windows. `agent`
 routes by the message's content. Streams the reply as Server-Sent Events:
 `data: {"delta":"…"}` per token, `data: {"status":"…"}` while the coach looks
 something up, `data: {"proposal":{…}}` for a change awaiting confirmation, then
-`data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`.
+`data: {"done":true}`; on failure mid-stream `data: {"error":"…"}`. Rate-limited
+to 30 requests/hour per user.
 
 `dismissedMeal` (optional) is a meal estimate the athlete just dismissed —
 `{ title, items[], calories, protein_g, date? }`. The server puts it in front of
@@ -329,9 +327,13 @@ The coach can call read-only tools (`get_day_logs`, `get_lift_history`, `get_dai
 proposal tools (`log_meal`, `update_meal`, `delete_meal`, `update_plan`,
 `activate_plan`, `delete_plan`, `update_logged_set`, `delete_logged_set`,
 `record_decision`) — all scoped to the authenticated user, in a bounded loop (max 4
-rounds). Proposals never apply themselves. The user message is stored up front, and
-the assistant message is stored with whatever text was produced — so a client Stop
-(which aborts the request and the upstream model call) keeps the partial answer.
+rounds). Proposals never apply themselves. Each proposal carries a server-generated
+`id` and is stored with the assistant message, so reopening the chat restores the
+confirm/dismiss cards; re-confirming a restored meal proposal replays the same
+create request instead of logging the meal twice. The user message is stored up
+front, and the assistant message is stored with whatever text was produced — so a
+client Stop (which aborts the request and the upstream model call) keeps the
+partial answer.
 
 Deployment note: this route needs nginx `proxy_buffering off;` (the route already
 sets `X-Accel-Buffering: no`), or the VPS proxy buffers the whole response and

@@ -14,9 +14,12 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
    or PM2 needed on the host.)
 3. Clone the repo, copy `log-app-backend/.env.example` →
    `log-app-backend/.env`, fill in secrets (`DATABASE_URL` from Neon,
-   `CLERK_SECRET_KEY`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`,
-   plus `PORT` and `SENTRY_DSN` for error monitoring). Model routing can be
-   tuned with `OPENAI_PARSE_MODEL`, `COACH_FAST_MODEL`, `COACH_MODEL`
+   `CLERK_SECRET_KEY`, and the AI provider key — `AI_API_KEY`, or
+   `COMMANDCODE_API_KEY`/`OPENAI_API_KEY` — for the coach and meals), plus
+   `PORT` and `SENTRY_DSN` for error monitoring. `OPENAI_API_KEY` is only
+   needed by AI plan import (`POST /api/plans/parse`); without it that
+   endpoint replies "unavailable" while everything else works. Model routing
+   can be tuned with `OPENAI_PARSE_MODEL`, `COACH_FAST_MODEL`, `COACH_MODEL`
    (reasoning) and `COACH_VISION_MODEL` — see `docs/backend.md`.
 4. `cd log-app-backend && docker compose up -d --build`
 5. Run migrations: `docker compose run --rm api npx prisma migrate deploy`
@@ -54,8 +57,17 @@ never in source control.
 - **Release APK** (internal testing):
   `eas build --platform android --profile preview`. That profile sets
   `channel: "preview"`, `distribution: "internal"`, `android.buildType: "apk"`, and bakes
-  in the production API URL and Clerk publishable key. A local dev build or Expo Go has no
-  update channel, so OTA updates never apply there.
+  in the production API URL plus the **development-instance** Clerk key — internal
+  testing only. A local dev build or Expo Go has no update channel, so OTA updates
+  never apply there.
+- **Production builds** (`--profile production`) must authenticate against the live
+  Clerk instance: the profile reads `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` from the EAS
+  `production` environment (set a `pk_live_…` key there — never a `pk_test_…` key).
+  A production profile with no such environment fails the build; if a build still
+  slips through without a key, the app shows a clear "missing Clerk key" message
+  instead of hanging on a spinner. The OTA workflow prefers the
+  `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` repository secret and **refuses to publish a
+  `pk_test_` key to the `production` channel**.
 - **Over-the-air updates**: `expo-updates` is installed and `app.json` points at the EAS
   project (`updates.url`) with `runtimeVersion.policy: "appVersion"`. A push to `main`
   touching `log-app-mobile/**` publishes a JS/asset update to the **preview** channel via

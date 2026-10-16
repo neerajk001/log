@@ -84,12 +84,19 @@ jobs:
           # Must match the build profile env in eas.json — EXPO_PUBLIC_* values are
           # inlined into the published bundle.
           EXPO_PUBLIC_API_BASE_URL: "https://api.neerajx.site"
-          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZGFyaW5nLWZhbGNvbi01Mi5jbGVyay5hY2NvdW50cy5kZXYk"
+          # The live Clerk key is the EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY repository
+          # secret. Preview (internal testing) falls back to the shared dev instance.
+          EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_ZGFyaW5nLWZhbGNvbi01Mi5jbGVyay5hY2NvdW50cy5kZXYk' }}
           UPDATE_MESSAGE: ${{ github.event.head_commit.message }}
           INPUT_CHANNEL: ${{ github.event.inputs.channel }}
         run: |
           set -euo pipefail
           CHANNEL="${INPUT_CHANNEL:-preview}"
+          # Production must never ship a development-instance Clerk key.
+          if [ "$CHANNEL" = "production" ] && [ "${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY#pk_test_}" != "$EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY" ]; then
+            echo "::error::The configured Clerk publishable key is a development key (pk_test_...). Add a live key as the EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY repository secret before publishing to the production channel."
+            exit 1
+          fi
           MSG="$(printf '%s' "${UPDATE_MESSAGE:-}" | head -n 1)"
           [ -n "$MSG" ] || MSG="auto update ${GITHUB_SHA:0:7}"
           echo "Publishing update -> channel: $CHANNEL"

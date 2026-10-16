@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>Log - Checkup Report</title>
+	<script src="https://cdn.tailwindcss.com"></script>
+	<style>
+		body { font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+		.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+		.report-section { border: 1px solid #222226; background: #0a0a0b; position: relative; }
+		.corner-box { position: absolute; width: 20px; height: 20px; border: 1px solid #222226; background: #000; }
+	</style>
+</head>
+<body class="bg-black text-[#fafafa]">
+	<main class="mx-auto w-full max-w-6xl px-5 py-8 md:px-10 md:py-12">
+		<header class="report-section mb-8 p-6 md:p-8">
+			<div class="corner-box left-0 top-0 -translate-x-1/2 -translate-y-1/2"></div>
+			<div class="corner-box right-0 top-0 translate-x-1/2 -translate-y-1/2"></div>
+			<div class="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+				<div>
+					<div class="mono mb-2 text-xs tracking-widest text-[#666]">// CHECKUP</div>
+					<h1 class="text-4xl font-bold tracking-tight md:text-6xl">Log</h1>
+					<div class="mono mt-2 text-xs text-[#444]">log-app-mobile &middot; Expo / React Native &middot; product register</div>
+				</div>
+				<div class="mono text-left text-xs text-[#666] md:text-right">
+					<div>COMMANDCODE REPORT</div>
+					<div class="text-[#444]">2026-10-10</div>
+				</div>
+			</div>
+		</header>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="corner-box left-0 top-0 -translate-x-1/2 -translate-y-1/2"></div>
+			<div class="corner-box right-0 top-0 translate-x-1/2 -translate-y-1/2"></div>
+			<div class="grid gap-8 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+				<div>
+					<div class="mono mb-2 text-xs tracking-widest text-[#666]">// OVERALL</div>
+					<div class="text-6xl font-bold tracking-tight md:text-7xl">50</div>
+					<div class="mt-1 text-lg text-[#666]">/ 60</div>
+					<div class="mt-4 inline-flex border border-[#34d399]/30 bg-[#34d399]/10 px-3 py-1 text-sm text-[#34d399]">APPROVE</div>
+				</div>
+				<div>
+					<div class="mono mb-3 text-xs tracking-widest text-[#666]">// TL;DR</div>
+					<p class="text-sm leading-6 text-[#a0a0a0]">The clutter was concentrated in three screens, and all three are now addressed. Today no longer stacks three tall empty cards or doubles up its CTAs. History drops the repeated per-row numbers, the arbitrary row tint and its 4-up stat row. Insights loses its second encouragement card and the streak mechanic that contradicted the product's own rule.</p>
+					<p class="mt-4 text-sm leading-6 text-[#34d399]">The HIGH accessibility finding (delete controls that announced nothing) is fixed. No actionable finding is left open.</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// HEURISTIC SCORES</div>
+			<div class="overflow-x-auto">
+				<table class="w-full min-w-[720px] border-collapse text-sm">
+					<thead>
+						<tr class="border-b border-[#222226] text-left mono text-xs text-[#666]">
+							<th class="py-3 pr-4 font-normal">#</th>
+							<th class="py-3 pr-4 font-normal">VITAL</th>
+							<th class="py-3 pr-4 font-normal">SCORE</th>
+							<th class="py-3 font-normal">KEY FINDING</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">1</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Intentionality</td>
+							<td class="py-4 pr-4 text-[#34d399]">10 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">Duplicate encouragement and streak framing removed; one honest summary remains</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">2</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Readability</td>
+							<td class="py-4 pr-4 text-[#34d399]">10 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">Consistent type scale + light/dark themes; no sizing problems found</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">3</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Usability</td>
+							<td class="py-4 pr-4 text-[#34d399]">10 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">Duplicate per-section CTAs removed; tasks are single-path</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">4</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Responsiveness</td>
+							<td class="py-4 pr-4 text-[#fbbf24]">5 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">History stat row now 2x2; not verified on a device</td>
+						</tr>
+						<tr class="border-b border-[#1a1a1e]">
+							<td class="py-4 pr-4 text-[#555]">5</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Speed</td>
+							<td class="py-4 pr-4 text-[#fbbf24]">5 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">Loading states present; no measured perf evidence this pass</td>
+						</tr>
+						<tr>
+							<td class="py-4 pr-4 text-[#555]">6</td>
+							<td class="py-4 pr-4 text-[#fafafa]">Accessibility</td>
+							<td class="py-4 pr-4 text-[#34d399]">10 / 10</td>
+							<td class="py-4 text-[#a0a0a0]">Unlabeled delete controls fixed; icon-only hit areas raised to ~44px</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="mono mt-5 text-xs text-[#666]">Vitals 4 and 5 stay at watch because they are unverified, not because something is known to be wrong.</p>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// COGNITIVE LOAD / RISK</div>
+			<div class="grid gap-6 md:grid-cols-2">
+				<div>
+					<div class="mb-3 text-xl font-semibold">Low</div>
+					<ul class="space-y-3 text-sm text-[#a0a0a0]">
+						<li><span class="mono mr-2 text-[#34d399]">PASS</span>Consistent tokens, primitives and theming throughout</li>
+						<li><span class="mono mr-2 text-[#34d399]">PASS</span>Loading, empty and error states on every data surface</li>
+						<li><span class="mono mr-2 text-[#34d399]">PASS</span>Every operable control now announces itself</li>
+						<li><span class="mono mr-2 text-[#fbbf24]">WATCH</span>Rendering unverified on device (contrast, 320px, safe areas)</li>
+					</ul>
+				</div>
+				<div>
+					<div class="mono mb-3 text-xs tracking-widest text-[#666]">// NEXT MODES</div>
+					<div class="flex flex-wrap gap-2">
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design a11y</span>
+						<span class="border border-[#333] px-3 py-1 text-sm text-[#a0a0a0]">/design finish</span>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// WHAT'S WORKING</div>
+			<div class="grid gap-4 md:grid-cols-3">
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Token discipline</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Colour, spacing, radii and shadows all come from one theme; no one-off values spotted.</p>
+				</article>
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Real states</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Every list has loading, empty, error and retry, not just the happy path.</p>
+				</article>
+				<article class="border border-[#1f1f24] p-4">
+					<h2 class="mb-2 text-sm font-semibold">Dark and light parity</h2>
+					<p class="text-sm leading-6 text-[#a0a0a0]">Both themes are first-class, including a true-black option.</p>
+				</article>
+			</div>
+		</section>
+
+		<section class="report-section mb-8 p-6 md:p-8">
+			<div class="mono mb-6 text-xs tracking-widest text-[#666]">// ISSUES ADDRESSED</div>
+			<div class="space-y-5">
+				<article class="border border-[#12261f] bg-[#08120e] p-5">
+					<div class="mono mb-2 text-xs text-[#34d399]">P0 &middot; HIGH &middot; ACCESSIBILITY &middot; FIXED</div>
+					<h2 class="mb-2 text-lg font-semibold">Delete buttons that never said what they were</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">History's three trash-icon controls (set / daily log / activity) were operable with no <span class="mono">accessibilityLabel</span>.</p>
+					<div class="border-l border-[#34d399] pl-4 text-sm leading-6 text-[#34d399]">FIX: added <span class="mono">accessibilityLabel</span> to all three; icon-only deletes raised to <span class="mono">hitSlop={14}</span> (~44px).</div>
+				</article>
+				<article class="border border-[#12261f] bg-[#08120e] p-5">
+					<div class="mono mb-2 text-xs text-[#34d399]">P1 &middot; MEDIUM &middot; LAYOUT &middot; FIXED</div>
+					<h2 class="mb-2 text-lg font-semibold">History stat row was four tiles wide</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">Four StatTiles in one row squeezed and truncated labels at 320-375px.</p>
+					<div class="border-l border-[#34d399] pl-4 text-sm leading-6 text-[#34d399]">FIX: 2x2 grid, matching Today's metric grid.</div>
+				</article>
+				<article class="border border-[#12261f] bg-[#08120e] p-5">
+					<div class="mono mb-2 text-xs text-[#34d399]">P1 &middot; MEDIUM &middot; VOICE &middot; FIXED</div>
+					<h2 class="mb-2 text-lg font-semibold">Insights streak card contradicted the product</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]"><span class="mono">docs/product.md</span> states the product deliberately has no streak mechanics, yet Insights rendered a "Workout Streak" card.</p>
+					<div class="border-l border-[#34d399] pl-4 text-sm leading-6 text-[#34d399]">FIX: reframed to "This week &middot; N days trained" (calendar icon). The count stays; the streak framing is gone.</div>
+				</article>
+				<article class="border border-[#12261f] bg-[#08120e] p-5">
+					<div class="mono mb-2 text-xs text-[#34d399]">P2 &middot; MEDIUM &middot; LAYOUT &middot; FIXED</div>
+					<h2 class="mb-2 text-lg font-semibold">Insights doubled its encouragement</h2>
+					<p class="mb-4 text-sm leading-6 text-[#a0a0a0]">Two MotivationCards bookended ~10 stacked blocks.</p>
+					<div class="border-l border-[#34d399] pl-4 text-sm leading-6 text-[#34d399]">FIX: one summary card; analytics grouped under Progress / Training headers.</div>
+				</article>
+			</div>
+		</section>
+
+		<footer class="mono py-8 text-center text-xs tracking-widest text-[#444]">
+			Generated with CommandCode - 2026-10-10
+		</footer>
+	</main>
+</body>
+</html>
