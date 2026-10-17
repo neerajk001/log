@@ -33,6 +33,10 @@
           "backgroundColor": "#0A0A0A",
           "dark": {
             "backgroundColor": "#0A0A0A"
+          },
+          "android": {
+            "image": "./assets/images/splash-brand.png",
+            "imageWidth": 288
           }
         }
       ],
@@ -45,8 +49,7 @@
           "cameraPermission": "Repora uses the camera so you can snap a meal or a check-in photo."
         }
       ],
-      "expo-localization",
-      "posthog-react-native/expo"
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": true,
