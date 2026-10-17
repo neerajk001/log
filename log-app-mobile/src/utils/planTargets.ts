@@ -87,6 +87,39 @@ export function defaultWeightFrom(values: string[]): number | undefined {
 }
 
 /**
+ * The weight part of a collapsed exercise row's prescription: a pyramid reads
+ * `60/62.5/65 kg`, a long one `60 → 65 kg`, and a plain target stays `60 kg`.
+ * Returns null when the plan prescribes no weight at all.
+ */
+export function formatTargetWeight(exercise: {
+  sets?: number;
+  weight_kg?: number | null;
+  set_targets?: PlanSetTarget[] | null;
+}): string | null {
+  const perSet = (exercise.set_targets ?? [])
+    .slice(0, exercise.sets ?? exercise.set_targets?.length ?? 0)
+    .map((target) => target?.weight_kg ?? null)
+    .filter((weight): weight is number => weight != null);
+  const unique = [...new Set(perSet)];
+  if (unique.length === 0) {
+    return exercise.weight_kg != null ? `${exercise.weight_kg} kg` : null;
+  }
+  if (unique.length === 1) return `${unique[0]} kg`;
+  if (unique.length <= 4) return `${unique.join("/")} kg`;
+  return `${unique[0]} → ${unique[unique.length - 1]} kg`;
+}
+
+/** `60 kg × 8` when every set matched, else `60/62.5/65 kg` — one line, no ellipsis. */
+export function formatSetList(sets: { weight_kg: number; reps: number }[]): string | null {
+  if (sets.length === 0) return null;
+  const weights = [...new Set(sets.map((set) => set.weight_kg))];
+  const reps = [...new Set(sets.map((set) => set.reps))];
+  const weightText = weights.length === 1 ? `${weights[0]} kg` : `${weights.join("/")} kg`;
+  if (reps.length === 1) return `${weightText} × ${reps[0]}`;
+  return `${weightText} × ${sets.map((set) => set.reps).join("/")}`;
+}
+
+/**
  * The prescription line for one set (0-based index), e.g. "Plan · 60 kg × 8".
  * The per-set target wins; otherwise the exercise's default weight and rep
  * scheme. Null when the set is beyond the prescription or has nothing to show.

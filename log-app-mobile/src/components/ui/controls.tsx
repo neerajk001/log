@@ -163,6 +163,98 @@ export function TextField({
   );
 }
 
+/* -------------------------------------------------------------- StepField */
+
+/** Avoids 60.00000000000001 after a nudge. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * A number input flanked by − and + buttons — for the values a lifter nudges far
+ * more often than they retype (62.5 kg, one more rep). Stepping down past the
+ * smallest real value clears the field, so it never sits at an invalid 0.
+ */
+export function StepField({
+  value,
+  onChangeText,
+  step = 2.5,
+  minNonZero = 2.5,
+  placeholder,
+  label,
+  editable = true,
+  onFocus,
+  onBlur,
+  style,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  /** How far one tap moves the value. */
+  step?: number;
+  /** The smallest value + can produce; stepping below it clears the field. */
+  minNonZero?: number;
+  placeholder?: string;
+  /** Screen-reader stem, e.g. "Weight" → "Decrease weight". */
+  label: string;
+  editable?: boolean;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+
+  const nudge = (direction: 1 | -1) => {
+    const parsed = value.trim() === "" ? null : Number(value);
+    const current = parsed != null && Number.isFinite(parsed) ? parsed : null;
+    if (direction === 1) {
+      onChangeText(String(round2((current ?? 0) + step)));
+      return;
+    }
+    if (current == null) return;
+    const next = round2(current - step);
+    // Below the smallest real value → clear, so the field never shows 0 kg.
+    onChangeText(next < minNonZero ? "" : String(next));
+  };
+
+  return (
+    <View style={[styles.stepField, style]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Decrease ${label.toLowerCase()}`}
+        onPress={() => nudge(-1)}
+        disabled={!editable}
+        hitSlop={6}
+        style={({ pressed }) => [styles.stepButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="remove" size={18} color={colors.textDim} />
+      </Pressable>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder={placeholder}
+        placeholderTextColor={colors.textMuted}
+        keyboardType="numeric"
+        editable={editable}
+        selectTextOnFocus
+        style={styles.stepInput}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Increase ${label.toLowerCase()}`}
+        onPress={() => nudge(1)}
+        disabled={!editable}
+        hitSlop={6}
+        style={({ pressed }) => [styles.stepButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="add" size={18} color={colors.textDim} />
+      </Pressable>
+    </View>
+  );
+}
+
 /* ----------------------------------------------------------------- Sheet */
 
 export function Sheet({
@@ -333,6 +425,27 @@ const useStyles = makeUseStyles((t) =>
     input: { flex: 1, padding: 0, fontSize: 15, color: t.colors.text },
     inputUnit: { ...t.typography.small, color: t.colors.textMuted },
     fieldError: { ...t.typography.small, color: t.colors.danger },
+
+    stepField: {
+      flexDirection: "row",
+      alignItems: "center",
+      flex: 1,
+      backgroundColor: t.colors.surface,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      borderRadius: radii.md,
+      height: 44,
+      overflow: "hidden",
+    },
+    stepButton: { width: 30, height: 42, alignItems: "center", justifyContent: "center" },
+    stepInput: {
+      flex: 1,
+      minWidth: 24,
+      padding: 0,
+      textAlign: "center",
+      fontSize: 15,
+      color: t.colors.text,
+    },
 
     backdrop: {
       position: "absolute",

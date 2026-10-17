@@ -20,7 +20,7 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DayBanner } from "../../src/components/DayBanner";
 import { ExerciseRow } from "../../src/components/ExerciseRow";
 import { Banner, Button, Card, EmptyState, LoadingState, ErrorState, IconBadge } from "../../src/components/ui/primitives";
-import { Chip, ChipRow, IconButton, OverflowMenu, TextField } from "../../src/components/ui/controls";
+import { Chip, ChipRow, IconButton, OverflowMenu, StepField, TextField } from "../../src/components/ui/controls";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { usePlans } from "../../src/hooks/usePlans";
@@ -106,6 +106,30 @@ export default function LiftScreen() {
   const addQuickSetRow = useCallback(() => {
     setQuickSets((prev) => [...prev, blankQuickSet()]);
   }, []);
+
+  /**
+   * Picking a recent exercise fills the sets it was last done in, so re-logging a
+   * familiar lift is one tap instead of six. Only replaces rows when the exercise
+   * actually changes — values already typed for this one are never thrown away.
+   */
+  const pickRecentExercise = useCallback(
+    (name: string) => {
+      if (name === quickName) return;
+      setQuickName(name);
+      const last = lastSetsByExercise.get(name)?.sets ?? [];
+      if (last.length === 0) return;
+      const hasTyped = quickSets.some((q) => q.weight.trim() !== "" || q.reps.trim() !== "");
+      if (hasTyped) return;
+      setQuickSets(
+        last.map((set) => ({
+          ...blankQuickSet(),
+          weight: String(set.weight_kg),
+          reps: String(set.reps),
+        })),
+      );
+    },
+    [lastSetsByExercise, quickName, quickSets],
+  );
 
   const quickLog = useCallback(async () => {
     const name = quickName.trim().slice(0, 120);
@@ -273,7 +297,7 @@ export default function LiftScreen() {
                     plannedWeight={ex.weight_kg ?? null}
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
                     lastLog={lastByExercise.get(ex.name) ?? null}
-                    lastSets={lastSetsByExercise.get(ex.name)?.sets ?? null}
+                    lastSession={lastSetsByExercise.get(ex.name) ?? null}
                     setTargets={ex.set_targets ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
                     planDayId={day.id}
@@ -330,7 +354,7 @@ export default function LiftScreen() {
           {recent.length > 0 ? (
             <ChipRow>
               {recent.map((r) => (
-                <Chip key={r} label={r} active={r === quickName} onPress={() => setQuickName(r)} />
+                <Chip key={r} label={r} active={r === quickName} onPress={() => pickRecentExercise(r)} />
               ))}
             </ChipRow>
           ) : null}
@@ -338,21 +362,23 @@ export default function LiftScreen() {
             <View key={q.key} style={styles.quickSet}>
               <Text style={styles.quickNum}>{i + 1}</Text>
               <View style={styles.quickSmall}>
-                <TextField
-                  label={i === 0 ? "Weight (kg)" : undefined}
+                {i === 0 ? <Text style={typography.caption}>Weight (kg)</Text> : null}
+                <StepField
                   value={q.weight}
                   onChangeText={(t) => patchQuickSet(q.key, { weight: t })}
-                  keyboardType="numeric"
                   placeholder="60"
+                  label="Weight"
                 />
               </View>
               <View style={styles.quickSmall}>
-                <TextField
-                  label={i === 0 ? "Reps" : undefined}
+                {i === 0 ? <Text style={typography.caption}>Reps</Text> : null}
+                <StepField
                   value={q.reps}
                   onChangeText={(t) => patchQuickSet(q.key, { reps: t })}
-                  keyboardType="numeric"
                   placeholder="8"
+                  label="Reps"
+                  step={1}
+                  minNonZero={1}
                 />
               </View>
               {quickSets.length > 1 ? (
@@ -376,7 +402,7 @@ export default function LiftScreen() {
             <Text style={typography.caption}>Recent exercises</Text>
             <ChipRow>
               {recent.map((r) => (
-                <Chip key={r} label={r} onPress={() => setQuickName(r)} />
+                <Chip key={r} label={r} onPress={() => pickRecentExercise(r)} />
               ))}
             </ChipRow>
           </View>
