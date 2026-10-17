@@ -134,10 +134,14 @@ describe("getLiftMetrics", () => {
  */
 describe("getLiftSummary", () => {
   function summaryClient(
-    options: { names?: { exerciseName: string }[]; last?: unknown[] } = {},
+    options: { names?: { exerciseName: string }[]; last?: unknown[]; sets?: unknown[] } = {},
   ) {
     const groupBy = vi.fn().mockResolvedValue(options.names ?? []);
-    const findMany = vi.fn().mockResolvedValue(options.last ?? []);
+    // 1st findMany = the "last:" cue rows, 2nd = every set of that session.
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce(options.last ?? [])
+      .mockResolvedValueOnce(options.sets ?? []);
     return { liftLog: { groupBy, findMany } };
   }
 
@@ -168,12 +172,75 @@ describe("getLiftSummary", () => {
     expect(lastArgs.orderBy).toEqual([{ date: "desc" }, { weightKg: "desc" }]);
   });
 
+  it("returns each exercise's previous session sets in logged order", async () => {
+    const bench = (date: string, kg: number, reps: number, createdAt: string) =>
+      record({
+        id: `${date}-${kg}-${reps}`,
+        exerciseName: "Bench Press",
+        date: new Date(date),
+        weightKg: new Prisma.Decimal(kg),
+        reps,
+        createdAt: new Date(createdAt),
+      });
+    const mock = summaryClient({
+      names: [{ exerciseName: "Bench Press" }],
+      last: [record({ id: "last", exerciseName: "Bench Press" })],
+      sets: [
+        bench("2026-10-05", 70, 5, "2026-10-05T10:00:00Z"), // older session - excluded
+        bench("2026-10-06", 60, 8, "2026-10-06T09:00:00Z"),
+        bench("2026-10-06", 62.5, 8, "2026-10-06T09:05:00Z"),
+        bench("2026-10-06", 65, 6, "2026-10-06T09:10:00Z"),
+      ],
+    });
+
+    const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
+
+    expect(summary.lastSetsByExercise["Bench Press"]).toEqual({
+      date: "2026-10-06",
+      sets: [
+        { weight_kg: 60, reps: 8 },
+        { weight_kg: 62.5, reps: 8 },
+        { weight_kg: 65, reps: 6 },
+      ],
+    });
+
+    // Bounded to the same window as the "last" cue and ordered oldest-first.
+    const setsArgs = mock.liftLog.findMany.mock.calls[1][0];
+    expect(setsArgs.where.date).toEqual({
+      gte: new Date("2026-06-10T00:00:00Z"),
+      lt: new Date("2026-10-08T00:00:00Z"),
+    });
+    expect(setsArgs.orderBy).toEqual([{ date: "asc" }, { createdAt: "asc" }]);
+  });
+
+  it("caps a session's set list so the payload stays bounded", async () => {
+    const sets = Array.from({ length: 25 }, (_, i) =>
+      record({
+        id: `set-${i}`,
+        exerciseName: "Squat",
+        date: new Date("2026-10-06"),
+        weightKg: new Prisma.Decimal(100),
+        reps: 5,
+        createdAt: new Date(`2026-10-06T09:${String(i).padStart(2, "0")}:00Z`),
+      }),
+    );
+    const mock = summaryClient({
+      names: [{ exerciseName: "Squat" }],
+      last: [record({ id: "last", exerciseName: "Squat" })],
+      sets,
+    });
+
+    const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
+
+    expect(summary.lastSetsByExercise["Squat"].sets).toHaveLength(20);
+  });
+
   it("skips the last-session query when nothing was logged in the window", async () => {
     const mock = summaryClient({ names: [] });
 
     const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
 
-    expect(summary).toEqual({ names: [], lastByExercise: [] });
+    expect(summary).toEqual({ names: [], lastByExercise: [], lastSetsByExercise: {} });
     expect(mock.liftLog.findMany).not.toHaveBeenCalled();
   });
 

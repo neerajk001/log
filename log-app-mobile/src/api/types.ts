@@ -95,12 +95,20 @@ export interface OnboardingInput {
   ai_coach_enabled?: boolean;
 }
 
+/** One set's prescription. Both fields optional: `{}` means "use the exercise defaults". */
+export interface PlanSetTarget {
+  weight_kg?: number | null;
+  reps?: string | null;
+}
+
 export interface PlanExercise {
   name: string;
   sets: number;
   reps: string;
-  /** Optional target weight the athlete plans to lift. */
+  /** Optional target weight the athlete plans to lift (the default for every set). */
   weight_kg?: number | null;
+  /** Per-set targets in set order (entry 1 = set 1); optional. */
+  set_targets?: PlanSetTarget[] | null;
 }
 
 export interface PlanDay {
@@ -429,10 +437,18 @@ export interface DismissedMeal {
   date?: string;
 }
 
+/** One previous session's sets, in the order they were logged. */
+export interface LastSessionSets {
+  date: string;
+  sets: { weight_kg: number; reps: number }[];
+}
+
 /** Recent exercise names, plus the top set from each one's previous session. */
 export interface LiftSummary {
   names: string[];
   last_by_exercise: LiftLog[];
+  /** Every set of each exercise's previous session, for set-by-set pre-filling. */
+  last_sets_by_exercise: Record<string, LastSessionSets>;
 }
 
 /** One exercise's rollup from the Insights metrics endpoint. */

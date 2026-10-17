@@ -294,6 +294,43 @@ describe("planExerciseSchema", () => {
       planExerciseSchema.safeParse({ name: "Squat", sets: 3, reps: "5", weight_kg: 0 }).success,
     ).toBe(false);
   });
+
+  it("accepts per-set targets in set order", () => {
+    const parsed = planExerciseSchema.safeParse({
+      name: "Bench Press",
+      sets: 5,
+      reps: "8",
+      weight_kg: 60,
+      set_targets: [
+        { weight_kg: 60 },
+        { weight_kg: 62.5 },
+        { weight_kg: 65, reps: "6" },
+        {}, // uses the exercise defaults
+        { weight_kg: null },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("rejects an out-of-range per-set weight and an oversized list", () => {
+    expect(
+      planExerciseSchema.safeParse({
+        name: "Bench Press",
+        sets: 3,
+        reps: "8",
+        set_targets: [{ weight_kg: 0 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      planExerciseSchema.safeParse({
+        name: "Bench Press",
+        sets: 3,
+        reps: "8",
+        set_targets: Array.from({ length: 100 }, () => ({ weight_kg: 60 })),
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("updateMeSchema", () => {

@@ -14,6 +14,7 @@ import { useCoachProfile } from "../../src/hooks/useCoachProfile";
 import { useCoachApi } from "../../src/api/coach";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
+import { editorWeightsFromExercise } from "../../src/utils/planTargets";
 import { pickPhoto, preparePhoto, type PhotoSource } from "../../src/utils/image";
 import { filePart } from "../../src/utils/upload";
 import { formatMediumDate } from "../../src/utils/date";
@@ -71,7 +72,13 @@ function toEditableDays(
   days: {
     day_name: string;
     rationale?: string | null;
-    exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[];
+    exercises: {
+      name: string;
+      sets: number;
+      reps: string;
+      weight_kg?: number | null;
+      set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+    }[];
   }[],
 ): EditableDay[] {
   return days.map((d) => ({
@@ -81,7 +88,7 @@ function toEditableDays(
       name: e.name,
       sets: String(e.sets),
       reps: e.reps,
-      weight: e.weight_kg != null ? String(e.weight_kg) : "",
+      setWeights: editorWeightsFromExercise(e),
     })),
   }));
 }

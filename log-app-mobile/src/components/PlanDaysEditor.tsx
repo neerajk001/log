@@ -4,13 +4,15 @@ import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { radii, spacing } from "../theme/spacing";
 import { muscleGroupsForDay } from "../utils/derive";
 import { muscleTagStyle } from "../utils/tags";
+import { MAX_EDITOR_SET_FIELDS, editorSetCount } from "../utils/planTargets";
 import { Tag } from "./ui/primitives";
 
 export interface EditableExercise {
   name: string;
   sets: string;
   reps: string;
-  weight: string;
+  /** One target weight (kg) per set, in set order. Blank = no target for that set. */
+  setWeights: string[];
 }
 
 export interface EditableDay {
@@ -21,7 +23,7 @@ export interface EditableDay {
 }
 
 export function emptyExercise(): EditableExercise {
-  return { name: "", sets: "", reps: "", weight: "" };
+  return { name: "", sets: "", reps: "", setWeights: [] };
 }
 
 export function emptyDay(): EditableDay {
@@ -48,6 +50,14 @@ export function PlanDaysEditor({
         i === di ? { ...d, exercises: d.exercises.map((e, j) => (j === ei ? { ...e, ...patch } : e)) } : d,
       ),
     );
+
+  /** Writes one set's target weight, padding the array so positions stay aligned. */
+  const updateSetWeight = (di: number, ei: number, index: number, value: string) => {
+    const setWeights = [...days[di].exercises[ei].setWeights];
+    while (setWeights.length <= index) setWeights.push("");
+    setWeights[index] = value;
+    updateExercise(di, ei, { setWeights });
+  };
 
   return (
     <View style={styles.container}>
@@ -90,55 +100,74 @@ export function PlanDaysEditor({
             </View>
 
             {day.exercises.map((ex, ei) => (
-              <View key={ei} style={styles.exerciseRow}>
-                <Ionicons name="reorder-three-outline" size={18} color={colors.textMuted} />
-                <TextInput
-                  style={[styles.input, styles.exName]}
-                  value={ex.name}
-                  onChangeText={(t) => updateExercise(di, ei, { name: t })}
-                  placeholder="Exercise"
-                  placeholderTextColor={colors.textMuted}
-                  autoCapitalize="words"
-                />
-                <TextInput
-                  style={[styles.input, styles.exNum]}
-                  value={ex.sets}
-                  onChangeText={(t) => updateExercise(di, ei, { sets: t })}
-                  placeholder="Sets"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                />
-                <TextInput
-                  style={[styles.input, styles.exNum]}
-                  value={ex.reps}
-                  onChangeText={(t) => updateExercise(di, ei, { reps: t })}
-                  placeholder="Reps"
-                  placeholderTextColor={colors.textMuted}
-                />
-                <TextInput
-                  style={[styles.input, styles.exNum]}
-                  value={ex.weight}
-                  onChangeText={(t) => updateExercise(di, ei, { weight: t })}
-                  placeholder="kg"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="numeric"
-                />
-                <Pressable
-                  onPress={() =>
-                    Alert.alert("Remove exercise?", "This removes the exercise from the plan.", [
-                      { text: "Cancel", style: "cancel" },
-                      {
-                        text: "Remove",
-                        style: "destructive",
-                        onPress: () => updateDay(di, { exercises: day.exercises.filter((_, j) => j !== ei) }),
-                      },
-                    ])
-                  }
-                  hitSlop={8}
-                  accessibilityLabel="Remove exercise"
-                >
-                  <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                </Pressable>
+              <View key={ei} style={styles.exerciseBlock}>
+                <View style={styles.exerciseRow}>
+                  <Ionicons name="reorder-three-outline" size={18} color={colors.textMuted} />
+                  <TextInput
+                    style={[styles.input, styles.exName]}
+                    value={ex.name}
+                    onChangeText={(t) => updateExercise(di, ei, { name: t })}
+                    placeholder="Exercise"
+                    placeholderTextColor={colors.textMuted}
+                    autoCapitalize="words"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.exNum]}
+                    value={ex.sets}
+                    onChangeText={(t) => updateExercise(di, ei, { sets: t })}
+                    placeholder="Sets"
+                    placeholderTextColor={colors.textMuted}
+                    keyboardType="numeric"
+                  />
+                  <TextInput
+                    style={[styles.input, styles.exNum]}
+                    value={ex.reps}
+                    onChangeText={(t) => updateExercise(di, ei, { reps: t })}
+                    placeholder="Reps"
+                    placeholderTextColor={colors.textMuted}
+                  />
+                  <Pressable
+                    onPress={() =>
+                      Alert.alert("Remove exercise?", "This removes the exercise from the plan.", [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                          text: "Remove",
+                          style: "destructive",
+                          onPress: () => updateDay(di, { exercises: day.exercises.filter((_, j) => j !== ei) }),
+                        },
+                      ])
+                    }
+                    hitSlop={8}
+                    accessibilityLabel="Remove exercise"
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+
+                {/* One target weight per set, so pyramids can be prescribed. */}
+                <View style={styles.setWeights}>
+                  <Text style={styles.setWeightsLabel}>
+                    Target weight per set (kg)
+                    {editorSetCount(ex.sets) < (parseInt(ex.sets, 10) || 1)
+                      ? ` · first ${MAX_EDITOR_SET_FIELDS}`
+                      : ""}
+                  </Text>
+                  <View style={styles.setWeightsRow}>
+                    {Array.from({ length: editorSetCount(ex.sets) }, (_, si) => (
+                      <View key={si} style={styles.setWeightField}>
+                        <Text style={styles.setWeightIndex}>{si + 1}</Text>
+                        <TextInput
+                          style={styles.setWeightInput}
+                          value={ex.setWeights[si] ?? ""}
+                          onChangeText={(t) => updateSetWeight(di, ei, si, t)}
+                          placeholder="kg"
+                          placeholderTextColor={colors.textMuted}
+                          keyboardType="numeric"
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
               </View>
             ))}
 
@@ -193,6 +222,23 @@ const useStyles = makeUseStyles((t) =>
     },
     addLink: { fontSize: 13, fontWeight: "600", color: t.colors.primary },
     exerciseRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    exerciseBlock: { gap: spacing.xs },
+    setWeights: { gap: 4, paddingLeft: 26 },
+    setWeightsLabel: { ...t.typography.caption, color: t.colors.textMuted },
+    setWeightsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    setWeightField: { alignItems: "center", gap: 1 },
+    setWeightIndex: { fontSize: 10, fontWeight: "700", color: t.colors.textMuted },
+    setWeightInput: {
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      borderRadius: radii.sm,
+      height: 40,
+      width: 54,
+      textAlign: "center",
+      fontSize: 13,
+      color: t.colors.text,
+      paddingHorizontal: 0,
+    },
     input: {
       borderWidth: 1,
       borderColor: t.colors.border,

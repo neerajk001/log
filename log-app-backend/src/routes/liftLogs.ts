@@ -154,6 +154,7 @@ router.get(
     res.json({
       names: summary.names,
       last_by_exercise: summary.lastByExercise.map(serializeLiftLog),
+      last_sets_by_exercise: summary.lastSetsByExercise,
     });
   },
 );

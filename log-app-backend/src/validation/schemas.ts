@@ -114,12 +114,23 @@ export const liftLogsQuerySchema = z
     message: "Provide exercise, or a date range via from/to/days",
   });
 
+/** One set's prescription. Both fields optional: `{}` means "use the exercise's defaults". */
+export const planSetTargetSchema = z.object({
+  weight_kg: z.number().positive().max(9999).optional().nullable(),
+  reps: z.string().min(1).max(20).optional(),
+});
+
 export const planExerciseSchema = z.object({
   name: z.string().min(1).max(120),
   sets: z.number().int().positive().max(99),
   reps: z.string().min(1).max(20),
   /** Optional target weight the athlete plans to lift. */
   weight_kg: z.number().positive().max(9999).optional(),
+  /**
+   * Per-set targets in set order (entry 1 = set 1), for pyramid work. Optional:
+   * `weight_kg` stays the default for any set without its own target.
+   */
+  set_targets: z.array(planSetTargetSchema).max(99).optional(),
 });
 
 export const planDaySchema = z.object({

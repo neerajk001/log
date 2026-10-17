@@ -134,10 +134,28 @@ export async function updateLiftLog(
   return findExisting(client, id);
 }
 
+/** One set of a previous session, in the order it was logged. */
+export interface ExerciseSet {
+  weight_kg: number;
+  reps: number;
+}
+
+/** The sets of an exercise's previous session. */
+export interface LastSessionSets {
+  date: string;
+  sets: ExerciseSet[];
+}
+
 /** Recent exercise names plus the top set from each one's previous session. */
 export interface LiftSummary {
   names: string[];
   lastByExercise: LiftLogRecord[];
+  /**
+   * Every set of each exercise's previous session (newest session before today),
+   * in logged order, so the lift rows can be pre-filled set-by-set instead of
+   * every row getting the same heaviest set. Capped per session.
+   */
+  lastSetsByExercise: Record<string, LastSessionSets>;
 }
 
 /** One exercise's rollup for the Insights screen. */
@@ -236,6 +254,8 @@ export async function getLiftMetrics(
 }
 
 const MAX_RECENT_EXERCISES = 12;
+/** Bound on the per-session set list returned for pre-filling (plenty for training). */
+const MAX_SETS_PER_SESSION = 20;
 
 function daysBefore(isoDate: string, days: number): Date {
   const d = new Date(`${isoDate}T00:00:00Z`);
@@ -267,7 +287,7 @@ export async function getLiftSummary(
     take: MAX_RECENT_EXERCISES,
   });
   const names = grouped.map((row) => row.exerciseName);
-  if (names.length === 0) return { names: [], lastByExercise: [] };
+  if (names.length === 0) return { names: [], lastByExercise: [], lastSetsByExercise: {} };
 
   // One row per exercise: newest session, heaviest set of that session — the same
   // rule the client applied in JS, and strictly before the athlete's today.
@@ -278,5 +298,28 @@ export async function getLiftSummary(
     select: liftLogSelect,
   });
 
-  return { names, lastByExercise };
+  // Then every set of each exercise's newest session, in logged order.
+  const sessionRows = await client.liftLog.findMany({
+    where: { userId, exerciseName: { in: names }, date: { gte: from, lt: before } },
+    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+    select: liftLogSelect,
+  });
+  const rowsByExercise = new Map<string, LiftLogRecord[]>();
+  for (const row of sessionRows) {
+    const list = rowsByExercise.get(row.exerciseName) ?? [];
+    list.push(row);
+    rowsByExercise.set(row.exerciseName, list);
+  }
+  const lastSetsByExercise: Record<string, LastSessionSets> = {};
+  for (const [exercise, rows] of rowsByExercise) {
+    // Date-ascending, so the last row carries the newest session's date.
+    const date = rows[rows.length - 1].date.toISOString().slice(0, 10);
+    const sets = rows
+      .filter((row) => row.date.toISOString().slice(0, 10) === date)
+      .slice(0, MAX_SETS_PER_SESSION)
+      .map((row) => ({ weight_kg: Number(row.weightKg), reps: row.reps }));
+    if (sets.length > 0) lastSetsByExercise[exercise] = { date, sets };
+  }
+
+  return { names, lastByExercise, lastSetsByExercise };
 }

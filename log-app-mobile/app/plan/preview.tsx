@@ -8,7 +8,8 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { PlanDaysEditor, type EditableDay } from "../../src/components/PlanDaysEditor";
 import { Button, Banner, Card, EmptyState } from "../../src/components/ui/primitives";
 import { TextField } from "../../src/components/ui/controls";
-import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
+import { parsePositiveInt } from "../../src/utils/parse";
+import { exerciseTargetsPayload, firstInvalidSetWeight } from "../../src/utils/planTargets";
 import { usePlansApi } from "../../src/api/plans";
 import { clearPendingPlan, getPendingPlan } from "../../src/state/parsedPlan";
 import type { CreatePlanInput } from "../../src/api/types";
@@ -60,8 +61,9 @@ export default function PlanPreviewScreen() {
         }
         // Weight is optional, but a non-empty one must be a real number —
         // otherwise the entered value (e.g. 12.5) would vanish silently.
-        if (e.weight.trim() !== "" && parsePositiveNumber(e.weight, 9999) == null) {
-          setError("Weights must be positive numbers, e.g. 12.5 (or left empty).");
+        const badSet = firstInvalidSetWeight(e.setWeights);
+        if (badSet != null) {
+          setError(`Set ${badSet}'s target weight must be a positive number (e.g. 12.5) or left empty.`);
           return;
         }
       }
@@ -78,7 +80,7 @@ export default function PlanPreviewScreen() {
           name: e.name.trim().slice(0, 120),
           sets: parsePositiveInt(e.sets, 99) ?? 0,
           reps: e.reps.trim().slice(0, 20),
-          weight_kg: parsePositiveNumber(e.weight, 9999) ?? undefined,
+          ...exerciseTargetsPayload(e.setWeights),
         })),
       })),
     };

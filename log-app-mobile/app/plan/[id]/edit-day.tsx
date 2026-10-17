@@ -11,12 +11,18 @@ import {
 import { Button, Banner, LoadingState, EmptyState } from "../../../src/components/ui/primitives";
 import { usePlans } from "../../../src/hooks/usePlans";
 import { usePlansApi } from "../../../src/api/plans";
-import { parsePositiveNumber } from "../../../src/utils/parse";
+import { editorWeightsFromExercise, exerciseTargetsPayload, firstInvalidSetWeight } from "../../../src/utils/planTargets";
 import type { CreatePlanInput } from "../../../src/api/types";
 
 function toEditable(
   dayName: string,
-  exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[],
+  exercises: {
+    name: string;
+    sets: number;
+    reps: string;
+    weight_kg?: number | null;
+    set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+  }[],
 ): EditableDay {
   return {
     day_name: dayName,
@@ -24,7 +30,7 @@ function toEditable(
       name: e.name,
       sets: String(e.sets),
       reps: e.reps,
-      weight: e.weight_kg != null ? String(e.weight_kg) : "",
+      setWeights: editorWeightsFromExercise(e),
     })),
   };
 }
@@ -77,8 +83,9 @@ export default function EditDayScreen() {
         return;
       }
       // Weight is optional, but a non-empty one must parse — decimals included.
-      if (e.weight.trim() !== "" && parsePositiveNumber(e.weight, 9999) == null) {
-        setError("Weights must be positive numbers, e.g. 12.5 (or left empty).");
+      const badSet = firstInvalidSetWeight(e.setWeights);
+      if (badSet != null) {
+        setError(`Set ${badSet}'s target weight must be a positive number (e.g. 12.5) or left empty.`);
         return;
       }
     }
@@ -94,7 +101,7 @@ export default function EditDayScreen() {
                 name: e.name.trim(),
                 sets: parseInt(e.sets, 10),
                 reps: e.reps.trim(),
-                weight_kg: parsePositiveNumber(e.weight, 9999) ?? undefined,
+                ...exerciseTargetsPayload(e.setWeights),
               })),
             }
           : {
@@ -104,6 +111,7 @@ export default function EditDayScreen() {
                 sets: e.sets,
                 reps: e.reps,
                 weight_kg: e.weight_kg ?? undefined,
+                set_targets: e.set_targets ?? undefined,
               })),
             },
       ),

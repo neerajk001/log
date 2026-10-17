@@ -53,6 +53,8 @@ interface PlanExercise {
   sets: number;
   reps: string;
   weight_kg?: number;
+  /** Per-set targets in set order (entry 1 = set 1); optional. */
+  set_targets?: { weight_kg?: number | null; reps?: string }[];
 }
 
 function planExerciseNames(exercises: Prisma.JsonValue): string[] {
@@ -286,6 +288,7 @@ router.get(
               sets: exercise.sets,
               reps: exercise.reps,
               weight_kg: exercise.weight_kg ?? null,
+              set_targets: exercise.set_targets ?? null,
               logged: logs.length > 0,
               last_log: lastLog
                 ? { weight_kg: lastLog.weightKg, reps: lastLog.reps }

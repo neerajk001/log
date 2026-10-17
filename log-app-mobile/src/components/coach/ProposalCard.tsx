@@ -105,7 +105,7 @@ export function ProposalCard({
                 name: e.name,
                 sets: String(e.sets),
                 reps: e.reps,
-                weight: "",
+                setWeights: [],
               })),
             }))
           : [],

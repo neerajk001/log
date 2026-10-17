@@ -66,7 +66,7 @@ export default function LiftScreen() {
     clearMutationError,
     refetch: refetchLifts,
   } = useLiftLogs(today);
-  const { names: recent, lastByExercise } = useRecentExercises();
+  const { names: recent, lastByExercise, lastSetsByExercise } = useRecentExercises();
 
   // The selected plan day lives in the route param, so Today's workout strip can
   // open this screen on its day — and the choice sticks for the next set.
@@ -273,6 +273,8 @@ export default function LiftScreen() {
                     plannedWeight={ex.weight_kg ?? null}
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
                     lastLog={lastByExercise.get(ex.name) ?? null}
+                    lastSets={lastSetsByExercise.get(ex.name)?.sets ?? null}
+                    setTargets={ex.set_targets ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
                     planDayId={day.id}
                     date={today}

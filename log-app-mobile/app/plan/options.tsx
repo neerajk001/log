@@ -65,6 +65,7 @@ export default function PlanOptionsScreen() {
             sets: e.sets,
             reps: e.reps,
             weight_kg: e.weight_kg ?? undefined,
+            set_targets: e.set_targets ?? undefined,
           })),
         })),
       });

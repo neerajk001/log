@@ -88,12 +88,16 @@ Returns lift history for one exercise, used by Trends deltas. Also accepts
 
 ## `GET /api/logs/lift/summary?days=120&before=YYYY-MM-DD`
 
-The Lift screen's "recent exercises" chips and its `Last:` cue, computed server-side:
-`{ names: string[], last_by_exercise: LiftLog[] }` — up to 12 distinct exercise names
-ordered by most recently used, plus one row per exercise (newest session, heaviest set
-of it). `before` is the athlete's local date; the "last" rows are strictly before it, so
-today's own sets never count as "last". This replaced a client-side download of every
-set in the window.
+The Lift screen's "recent exercises" chips, its `Last:` cue and its set-by-set
+pre-fill, computed server-side:
+`{ names: string[], last_by_exercise: LiftLog[], last_sets_by_exercise: Record<string, { date: string, sets: { weight_kg: number, reps: number }[] }> }`
+— up to 12 distinct exercise names ordered by most recently used, plus one row per
+exercise (newest session, heaviest set of it) and that session's full set list in
+logged order (capped at 20 sets). `before` is the athlete's local date; the "last"
+rows are strictly before it, so today's own sets never count as "last". This
+replaced a client-side download of every set in the window.
+
+Each set is `{ weight_kg: number, reps: number }`.
 
 ## `GET /api/logs/lift/metrics?from&to&prev_from&prev_to`
 
@@ -168,6 +172,8 @@ Response (day resolves):
         "name": "Barbell Bench Press",
         "sets": 5,
         "reps": "5",
+        "weight_kg": 60,
+        "set_targets": [{ "weight_kg": 60 }, { "weight_kg": 62.5 }],
         "logged": false,
         "last_log": null
       },
@@ -213,11 +219,25 @@ Body: the (possibly user-edited) result of `/api/plans/parse`, plus a
   "source": "ai_parsed",
   "days": [
     { "day_name": "Push", "exercises": [
-      { "name": "Barbell Bench Press", "sets": 5, "reps": "5" }
+      {
+        "name": "Barbell Bench Press",
+        "sets": 5,
+        "reps": "5",
+        "weight_kg": 60,
+        "set_targets": [{ "weight_kg": 60 }, { "weight_kg": 62.5 }, { "weight_kg": 65 }]
+      }
     ]}
   ]
 }
 ```
+`weight_kg` is the exercise's default target, and the optional `set_targets`
+prescribes it set by set (a pyramid), in set order: entry 1 is set 1, a missing
+or `null` weight means "use the default", and `reps` may override the exercise's
+scheme for that set. Both are carried through unchanged and drive the target
+caption under each row on the Lift screen (`Plan · 62.5 kg × 8`) and the
+set-by-set pre-fill from the previous session. `set_targets` is capped at 99
+entries; plans saved without it behave exactly as before.
+
 Persists the plan and its days/exercises, sets it as the active plan
 (deactivates any prior active plan for that user). Returns the created
 plan in the same shape as `GET /api/plans` (single object, `201`).

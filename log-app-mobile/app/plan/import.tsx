@@ -13,13 +13,23 @@ import { setPendingPlan } from "../../src/state/parsedPlan";
 import { ApiError } from "../../src/api/client";
 import { filePart } from "../../src/utils/upload";
 import { emptyDay, type EditableDay } from "../../src/components/PlanDaysEditor";
+import { editorWeightsFromExercise } from "../../src/utils/planTargets";
 
 /** Keep in step with the server's cap (routes/plans.ts) — it sends the file to the model. */
 const MAX_PLAN_FILE_MB = 1;
 const MAX_PLAN_FILE_BYTES = MAX_PLAN_FILE_MB * 1024 * 1024;
 
 function toEditableDays(
-  days: { day_name: string; exercises: { name: string; sets: number; reps: string; weight_kg?: number | null }[] }[],
+  days: {
+    day_name: string;
+    exercises: {
+      name: string;
+      sets: number;
+      reps: string;
+      weight_kg?: number | null;
+      set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+    }[];
+  }[],
 ): EditableDay[] {
   return days.map((d) => ({
     day_name: d.day_name,
@@ -27,7 +37,7 @@ function toEditableDays(
       name: e.name,
       sets: String(e.sets),
       reps: e.reps,
-      weight: e.weight_kg != null ? String(e.weight_kg) : "",
+      setWeights: editorWeightsFromExercise(e),
     })),
   }));
 }

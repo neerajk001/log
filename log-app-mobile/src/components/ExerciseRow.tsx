@@ -7,7 +7,9 @@ import { radii, shadows, spacing } from "../theme/spacing";
 import { exerciseTypeFor } from "../utils/derive";
 import { muscleTagStyle, typeTagStyle } from "../utils/tags";
 import { parsePositiveInt, parsePositiveNumber, requestIdForAttempt } from "../utils/parse";
-import type { LiftLog, LiftLogCreate } from "../api/types";
+import { buildSetSeeds } from "../utils/liftPrefill";
+import { planHintFor } from "../utils/planTargets";
+import type { LiftLog, LiftLogCreate, PlanSetTarget } from "../api/types";
 import { successTick } from "../hooks/useHaptics";
 import { IconBadge, Tag } from "./ui/primitives";
 
@@ -38,12 +40,6 @@ function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
   };
 }
 
-/** First integer in a rep scheme, e.g. "8-12" -> 8. */
-function firstInt(value: string): number | null {
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
 function canLogDraft(draft: Draft): boolean {
   return (
     parsePositiveNumber(draft.weight.trim(), 9999) != null &&
@@ -59,6 +55,8 @@ export function ExerciseRow({
   plannedWeight,
   muscle,
   lastLog,
+  lastSets,
+  setTargets,
   loggedSets,
   planDayId,
   date,
@@ -77,6 +75,10 @@ export function ExerciseRow({
   plannedWeight?: number | null;
   muscle?: string;
   lastLog?: { weight_kg: number; reps: number } | null;
+  /** Every set of the previous session, in order — pre-fills set by set. */
+  lastSets?: { weight_kg: number; reps: number }[] | null;
+  /** The plan's per-set targets, in order — shown as the caption under each row. */
+  setTargets?: PlanSetTarget[] | null;
   loggedSets?: LiftLog[];
   planDayId?: string | null;
   date?: string;
@@ -131,19 +133,34 @@ export function ExerciseRow({
     if (initializedScopeRef.current === scopeKey) return;
     initializedScopeRef.current = scopeKey;
     const count = Math.max(1, sets - confirmedLogged.length);
-    // Pre-fill: the plan's target weight, else what you lifted last session.
-    const seedWeight = plannedWeight ?? lastLog?.weight_kg ?? null;
-    const seedReps = firstInt(reps) ?? lastLog?.reps ?? null;
-    const next = Array.from({ length: count }, (_, draftIndex) =>
-      makeDraft(
-        confirmedLogged.length + draftIndex + 1,
-        seedWeight != null ? String(seedWeight) : "",
-        seedReps != null ? String(seedReps) : "",
-      ),
+    // Pre-fill set by set from the previous session (a pyramid comes back as it
+    // was lifted); extra rows repeat its last set. No history => the plan target.
+    const seeds = buildSetSeeds({
+      count,
+      loggedSetCount: confirmedLogged.length,
+      lastSets,
+      setTargets,
+      plannedWeight,
+      plannedReps: reps,
+      lastLog,
+    });
+    const next = seeds.map((seed, draftIndex) =>
+      makeDraft(confirmedLogged.length + draftIndex + 1, seed.weight, seed.reps),
     );
     draftsRef.current = next;
     setDrafts(next);
-  }, [confirmedLogged.length, expanded, lastLog, logsLoading, plannedWeight, reps, scopeKey, sets]);
+  }, [
+    confirmedLogged.length,
+    expanded,
+    lastLog,
+    lastSets,
+    logsLoading,
+    plannedWeight,
+    reps,
+    scopeKey,
+    setTargets,
+    sets,
+  ]);
 
   useEffect(() => clearAllTimers, [clearAllTimers]);
 
@@ -337,8 +354,15 @@ export function ExerciseRow({
             </View>
           ) : null}
 
-          {drafts.map((draft) => (
-            <View key={draft.key} style={styles.draftWrap}>
+          {drafts.map((draft) => {
+            const hint = planHintFor(draft.ordinal - 1, {
+              sets,
+              reps,
+              weight_kg: plannedWeight,
+              set_targets: setTargets,
+            });
+            return (
+              <View key={draft.key} style={styles.draftWrap}>
               <View style={[styles.setRow, draft.status === "error" && styles.setRowError]}>
                 <View style={styles.setBadge}>
                   <Text style={styles.setBadgeText}>{draft.ordinal}</Text>
@@ -388,6 +412,12 @@ export function ExerciseRow({
                   </Pressable>
                 )}
               </View>
+              {hint ? (
+                <View style={styles.planHint}>
+                  <Ionicons name="flag-outline" size={12} color={colors.textDim} />
+                  <Text style={styles.planHintText}>{hint}</Text>
+                </View>
+              ) : null}
               {draft.status === "error" ? (
                 <View style={styles.retryRow}>
                   <Text style={styles.errorText}>Couldn’t save. Your values are kept.</Text>
@@ -397,7 +427,8 @@ export function ExerciseRow({
                 </View>
               ) : null}
             </View>
-          ))}
+            );
+          })}
 
           <Pressable onPress={addDraft} hitSlop={8} style={styles.addSet}>
             <Ionicons name="add" size={16} color={colors.primary} />
@@ -444,6 +475,8 @@ const useStyles = makeUseStyles((t) =>
     loggedList: { gap: spacing.xs },
     loggedRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     draftWrap: { gap: spacing.xs },
+    planHint: { flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 36 },
+    planHintText: { ...t.typography.caption, color: t.colors.textDim },
     setRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     setRowError: { borderWidth: 1, borderColor: t.colors.danger, borderRadius: radii.sm, padding: 2 },
     setBadge: {
