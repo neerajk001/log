@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
-import { buildPoolOptions, keepaliveMs } from "../src/db/client";
+import { buildPoolOptions, keepaliveMs, poolMax } from "../src/db/client";
 
 describe("buildPoolOptions", () => {
   it("sizes past the coach context's concurrent fan-out with fail-fast connects", () => {
@@ -14,6 +14,23 @@ describe("buildPoolOptions", () => {
     expect(opts.keepAliveInitialDelayMillis).toBe(10_000);
     // Lets operators (and the integration suite) identify this app's backends.
     expect(opts.application_name).toBe("log-app-backend");
+  });
+});
+
+describe("poolMax", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("defaults to 20 and honours a lower ceiling for poolers that cap connections", () => {
+    vi.stubEnv("DB_POOL_MAX", "");
+    expect(poolMax()).toBe(20);
+    vi.stubEnv("DB_POOL_MAX", "10");
+    expect(poolMax()).toBe(10);
+    vi.stubEnv("DB_POOL_MAX", "0");
+    expect(poolMax()).toBe(20);
+    vi.stubEnv("DB_POOL_MAX", "soon");
+    expect(poolMax()).toBe(20);
   });
 });
 

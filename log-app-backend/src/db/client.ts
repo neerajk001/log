@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { readFileSync } from "node:fs";
 import { Pool, type PoolConfig } from "pg";
 import { config } from "../config";
 import { normalizeQueryText, slowDbMs } from "../utils/perf";
@@ -12,9 +13,20 @@ const globalForPrisma = globalThis as unknown as {
   pgPool: Pool | undefined;
 };
 
+/**
+ * Path to a PEM root CA to trust in addition to the system store, e.g.
+ * Supabase's `prod-ca-2021.crt`. Providers that use their own CA (Supabase)
+ * need it; providers with publicly-trusted certs (Neon) leave it unset.
+ */
+export function databaseSslCaPath(): string | undefined {
+  const path = process.env.DATABASE_SSL_CA?.trim();
+  return path ? path : undefined;
+}
+
 export function buildPoolSslConfig(
   databaseUrl: string,
   sslNoVerify = false,
+  caPath = databaseSslCaPath(),
 ): PoolConfig["ssl"] {
   let sslmode: string | null = null;
   try {
@@ -30,7 +42,36 @@ export function buildPoolSslConfig(
     );
     return { rejectUnauthorized: false };
   }
+  if (caPath) {
+    try {
+      // Verification stays ON — this only adds the provider's root to the trust
+      // store, so a self-signed pooler chain (Supabase) validates properly.
+      return { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };
+    } catch (err) {
+      throw new Error(
+        `DATABASE_SSL_CA is set to ${caPath} but it could not be read: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
   return { rejectUnauthorized: true };
+}
+
+/**
+ * `sslmode` in the connection string takes precedence over an explicit `ssl`
+ * object (pg ≥ 8.16 treats `require` as verify-full), which silently discards
+ * the CA above. The ssl object built here is authoritative, so the parameter is
+ * dropped from the URL. Anything else — including `disable` — is left alone.
+ */
+export function stripSslMode(databaseUrl: string | undefined): string | undefined {
+  if (!databaseUrl) return databaseUrl;
+  try {
+    const parsed = new URL(databaseUrl);
+    if (!parsed.searchParams.has("sslmode")) return databaseUrl;
+    parsed.searchParams.delete("sslmode");
+    return parsed.toString();
+  } catch {
+    return databaseUrl;
+  }
 }
 
 export function assertDbSslAllowed(
@@ -52,21 +93,24 @@ assertDbSslAllowed(ssl);
 
 /**
  * Pool shape, extracted pure for tests. Rationale per field (see perf audit §14):
- * - max 20: the coach context fires ~13 concurrent queries; the default 10
- *   forces client-side queueing. Upstream is the Neon pooler, so this is safe.
+ * - max 20 (override DB_POOL_MAX): the coach context fires ~13 concurrent
+ *   queries; the default 10 forces client-side queueing. Lower it where the
+ *   upstream pooler caps connections lower than that.
  * - connectionTimeoutMillis 10s: the default (0 = wait forever) turns a stuck
  *   connect into a hung request instead of a fast, diagnosable error.
  * - idleTimeoutMillis 10s: pg default, stated explicitly (dead sockets after a
- *   Neon suspend must be reaped, not handed out).
+ *   suspend must be reaped, not handed out).
  * - keepAlive: TCP keepalive probes detect dead peers through NAT/LB idle drops.
+ * - sslmode is stripped from the URL: this file's ssl config is authoritative
+ *   (see stripSslMode), otherwise the URL's `require` overrides the CA.
  * No statement_timeout here: with a `-pooler` (PgBouncer transaction-mode) host,
  * per-connection settings are unsafe without verifying the pooler mode first.
  */
 export function buildPoolOptions(): PoolConfig {
   return {
-    connectionString: process.env.DATABASE_URL,
+    connectionString: stripSslMode(process.env.DATABASE_URL),
     ssl,
-    max: 20,
+    max: poolMax(),
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 10_000,
     keepAlive: true,
@@ -85,6 +129,18 @@ export function keepaliveMs(): number {
   if (raw === undefined || raw === "") return 4 * 60 * 1000;
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/**
+ * Local pool ceiling. The default (20) sizes past the coach context's ~13-query
+ * fan-out. Supabase's session pooler caps server-side connections lower than
+ * that, so set DB_POOL_MAX there (e.g. 10) instead of queueing at the pooler.
+ */
+export function poolMax(): number {
+  const raw = process.env.DB_POOL_MAX;
+  if (raw === undefined || raw === "") return 20;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 20;
 }
 
 const pool = globalForPrisma.pgPool ?? new Pool(buildPoolOptions());

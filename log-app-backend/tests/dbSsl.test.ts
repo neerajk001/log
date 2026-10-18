@@ -1,7 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { buildPoolSslConfig, assertDbSslAllowed } from "../src/db/client";
+import { describe, it, expect, afterAll } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildPoolSslConfig, assertDbSslAllowed, stripSslMode } from "../src/db/client";
 
 const BASE = "postgresql://user:password@host:5432/log";
+
+const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+const dir = mkdtempSync(join(tmpdir(), "ca-"));
+const caPath = join(dir, "prod-ca-2021.crt");
+writeFileSync(caPath, pem);
+
+afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("buildPoolSslConfig", () => {
   it("verifies by default (missing sslmode)", () => {
@@ -30,6 +40,45 @@ describe("buildPoolSslConfig", () => {
     expect(buildPoolSslConfig(`${BASE}?sslmode=require`, true)).toEqual({
       rejectUnauthorized: false,
     });
+  });
+
+  it("trusts a configured CA while keeping verification on", () => {
+    expect(buildPoolSslConfig(`${BASE}?sslmode=require`, false, caPath)).toEqual({
+      ca: pem,
+      rejectUnauthorized: true,
+    });
+  });
+
+  it("still wins over sslmode=require for a self-signed pooler chain", () => {
+    // Supabase's pooler: require would verify-full against the public store and
+    // fail, so the CA must reach pg (see stripSslMode).
+    const ssl = buildPoolSslConfig(`${BASE}?sslmode=require`, false, caPath);
+    expect(ssl).toMatchObject({ ca: pem });
+  });
+
+  it("refuses to start when the CA path cannot be read", () => {
+    expect(() => buildPoolSslConfig(BASE, false, join(dir, "missing.crt"))).toThrow(
+      /could not be read/i,
+    );
+  });
+});
+
+describe("stripSslMode", () => {
+  it("drops sslmode so the explicit ssl object is authoritative", () => {
+    expect(stripSslMode(`${BASE}?sslmode=require`)).toBe(BASE);
+    expect(stripSslMode(`${BASE}?sslmode=require&application_name=x`)).toBe(
+      `${BASE}?application_name=x`,
+    );
+  });
+
+  it("leaves the URL untouched when there is no sslmode", () => {
+    expect(stripSslMode(BASE)).toBe(BASE);
+    expect(stripSslMode(`${BASE}?foo=bar`)).toBe(`${BASE}?foo=bar`);
+  });
+
+  it("passes through undefined and unparseable values", () => {
+    expect(stripSslMode(undefined)).toBeUndefined();
+    expect(stripSslMode("not a url")).toBe("not a url");
   });
 });
 
