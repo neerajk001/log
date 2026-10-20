@@ -8,7 +8,7 @@ import { exerciseTypeFor } from "../utils/derive";
 import { muscleTagStyle, typeTagStyle } from "../utils/tags";
 import { parsePositiveInt, parsePositiveNumber, requestIdForAttempt } from "../utils/parse";
 import { buildSetSeeds } from "../utils/liftPrefill";
-import { formatSetList, formatTargetWeight, planHintFor } from "../utils/planTargets";
+import { formatTargetWeight, planHintFor } from "../utils/planTargets";
 import { formatSetLoad, inferLoadMode, type LoadMode } from "../utils/bodyweight";
 import { formatMediumDate } from "../utils/date";
 import type { LastSessionSets, LiftLog, LiftLogCreate, PlanSetTarget } from "../api/types";
@@ -49,6 +49,32 @@ function canLogDraft(draft: Draft, bodyweight: boolean): boolean {
   const reps = parsePositiveInt(draft.reps.trim(), 9999) != null;
   if (!reps) return false;
   return bodyweight || parsePositiveNumber(draft.weight.trim(), 9999) != null;
+}
+
+/**
+ * One-line summary of a previous session: the load range plus how many sets.
+ * A straight set reads "60 kg × 8 · 3 sets"; a pyramid reads "60–65 kg · 3 sets".
+ */
+function lastSessionSummary(
+  sets: { weight_kg: number | null; reps: number }[],
+): string | null {
+  if (sets.length === 0) return null;
+  const count = `${sets.length} ${sets.length === 1 ? "set" : "sets"}`;
+  const weights = sets
+    .map((set) => set.weight_kg)
+    .filter((weight): weight is number => weight != null);
+  const reps = new Set(sets.map((set) => set.reps));
+  if (weights.length === 0) {
+    return reps.size === 1 ? `BW × ${sets[0].reps} · ${count}` : `BW · ${count}`;
+  }
+  const min = Math.min(...weights);
+  const max = Math.max(...weights);
+  if (min === max) {
+    return reps.size === 1
+      ? `${max} kg × ${sets[0].reps} · ${count}`
+      : `${max} kg · ${count}`;
+  }
+  return `${min}–${max} kg · ${count}`;
 }
 
 export function ExerciseRow({
@@ -342,11 +368,11 @@ export function ExerciseRow({
   const canExpand = !!onToggle;
   const bodyweight = loadMode === "bw";
   const targetText = formatTargetWeight({ sets, weight_kg: plannedWeight, set_targets: setTargets });
-  /** One line of what was lifted last time; tapping it opens the full session. */
-  const lastLine = lastSession
-    ? `Last (${formatMediumDate(lastSession.date)}): ${formatSetList(lastSession.sets) ?? "no sets"}`
+  /** The previous session in one glance; tapping it opens every set. */
+  const lastSummary = lastSession
+    ? lastSessionSummary(lastSession.sets)
     : lastLog
-      ? `Last: ${formatSetLoad(lastLog.weight_kg, lastLog.reps)} reps`
+      ? formatSetLoad(lastLog.weight_kg, lastLog.reps)
       : null;
 
   return (
@@ -386,44 +412,60 @@ export function ExerciseRow({
         ) : null}
       </Pressable>
 
-      {lastLine ? (
-        lastSession ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Show the previous session's sets"
-            onPress={() => setHistoryOpen((open) => !open)}
-            hitSlop={6}
-            style={({ pressed }) => [styles.lastRow, pressed && styles.pressed]}
-          >
-            <Ionicons name="time-outline" size={12} color={colors.textMuted} />
-            <Text style={[typography.caption, styles.last]} numberOfLines={1}>
-              {lastLine}
-            </Text>
-            <Ionicons
-              name={historyOpen ? "chevron-up" : "chevron-down"}
-              size={12}
-              color={colors.textMuted}
-            />
-          </Pressable>
-        ) : (
-          <View style={styles.lastRow}>
-            <Ionicons name="time-outline" size={12} color={colors.textMuted} />
-            <Text style={[typography.caption, styles.last]} numberOfLines={1}>
-              {lastLine}
-            </Text>
-          </View>
-        )
-      ) : null}
-
-      {historyOpen && lastSession ? (
-        <View style={styles.historyPanel}>
-          <Text style={[typography.caption, styles.last]}>{formatMediumDate(lastSession.date)}</Text>
-          {lastSession.sets.map((set, i) => (
-            <View key={`${i}-${set.weight_kg}-${set.reps}`} style={styles.historyRow}>
-              <Text style={styles.historyIndex}>{i + 1}</Text>
-              <Text style={typography.small}>{formatSetLoad(set.weight_kg, set.reps)}</Text>
+      {lastSummary ? (
+        <View style={styles.lastBlock}>
+          {lastSession ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: historyOpen }}
+              accessibilityLabel="Show the previous session's sets"
+              onPress={() => setHistoryOpen((open) => !open)}
+              style={({ pressed }) => [styles.lastStrip, pressed && styles.pressed]}
+            >
+              <View style={styles.lastIcon}>
+                <Ionicons name="time-outline" size={13} color={colors.textDim} />
+              </View>
+              <View style={styles.lastMain}>
+                <Text style={styles.lastLabel} numberOfLines={1}>
+                  Last session
+                </Text>
+                <Text style={styles.lastValue} numberOfLines={1}>
+                  {lastSummary}
+                </Text>
+              </View>
+              <Text style={styles.lastDate}>{formatMediumDate(lastSession.date)}</Text>
+              <Ionicons
+                name={historyOpen ? "chevron-up" : "chevron-down"}
+                size={14}
+                color={colors.textMuted}
+              />
+            </Pressable>
+          ) : (
+            <View style={styles.lastStrip}>
+              <View style={styles.lastIcon}>
+                <Ionicons name="time-outline" size={13} color={colors.textDim} />
+              </View>
+              <View style={styles.lastMain}>
+                <Text style={styles.lastLabel} numberOfLines={1}>
+                  Last set
+                </Text>
+                <Text style={styles.lastValue} numberOfLines={1}>
+                  {lastSummary}
+                </Text>
+              </View>
             </View>
-          ))}
+          )}
+
+          {historyOpen && lastSession ? (
+            <View style={styles.historyPanel}>
+              {lastSession.sets.map((set, i) => (
+                <View key={`${i}-${set.weight_kg}-${set.reps}`} style={styles.setPill}>
+                  <Text style={styles.setPillIndex}>{i + 1}</Text>
+                  <Text style={styles.setPillValue}>{formatSetLoad(set.weight_kg, set.reps)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -599,17 +641,51 @@ const useStyles = makeUseStyles((t) =>
     body: { flex: 1, gap: 3 },
     name: {},
     prescription: { color: t.colors.textDim },
-    last: { color: t.colors.textMuted, flexShrink: 1 },
-    lastRow: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.xs },
-    historyPanel: {
-      marginTop: spacing.xs,
-      padding: spacing.sm,
-      borderRadius: radii.sm,
+    lastBlock: {
+      marginTop: spacing.sm,
       backgroundColor: t.colors.surfaceAlt,
-      gap: 2,
+      borderRadius: radii.md,
+      overflow: "hidden",
     },
-    historyRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    historyIndex: { fontSize: 11, fontWeight: "700", color: t.colors.textMuted, width: 12 },
+    lastStrip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    lastIcon: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: t.colors.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    lastMain: { flex: 1, gap: 1, minWidth: 0 },
+    lastLabel: { ...t.typography.caption, color: t.colors.textMuted },
+    lastValue: { ...t.typography.small, fontWeight: "600", color: t.colors.text },
+    lastDate: { ...t.typography.caption, color: t.colors.textMuted },
+    historyPanel: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.colors.border,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    setPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.sm,
+      paddingHorizontal: 8,
+      height: 28,
+    },
+    setPillIndex: { fontSize: 10, fontWeight: "700", color: t.colors.textMuted },
+    setPillValue: { fontSize: 12, fontWeight: "600", color: t.colors.text },
     tags: { flexDirection: "row", gap: spacing.xs, marginTop: 2, flexWrap: "wrap" },
     expanded: { marginTop: spacing.md, gap: spacing.sm },
     loggedList: { gap: spacing.xs },
