@@ -138,6 +138,8 @@ function topSetByWeek(
   let max: number | null = null;
   for (const l of lifts) {
     if (l.date < weekStart || l.date >= weekEnd) continue;
+    // Bodyweight sets carry no load, so they can't set a top-set delta.
+    if (l.weightKg == null) continue;
     const w = Number(l.weightKg);
     if (max == null || w > max) max = w;
   }

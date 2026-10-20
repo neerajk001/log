@@ -22,13 +22,15 @@ export const liftLogSchema = z.object({
   id: z.string().uuid().optional(),
   date: dateString,
   exercise_name: z.string().min(1).max(120),
-  weight_kg: z.number().positive().max(9999),
+  /** Null = bodyweight set (reps only), e.g. a hanging leg raise. */
+  weight_kg: z.number().positive().max(9999).nullable(),
   reps: z.number().int().positive().max(9999),
   plan_day_id: z.string().uuid().optional().nullable(),
 });
 
 export const liftLogUpdateSchema = z.object({
-  weight_kg: z.number().positive().max(9999),
+  /** Null = bodyweight set: clears any stored load. */
+  weight_kg: z.number().positive().max(9999).nullable(),
   reps: z.number().int().positive().max(9999),
 });
 

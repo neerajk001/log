@@ -150,6 +150,8 @@ function topSetByWindow(
   const map = new Map<string, number>();
   for (const l of lifts) {
     if (l.date < start || l.date >= end) continue;
+    // Bodyweight sets have no load to rank; they still count as work elsewhere.
+    if (l.weightKg == null) continue;
     const w = Number(l.weightKg);
     const prev = map.get(l.exerciseName);
     if (prev == null || w > prev) map.set(l.exerciseName, w);
@@ -361,19 +363,27 @@ export async function buildAthleteContext(
     );
   }
 
-  const byExercise = new Map<string, { top: number; volume: number }>();
+  const byExercise = new Map<string, { top: number; volume: number; sets: number }>();
   for (const l of lifts) {
-    const w = Number(l.weightKg);
-    const entry = byExercise.get(l.exerciseName) ?? { top: 0, volume: 0 };
-    entry.top = Math.max(entry.top, w);
-    entry.volume += w * l.reps;
+    const entry = byExercise.get(l.exerciseName) ?? { top: 0, volume: 0, sets: 0 };
+    entry.sets += 1;
+    // Bodyweight sets count as work but contribute no load/volume.
+    if (l.weightKg != null) {
+      const w = Number(l.weightKg);
+      entry.top = Math.max(entry.top, w);
+      entry.volume += w * l.reps;
+    }
     byExercise.set(l.exerciseName, entry);
   }
   if (byExercise.size > 0) {
     const ranked = Array.from(byExercise.entries())
       .sort((a, b) => b[1].volume - a[1].volume)
       .slice(0, 12)
-      .map(([name, e]) => `${name}: ${e.top}kg top / ${Math.round(e.volume)}kg vol`);
+      .map(([name, e]) =>
+        e.top > 0
+          ? `${name}: ${e.top}kg top / ${Math.round(e.volume)}kg vol`
+          : `${name}: ${e.sets} sets (bodyweight)`,
+      );
     lines.push(`LIFTS (last ${CONTEXT_WINDOW_DAYS}d): ${ranked.join("; ")}`);
   }
 
@@ -911,15 +921,22 @@ const COACH_TOOLS = [
     type: "function",
     name: "update_logged_set",
     description:
-      "PROPOSE fixing one logged set (weight and/or reps). Does not apply — creates a proposal.",
+      "PROPOSE fixing one logged set (load and/or reps). Does not apply — creates a proposal.",
     parameters: {
       type: "object",
       properties: {
         set_id: { type: "string", description: "Id from get_lift_history." },
-        weight_kg: { type: "number" },
+        weight_kg: {
+          type: "number",
+          description: "New load in kg. Omit to keep the set's current load.",
+        },
+        bodyweight: {
+          type: "boolean",
+          description: "True to mark the set as bodyweight (reps only, clears the load).",
+        },
         reps: { type: "number" },
       },
-      required: ["set_id", "weight_kg", "reps"],
+      required: ["set_id", "reps"],
     },
   },
   {
@@ -1533,7 +1550,7 @@ export async function executeCoachTool(
           id: r.id,
           date: fmtDate(r.date),
           exercise: r.exerciseName,
-          weight_kg: Number(r.weightKg),
+          weight_kg: r.weightKg == null ? null : Number(r.weightKg),
           reps: r.reps,
         }));
       }
@@ -1557,12 +1574,23 @@ export async function executeCoachTool(
           }),
         ]);
 
-        const byExercise = new Map<string, { sets: number; top: { weight_kg: number; reps: number } }>();
+        // Bodyweight sets rank by reps; a loaded set always outranks them.
+        const byExercise = new Map<
+          string,
+          { sets: number; top: { weight_kg: number | null; reps: number } }
+        >();
         for (const l of lifts) {
-          const w = Number(l.weightKg);
-          const entry = byExercise.get(l.exerciseName) ?? { sets: 0, top: { weight_kg: 0, reps: 0 } };
+          const w = l.weightKg == null ? null : Number(l.weightKg);
+          const entry = byExercise.get(l.exerciseName) ?? {
+            sets: 0,
+            top: { weight_kg: null, reps: 0 },
+          };
           entry.sets += 1;
-          if (w > entry.top.weight_kg) entry.top = { weight_kg: w, reps: l.reps };
+          const better =
+            w != null
+              ? entry.top.weight_kg == null || w > entry.top.weight_kg
+              : entry.top.weight_kg == null && l.reps > entry.top.reps;
+          if (better) entry.top = { weight_kg: w, reps: l.reps };
           byExercise.set(l.exerciseName, entry);
         }
 
@@ -1651,10 +1679,16 @@ export async function executeCoachTool(
           day: day.dayName,
           prescribed: prescribed.map((e) => {
             const mine = logs.filter((l) => l.exerciseName === e.name);
-            const top = mine.reduce<{ weight_kg: number; reps: number } | null>((best, l) => {
-              const kg = Number(l.weightKg);
-              return !best || kg > best.weight_kg ? { weight_kg: kg, reps: l.reps } : best;
-            }, null);
+            // A loaded set wins; bodyweight work falls back to the best rep set.
+            let top: { weight_kg: number | null; reps: number } | null = null;
+            for (const l of mine) {
+              const kg = l.weightKg == null ? null : Number(l.weightKg);
+              const better =
+                top == null ||
+                (kg != null && (top.weight_kg == null || kg > top.weight_kg)) ||
+                (kg == null && top.weight_kg == null && l.reps > top.reps);
+              if (better) top = { weight_kg: kg, reps: l.reps };
+            }
             return {
               name: e.name,
               target_sets: e.sets,
@@ -1773,10 +1807,21 @@ export async function executeCoachTool(
           select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
         });
         if (!row) return { error: "That logged set wasn't found." };
-        const weight = positiveNumber(args.weight_kg, 9999);
         const reps = positiveInt(args.reps, 9999);
-        if (weight == null || reps == null) {
-          return { error: "Provide a positive weight and a whole number of reps." };
+        if (reps == null) {
+          return { error: "Provide a whole number of reps." };
+        }
+        let weight: number | null;
+        if (args.bodyweight === true) {
+          weight = null;
+        } else if (args.weight_kg === undefined || args.weight_kg === null) {
+          // Omitted: keep the set's current load rather than silently clearing it.
+          weight = row.weightKg == null ? null : Number(row.weightKg);
+        } else {
+          weight = positiveNumber(args.weight_kg, 9999);
+          if (weight == null) {
+            return { error: "Provide a positive weight in kg, or bodyweight=true." };
+          }
         }
         return {
           __proposal: {
@@ -1785,7 +1830,10 @@ export async function executeCoachTool(
             set_id: row.id,
             date: fmtDate(row.date),
             exercise: row.exerciseName,
-            from: { weight_kg: Number(row.weightKg), reps: row.reps },
+            from: {
+              weight_kg: row.weightKg == null ? null : Number(row.weightKg),
+              reps: row.reps,
+            },
             to: { weight_kg: weight, reps },
           },
         };
@@ -1805,7 +1853,7 @@ export async function executeCoachTool(
             set_id: row.id,
             date: fmtDate(row.date),
             exercise: row.exerciseName,
-            weight_kg: Number(row.weightKg),
+            weight_kg: row.weightKg == null ? null : Number(row.weightKg),
             reps: row.reps,
           },
         };

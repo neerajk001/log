@@ -39,6 +39,8 @@ function topSetByWeek(
   let max: number | null = null;
   for (const l of lifts) {
     if (l.date < weekStart || l.date >= weekEnd) continue;
+    // Bodyweight sets have no load to compare; they still count in week.sets.
+    if (l.weightKg == null) continue;
     const w = Number(l.weightKg);
     if (max == null || w > max) max = w;
   }

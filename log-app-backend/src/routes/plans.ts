@@ -291,7 +291,10 @@ router.get(
               set_targets: exercise.set_targets ?? null,
               logged: logs.length > 0,
               last_log: lastLog
-                ? { weight_kg: lastLog.weightKg, reps: lastLog.reps }
+                ? {
+                    weight_kg: lastLog.weightKg == null ? null : Number(lastLog.weightKg),
+                    reps: lastLog.reps,
+                  }
                 : null,
             };
           }),

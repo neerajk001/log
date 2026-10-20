@@ -57,7 +57,8 @@ model LiftLog {
   userId        String     @map("user_id") @db.Uuid
   date          DateTime   @db.Date
   exerciseName  String     @map("exercise_name") @db.Text
-  weightKg      Decimal    @map("weight_kg") @db.Decimal(6, 2)
+  /// Null = bodyweight set (reps only), e.g. a hanging leg raise.
+  weightKg      Decimal?   @map("weight_kg") @db.Decimal(6, 2)
   reps          Int
   planDayId     String?    @map("plan_day_id") @db.Uuid
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()

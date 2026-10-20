@@ -11,7 +11,8 @@ type LiftLogRecord = {
   userId: string;
   date: Date;
   exerciseName: string;
-  weightKg: Prisma.Decimal;
+  /** Null = bodyweight set (reps only). */
+  weightKg: Prisma.Decimal | null;
   reps: number;
   planDayId: string | null;
 };
@@ -33,18 +34,23 @@ export function serializeLiftLog(log: Omit<LiftLogRecord, "userId"> | LiftLogRec
     id: log.id,
     date: log.date.toISOString().slice(0, 10),
     exercise_name: log.exerciseName,
-    weight_kg: Number(log.weightKg),
+    weight_kg: log.weightKg == null ? null : Number(log.weightKg),
     reps: log.reps,
     plan_day_id: log.planDayId,
   };
 }
 
 function sameLiftRequest(log: LiftLogRecord, userId: string, input: LiftLogInput): boolean {
+  const weightMatches =
+    log.weightKg == null
+      ? input.weight_kg == null
+      : input.weight_kg != null &&
+        log.weightKg.equals(new Prisma.Decimal(input.weight_kg).toDecimalPlaces(2));
   return (
     log.userId === userId &&
     log.date.toISOString().slice(0, 10) === input.date &&
     log.exerciseName === input.exercise_name &&
-    log.weightKg.equals(new Prisma.Decimal(input.weight_kg).toDecimalPlaces(2)) &&
+    weightMatches &&
     log.reps === input.reps &&
     log.planDayId === (input.plan_day_id ?? null)
   );
@@ -96,7 +102,7 @@ export async function createLiftLogIdempotent(
         userId,
         date: new Date(input.date),
         exerciseName: input.exercise_name,
-        weightKg: input.weight_kg,
+        weightKg: input.weight_kg ?? null,
         reps: input.reps,
         planDayId: input.plan_day_id ?? null,
       },
@@ -119,11 +125,11 @@ export async function createLiftLogIdempotent(
   }
 }
 
-/** Update the weight/reps of one owned set. Returns null when not found. */
+/** Update the load/reps of one owned set. Returns null when not found. */
 export async function updateLiftLog(
   userId: string,
   id: string,
-  input: { weight_kg: number; reps: number },
+  input: { weight_kg: number | null; reps: number },
   client: LiftLogClient = prisma,
 ): Promise<LiftLogRecord | null> {
   const result = await client.liftLog.updateMany({
@@ -136,7 +142,8 @@ export async function updateLiftLog(
 
 /** One set of a previous session, in the order it was logged. */
 export interface ExerciseSet {
-  weight_kg: number;
+  /** Null = bodyweight set (reps only). */
+  weight_kg: number | null;
   reps: number;
 }
 
@@ -207,7 +214,9 @@ export async function getLiftMetrics(
 
   for (const row of rows) {
     const iso = row.date.toISOString().slice(0, 10);
-    const kg = Number(row.weightKg);
+    // Bodyweight sets still count as work (and in `days`), but they have no load
+    // to add to volume or compare as a record.
+    const kg = row.weightKg == null ? null : Number(row.weightKg);
     const inCurrent = iso >= opts.from && iso <= opts.to;
     const inPrevious = iso >= opts.prevFrom && iso <= opts.prevTo;
     if (!inCurrent && !inPrevious) continue;
@@ -226,7 +235,7 @@ export async function getLiftMetrics(
         previousTopKg: 0,
       };
 
-    if (kg > entry.bestKg) {
+    if (kg != null && kg > entry.bestKg) {
       entry.prevBestKg = entry.bestKg;
       entry.bestKg = kg;
       entry.bestReps = row.reps;
@@ -236,9 +245,11 @@ export async function getLiftMetrics(
     if (inCurrent) {
       dayCounts.set(iso, (dayCounts.get(iso) ?? 0) + 1);
       entry.sets += 1;
-      entry.volume += kg * row.reps;
-      entry.currentTopKg = Math.max(entry.currentTopKg, kg);
-    } else {
+      if (kg != null) {
+        entry.volume += kg * row.reps;
+        entry.currentTopKg = Math.max(entry.currentTopKg, kg);
+      }
+    } else if (kg != null) {
       entry.previousTopKg = Math.max(entry.previousTopKg, kg);
     }
 
@@ -291,9 +302,10 @@ export async function getLiftSummary(
 
   // One row per exercise: newest session, heaviest set of that session — the same
   // rule the client applied in JS, and strictly before the athlete's today.
+  // Bodyweight sets (null) sort after weighted ones, so a loaded set stays the cue.
   const lastByExercise = await client.liftLog.findMany({
     where: { userId, exerciseName: { in: names }, date: { lt: before } },
-    orderBy: [{ date: "desc" }, { weightKg: "desc" }],
+    orderBy: [{ date: "desc" }, { weightKg: { sort: "desc", nulls: "last" } }],
     distinct: ["exerciseName"],
     select: liftLogSelect,
   });
@@ -317,7 +329,10 @@ export async function getLiftSummary(
     const sets = rows
       .filter((row) => row.date.toISOString().slice(0, 10) === date)
       .slice(0, MAX_SETS_PER_SESSION)
-      .map((row) => ({ weight_kg: Number(row.weightKg), reps: row.reps }));
+      .map((row) => ({
+        weight_kg: row.weightKg == null ? null : Number(row.weightKg),
+        reps: row.reps,
+      }));
     if (sets.length > 0) lastSetsByExercise[exercise] = { date, sets };
   }
 

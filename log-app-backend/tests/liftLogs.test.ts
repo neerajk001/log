@@ -75,6 +75,13 @@ describe("getLiftMetrics", () => {
     reps,
   });
 
+  const bodyweightRow = (date: string, exerciseName: string, reps: number) => ({
+    date: new Date(`${date}T00:00:00Z`),
+    exerciseName,
+    weightKg: null,
+    reps,
+  });
+
   function metricsClient(rows: unknown[]) {
     return { liftLog: { findMany: vi.fn().mockResolvedValue(rows) } };
   }
@@ -126,6 +133,37 @@ describe("getLiftMetrics", () => {
     expect(metrics.exercises[0].bestKg).toBe(80);
     expect(metrics.exercises[0].prevBestKg).toBe(0);
   });
+
+  it("counts bodyweight sets but keeps them out of load metrics", async () => {
+    const mock = metricsClient([
+      bodyweightRow("2026-10-02", "Hanging Leg Raise", 12),
+      bodyweightRow("2026-10-04", "Hanging Leg Raise", 15),
+      bodyweightRow("2026-10-04", "Bench Press", 20),
+      row("2026-10-04", "Bench Press", 80, 5),
+    ]);
+
+    const metrics = await getLiftMetrics(userId, windows, mock as never);
+
+    // Bodyweight work still counts as training.
+    expect(metrics.days).toEqual([
+      { date: "2026-10-02", sets: 1 },
+      { date: "2026-10-04", sets: 3 },
+    ]);
+
+    const legRaise = metrics.exercises.find((e) => e.name === "Hanging Leg Raise")!;
+    expect(legRaise.sets).toBe(2);
+    expect(legRaise.volume).toBe(0);
+    expect(legRaise.bestKg).toBe(0);
+    expect(legRaise.currentTopKg).toBe(0);
+
+    // A bodyweight set must not become a "0 kg" record for a loaded exercise.
+    const bench = metrics.exercises.find((e) => e.name === "Bench Press")!;
+    expect(bench.sets).toBe(2);
+    expect(bench.volume).toBe(80 * 5);
+    expect(bench.bestKg).toBe(80);
+    expect(bench.prevBestKg).toBe(0);
+    expect(bench.currentTopKg).toBe(80);
+  });
 });
 
 /**
@@ -169,7 +207,10 @@ describe("getLiftSummary", () => {
     const lastArgs = mock.liftLog.findMany.mock.calls[0][0];
     expect(lastArgs.where.date).toEqual({ lt: new Date("2026-10-08T00:00:00Z") });
     expect(lastArgs.distinct).toEqual(["exerciseName"]);
-    expect(lastArgs.orderBy).toEqual([{ date: "desc" }, { weightKg: "desc" }]);
+    expect(lastArgs.orderBy).toEqual([
+      { date: "desc" },
+      { weightKg: { sort: "desc", nulls: "last" } },
+    ]);
   });
 
   it("returns each exercise's previous session sets in logged order", async () => {
@@ -211,6 +252,30 @@ describe("getLiftSummary", () => {
       lt: new Date("2026-10-08T00:00:00Z"),
     });
     expect(setsArgs.orderBy).toEqual([{ date: "asc" }, { createdAt: "asc" }]);
+  });
+
+  it("returns a null weight for a bodyweight session's sets", async () => {
+    const mock = summaryClient({
+      names: [{ exerciseName: "Hanging Leg Raise" }],
+      last: [record({ id: "last", exerciseName: "Hanging Leg Raise", weightKg: null })],
+      sets: [
+        record({
+          id: "set-1",
+          exerciseName: "Hanging Leg Raise",
+          weightKg: null,
+          reps: 12,
+          date: new Date("2026-10-06"),
+          createdAt: new Date("2026-10-06T09:00:00Z"),
+        }),
+      ],
+    });
+
+    const summary = await getLiftSummary(userId, { days: 120, before: "2026-10-08" }, mock as never);
+
+    expect(summary.lastSetsByExercise["Hanging Leg Raise"]).toEqual({
+      date: "2026-10-06",
+      sets: [{ weight_kg: null, reps: 12 }],
+    });
   });
 
   it("caps a session's set list so the payload stays bounded", async () => {
@@ -258,6 +323,14 @@ describe("liftLogSchema", () => {
   it("accepts omitted and valid client request IDs", () => {
     expect(liftLogSchema.safeParse(input({ id: undefined })).success).toBe(true);
     expect(liftLogSchema.safeParse(input()).success).toBe(true);
+  });
+
+  it("accepts a bodyweight set with no load", () => {
+    expect(liftLogSchema.safeParse(input({ weight_kg: null })).success).toBe(true);
+  });
+
+  it("still rejects a zero weight", () => {
+    expect(liftLogSchema.safeParse(input({ weight_kg: 0 })).success).toBe(false);
   });
 
   it("rejects malformed client request IDs", () => {
@@ -339,6 +412,32 @@ describe("createLiftLogIdempotent", () => {
       ),
     ).rejects.toMatchObject({ statusCode: 404, code: "NOT_FOUND" });
   });
+
+  it("creates and replays a bodyweight set", async () => {
+    const mock = client({ created: record({ weightKg: null }) });
+
+    const created = await createLiftLogIdempotent(userId, input({ weight_kg: null }), mock as never);
+    expect(created.created).toBe(true);
+    expect(mock.liftLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ weightKg: null }),
+      }),
+    );
+
+    const replay = await createLiftLogIdempotent(
+      userId,
+      input({ weight_kg: null }),
+      client({ existing: record({ weightKg: null }) }) as never,
+    );
+    expect(replay.created).toBe(false);
+  });
+
+  it("rejects the same ID when only the load differs from null", async () => {
+    const mock = client({ existing: record({ weightKg: null }) });
+    await expect(
+      createLiftLogIdempotent(userId, input({ weight_kg: 60 }), mock as never),
+    ).rejects.toSatisfy(expectConflict);
+  });
 });
 
 describe("serializeLiftLog", () => {
@@ -352,11 +451,19 @@ describe("serializeLiftLog", () => {
       plan_day_id: null,
     });
   });
+
+  it("returns null for a bodyweight set", () => {
+    expect(serializeLiftLog(record({ weightKg: null }))).toMatchObject({ weight_kg: null });
+  });
 });
 
 describe("liftLogUpdateSchema", () => {
   it("accepts a positive weight and reps", () => {
     expect(liftLogUpdateSchema.safeParse({ weight_kg: 62.5, reps: 8 }).success).toBe(true);
+  });
+
+  it("accepts clearing the load for a bodyweight set", () => {
+    expect(liftLogUpdateSchema.safeParse({ weight_kg: null, reps: 12 }).success).toBe(true);
   });
 
   it("rejects non-positive or missing values", () => {
@@ -392,5 +499,24 @@ describe("updateLiftLog", () => {
     expect(
       await updateLiftLog(userId, requestId, { weight_kg: 62.5, reps: 8 }, mock as never),
     ).toBeNull();
+  });
+
+  it("clears the load when a set becomes bodyweight", async () => {
+    const mock = client();
+    mock.liftLog.updateMany.mockResolvedValue({ count: 1 });
+    mock.liftLog.findUnique.mockResolvedValue(record({ weightKg: null, reps: 12 }));
+
+    const result = await updateLiftLog(
+      userId,
+      requestId,
+      { weight_kg: null, reps: 12 },
+      mock as never,
+    );
+
+    expect(mock.liftLog.updateMany).toHaveBeenCalledWith({
+      where: { id: requestId, userId },
+      data: { weightKg: null, reps: 12 },
+    });
+    expect(result?.weightKg).toBeNull();
   });
 });

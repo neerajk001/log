@@ -42,7 +42,7 @@ router.post("/lift", requireAuth, validate(liftLogSchema), async (req, res: Resp
       id: log.id,
       created,
       exercise_name: log.exerciseName,
-      weight_kg: Number(log.weightKg),
+      weight_kg: log.weightKg == null ? null : Number(log.weightKg),
       reps: log.reps,
       plan_day_id: log.planDayId,
     });
@@ -166,7 +166,7 @@ router.put(
   validate(liftLogUpdateSchema),
   async (req, res: Response) => {
     const { id } = req.params as unknown as { id: string };
-    const input = req.body as { weight_kg: number; reps: number };
+    const input = req.body as { weight_kg: number | null; reps: number };
 
     const log = await updateLiftLog(req.userId, id, input);
     if (!log) {
