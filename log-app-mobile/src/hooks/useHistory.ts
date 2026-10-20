@@ -254,7 +254,10 @@ export function useHistory(rangeDays: number) {
       const day = ensure(group.date);
       day.lifts = group.logs;
       day.exercises = Array.from(new Set(group.logs.map((l) => l.exercise_name)));
-      day.volume = group.logs.reduce((sum, l) => sum + Number(l.weight_kg) * l.reps, 0);
+      day.volume = group.logs.reduce(
+        (sum, l) => sum + (l.weight_kg == null ? 0 : Number(l.weight_kg) * l.reps),
+        0,
+      );
     }
     for (const dl of dailyLogs) ensure(dl.date).daily = dl;
     for (const a of activityLogs) ensure(a.date).activities.push(a);

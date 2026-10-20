@@ -9,10 +9,11 @@ import { muscleTagStyle, typeTagStyle } from "../utils/tags";
 import { parsePositiveInt, parsePositiveNumber, requestIdForAttempt } from "../utils/parse";
 import { buildSetSeeds } from "../utils/liftPrefill";
 import { formatSetList, formatTargetWeight, planHintFor } from "../utils/planTargets";
+import { formatSetLoad, inferLoadMode, type LoadMode } from "../utils/bodyweight";
 import { formatMediumDate } from "../utils/date";
 import type { LastSessionSets, LiftLog, LiftLogCreate, PlanSetTarget } from "../api/types";
 import { successTick } from "../hooks/useHaptics";
-import { StepField } from "./ui/controls";
+import { SegmentedControl, StepField } from "./ui/controls";
 import { IconBadge, Tag } from "./ui/primitives";
 
 const AUTOSAVE_DELAY_MS = 1200;
@@ -28,6 +29,8 @@ interface Draft {
   weight: string;
   reps: string;
   status: RowStatus;
+  /** What the server actually stored, so a saved row keeps its load across mode switches. */
+  savedWeight?: number | null;
 }
 
 function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
@@ -42,11 +45,10 @@ function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
   };
 }
 
-function canLogDraft(draft: Draft): boolean {
-  return (
-    parsePositiveNumber(draft.weight.trim(), 9999) != null &&
-    parsePositiveInt(draft.reps.trim(), 9999) != null
-  );
+function canLogDraft(draft: Draft, bodyweight: boolean): boolean {
+  const reps = parsePositiveInt(draft.reps.trim(), 9999) != null;
+  if (!reps) return false;
+  return bodyweight || parsePositiveNumber(draft.weight.trim(), 9999) != null;
 }
 
 export function ExerciseRow({
@@ -76,7 +78,8 @@ export function ExerciseRow({
   /** Target weight from the plan; used to pre-fill the inputs. */
   plannedWeight?: number | null;
   muscle?: string;
-  lastLog?: { weight_kg: number; reps: number } | null;
+  /** The previous session's top set, when no per-set history exists. */
+  lastLog?: { weight_kg: number | null; reps: number } | null;
   /** The previous session in full (date + every set), for the reference line. */
   lastSession?: LastSessionSets | null;
   /** The plan's per-set targets, in order — shown as the caption under each row. */
@@ -106,6 +109,8 @@ export function ExerciseRow({
   const scopeKey = `${date ?? ""}:${planDayId ?? ""}:${name}`;
   const initializedScopeRef = useRef("");
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [loadMode, setLoadMode] = useState<LoadMode>("kg");
+  const loadModeRef = useRef<LoadMode>("kg");
   const [historyOpen, setHistoryOpen] = useState(false);
   const draftsRef = useRef<Draft[]>([]);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -132,11 +137,20 @@ export function ExerciseRow({
     timers.current = {};
   }, []);
 
+  /** Weighted vs bodyweight for this exercise — one tap, applies to every row. */
+  const changeLoadMode = useCallback((mode: LoadMode) => {
+    loadModeRef.current = mode;
+    setLoadMode(mode);
+  }, []);
+
   useEffect(() => {
     if (!expanded || logsLoading) return;
     if (initializedScopeRef.current === scopeKey) return;
     initializedScopeRef.current = scopeKey;
     setHistoryOpen(false);
+    const mode = inferLoadMode({ name, lastSets, lastLog, plannedWeight, setTargets });
+    loadModeRef.current = mode;
+    setLoadMode(mode);
     const count = Math.max(1, sets - confirmedLogged.length);
     // Pre-fill set by set from the previous session (a pyramid comes back as it
     // was lifted); extra rows repeat its last set. No history => the plan target.
@@ -148,6 +162,7 @@ export function ExerciseRow({
       plannedWeight,
       plannedReps: reps,
       lastLog,
+      bodyweight: mode === "bw",
     });
     const next = seeds.map((seed, draftIndex) =>
       makeDraft(confirmedLogged.length + draftIndex + 1, seed.weight, seed.reps),
@@ -160,6 +175,7 @@ export function ExerciseRow({
     lastLog,
     lastSets,
     logsLoading,
+    name,
     plannedWeight,
     reps,
     scopeKey,
@@ -177,16 +193,18 @@ export function ExerciseRow({
 
       const draft = draftsRef.current.find((entry) => entry.key === key);
       if (!draft) return Promise.resolve();
-      const weight = parsePositiveNumber(draft.weight.trim(), 9999);
+      const bodyweight = loadModeRef.current === "bw";
+      const parsedWeight = parsePositiveNumber(draft.weight.trim(), 9999);
       const repsNum = parsePositiveInt(draft.reps.trim(), 9999);
-      if (weight == null || repsNum == null) return Promise.resolve();
+      if (repsNum == null || (!bodyweight && parsedWeight == null)) return Promise.resolve();
+      const weight = bodyweight ? null : parsedWeight;
 
       // Same values => same request id (a lost response replays safely);
       // edited values => a fresh id, because replaying the old one with a
       // changed payload is a permanent 409.
       const { requestId, lastAttempt } = requestIdForAttempt(
         draft,
-        `${weight}|${repsNum}`,
+        `${weight ?? "bw"}|${repsNum}`,
         () => Crypto.randomUUID(),
       );
       const requestScope = scopeKey;
@@ -210,7 +228,7 @@ export function ExerciseRow({
           // doesn't vanish and the set doesn't jump to the list above.
           applyDrafts((current) =>
             current.map((entry) =>
-              entry.key === key ? { ...entry, status: "saved" } : entry,
+              entry.key === key ? { ...entry, status: "saved", savedWeight: weight } : entry,
             ),
           );
           successTick();
@@ -322,12 +340,13 @@ export function ExerciseRow({
     [activeRequestIds, logged],
   );
   const canExpand = !!onToggle;
+  const bodyweight = loadMode === "bw";
   const targetText = formatTargetWeight({ sets, weight_kg: plannedWeight, set_targets: setTargets });
   /** One line of what was lifted last time; tapping it opens the full session. */
   const lastLine = lastSession
     ? `Last (${formatMediumDate(lastSession.date)}): ${formatSetList(lastSession.sets) ?? "no sets"}`
     : lastLog
-      ? `Last: ${lastLog.weight_kg} kg × ${lastLog.reps} reps`
+      ? `Last: ${formatSetLoad(lastLog.weight_kg, lastLog.reps)} reps`
       : null;
 
   return (
@@ -402,9 +421,7 @@ export function ExerciseRow({
           {lastSession.sets.map((set, i) => (
             <View key={`${i}-${set.weight_kg}-${set.reps}`} style={styles.historyRow}>
               <Text style={styles.historyIndex}>{i + 1}</Text>
-              <Text style={typography.small}>
-                {set.weight_kg} kg × {set.reps}
-              </Text>
+              <Text style={typography.small}>{formatSetLoad(set.weight_kg, set.reps)}</Text>
             </View>
           ))}
         </View>
@@ -412,13 +429,21 @@ export function ExerciseRow({
 
       {expanded ? (
         <View style={styles.expanded}>
+          <SegmentedControl
+            options={[
+              { value: "kg", label: "Weighted" },
+              { value: "bw", label: "Bodyweight" },
+            ]}
+            value={loadMode}
+            onChange={changeLoadMode}
+          />
           {visibleLogged.length > 0 ? (
             <View style={styles.loggedList}>
               {visibleLogged.map((entry) => (
                 <View key={entry.id} style={styles.loggedRow}>
                   <Ionicons name="checkmark-circle" size={16} color={colors.success} />
                   <Text style={typography.bodyStrong}>
-                    {entry.weight_kg} kg × {entry.reps}
+                    {formatSetLoad(entry.weight_kg, entry.reps)}
                   </Text>
                   <Pressable
                     onPress={() => confirmDelete(entry.id)}
@@ -450,7 +475,7 @@ export function ExerciseRow({
                   </View>
                   <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                   <Text style={[typography.bodyStrong, styles.savedValues]}>
-                    {draft.weight} kg × {draft.reps}
+                    {formatSetLoad(draft.savedWeight, parsePositiveInt(draft.reps, 9999) ?? 0)}
                   </Text>
                   <Pressable
                     onPress={() => deleteSaved(draft)}
@@ -468,15 +493,21 @@ export function ExerciseRow({
                   <View style={styles.setBadge}>
                     <Text style={styles.setBadgeText}>{draft.ordinal}</Text>
                   </View>
-                  <StepField
-                    value={draft.weight}
-                    onChangeText={(text) => patchDraft(draft.key, { weight: text })}
-                    onFocus={() => handleFocus(draft.key)}
-                    onBlur={() => handleBlur(draft.key)}
-                    placeholder="kg"
-                    label="Weight"
-                    editable={draft.status !== "saving"}
-                  />
+                  {bodyweight ? (
+                    <View style={styles.bwField}>
+                      <Text style={styles.bwFieldText}>BW</Text>
+                    </View>
+                  ) : (
+                    <StepField
+                      value={draft.weight}
+                      onChangeText={(text) => patchDraft(draft.key, { weight: text })}
+                      onFocus={() => handleFocus(draft.key)}
+                      onBlur={() => handleBlur(draft.key)}
+                      placeholder="kg"
+                      label="Weight"
+                      editable={draft.status !== "saving"}
+                    />
+                  )}
                   <Text style={styles.x}>×</Text>
                   <StepField
                     value={draft.reps}
@@ -499,14 +530,14 @@ export function ExerciseRow({
                         clearTimer(draft.key);
                         void commitSet(draft.key);
                       }}
-                      disabled={!canLogDraft(draft)}
+                      disabled={!canLogDraft(draft, bodyweight)}
                       hitSlop={8}
                       style={styles.tick}
                     >
                       <Ionicons
                         name="checkmark-circle"
                         size={26}
-                        color={canLogDraft(draft) ? colors.primary : colors.borderStrong}
+                        color={canLogDraft(draft, bodyweight) ? colors.primary : colors.borderStrong}
                       />
                     </Pressable>
                   )}
@@ -597,6 +628,17 @@ const useStyles = makeUseStyles((t) =>
     planHint: { flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 36 },
     planHintText: { ...t.typography.caption, color: t.colors.textDim },
     setRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    bwField: {
+      flex: 1,
+      height: 44,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      backgroundColor: t.colors.surfaceAlt,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    bwFieldText: { fontSize: 14, fontWeight: "700", color: t.colors.textDim, letterSpacing: 0.5 },
     setRowError: { borderWidth: 1, borderColor: t.colors.danger, borderRadius: radii.sm, padding: 2 },
     setBadge: {
       width: 28,

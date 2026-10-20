@@ -11,6 +11,7 @@ import { useLiftLogsApi } from "../../api/liftLogs";
 import { useMealsApi } from "../../api/meals";
 import { setPendingPlan } from "../../state/parsedPlan";
 import { formatMediumDate } from "../../utils/date";
+import { formatSetLoad } from "../../utils/bodyweight";
 import type { IoniconName } from "../ui/primitives";
 import type { ChatProposal } from "../../hooks/useCoachChat";
 import type { MealItem } from "../../api/types";
@@ -233,7 +234,7 @@ export function ProposalCard({
       case "set_delete":
         Alert.alert(
           "Delete set?",
-          `${proposal.exercise} · ${proposal.weight_kg} kg × ${proposal.reps} will be removed.`,
+          `${proposal.exercise} · ${formatSetLoad(proposal.weight_kg, proposal.reps)} will be removed.`,
           [
             { text: "Cancel", style: "cancel" },
             { text: "Delete", style: "destructive", onPress: () => void applyDelete() },
@@ -268,9 +269,9 @@ export function ProposalCard({
       case "plan_delete":
         return `Delete "${proposal.plan_name}"? This can't be undone.`;
       case "set_update":
-        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — ${proposal.from.weight_kg} kg × ${proposal.from.reps} → ${proposal.to.weight_kg} kg × ${proposal.to.reps}`;
+        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — ${formatSetLoad(proposal.from.weight_kg, proposal.from.reps)} → ${formatSetLoad(proposal.to.weight_kg, proposal.to.reps)}`;
       case "set_delete":
-        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${proposal.weight_kg} kg × ${proposal.reps}`;
+        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${formatSetLoad(proposal.weight_kg, proposal.reps)}`;
       case "meal_log": {
         const provenance =
           proposal.source === "photo"

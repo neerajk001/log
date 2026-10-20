@@ -27,7 +27,8 @@ export interface LiftLog {
   id: string;
   date: string;
   exercise_name: string;
-  weight_kg: number;
+  /** Null = bodyweight set (reps only). */
+  weight_kg: number | null;
   reps: number;
   plan_day_id: string | null;
 }
@@ -36,7 +37,8 @@ export interface LiftLogCreate {
   id?: string;
   date: string;
   exercise_name: string;
-  weight_kg: number;
+  /** Null = bodyweight set (reps only). */
+  weight_kg?: number | null;
   reps: number;
   plan_day_id?: string | null;
 }
@@ -140,7 +142,7 @@ export interface ParsedPlanPreview {
 export interface PlanTodayExercise extends PlanExercise {
   weight_kg: number | null;
   logged: boolean;
-  last_log: { weight_kg: number; reps: number } | null;
+  last_log: { weight_kg: number | null; reps: number } | null;
 }
 
 export interface PlanDayToday {
@@ -378,15 +380,15 @@ export type CoachProposal = (
       set_id: string;
       date: string;
       exercise: string;
-      from: { weight_kg: number; reps: number };
-      to: { weight_kg: number; reps: number };
+      from: { weight_kg: number | null; reps: number };
+      to: { weight_kg: number | null; reps: number };
     }
   | {
       kind: "set_delete";
       set_id: string;
       date: string;
       exercise: string;
-      weight_kg: number;
+      weight_kg: number | null;
       reps: number;
     }
   | {
@@ -440,7 +442,7 @@ export interface DismissedMeal {
 /** One previous session's sets, in the order they were logged. */
 export interface LastSessionSets {
   date: string;
-  sets: { weight_kg: number; reps: number }[];
+  sets: { weight_kg: number | null; reps: number }[];
 }
 
 /** Recent exercise names, plus the top set from each one's previous session. */

@@ -21,7 +21,7 @@ export interface LiftSeedInput {
   /** Sets already logged today for this exercise. */
   loggedSetCount: number;
   /** The previous session's sets, in order. */
-  lastSets?: { weight_kg: number; reps: number }[] | null;
+  lastSets?: { weight_kg: number | null; reps: number }[] | null;
   /** The plan's per-set targets, in order. */
   setTargets?: { weight_kg?: number | null; reps?: string | null }[] | null;
   /** The plan's single target weight (fallback). */
@@ -29,7 +29,9 @@ export interface LiftSeedInput {
   /** The plan's rep scheme, e.g. "8-12" (its first number is used). */
   plannedReps?: string | null;
   /** The previous session's top set, when no per-set history exists. */
-  lastLog?: { weight_kg: number; reps: number } | null;
+  lastLog?: { weight_kg: number | null; reps: number } | null;
+  /** Bodyweight mode: seed reps only, never a load. */
+  bodyweight?: boolean;
 }
 
 /** First integer in a rep scheme, e.g. "8-12" → 8. */
@@ -47,6 +49,7 @@ export function buildSetSeeds({
   plannedWeight,
   plannedReps,
   lastLog,
+  bodyweight = false,
 }: LiftSeedInput): LiftSeed[] {
   const seeds: LiftSeed[] = [];
   for (let row = 0; row < count; row++) {
@@ -54,7 +57,10 @@ export function buildSetSeeds({
     // History first (what they actually did); repeat the final set beyond it.
     const history = lastSets?.[index] ?? lastSets?.[lastSets.length - 1] ?? lastLog ?? null;
     const target = setTargets?.[index] ?? null;
-    const weight = history?.weight_kg ?? target?.weight_kg ?? plannedWeight ?? null;
+    // A bodyweight exercise has no load to pre-fill, even if the plan mentions one.
+    const weight = bodyweight
+      ? null
+      : history?.weight_kg ?? target?.weight_kg ?? plannedWeight ?? null;
     const reps =
       history?.reps ?? firstInt(target?.reps) ?? firstInt(plannedReps) ?? lastLog?.reps ?? null;
     seeds.push({

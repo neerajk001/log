@@ -109,12 +109,17 @@ export function formatTargetWeight(exercise: {
   return `${unique[0]} → ${unique[unique.length - 1]} kg`;
 }
 
-/** `60 kg × 8` when every set matched, else `60/62.5/65 kg` — one line, no ellipsis. */
-export function formatSetList(sets: { weight_kg: number; reps: number }[]): string | null {
+/** `60 kg × 8` when every set matched, `BW × 8/8/10` for bodyweight — one line, no ellipsis. */
+export function formatSetList(sets: { weight_kg: number | null; reps: number }[]): string | null {
   if (sets.length === 0) return null;
-  const weights = [...new Set(sets.map((set) => set.weight_kg))];
+  const weights = [...new Set(sets.map((set) => set.weight_kg).filter((w): w is number => w != null))];
   const reps = [...new Set(sets.map((set) => set.reps))];
-  const weightText = weights.length === 1 ? `${weights[0]} kg` : `${weights.join("/")} kg`;
+  const weightText =
+    weights.length === 0
+      ? "BW"
+      : weights.length === 1
+        ? `${weights[0]} kg`
+        : `${weights.join("/")} kg`;
   if (reps.length === 1) return `${weightText} × ${reps[0]}`;
   return `${weightText} × ${sets.map((set) => set.reps).join("/")}`;
 }

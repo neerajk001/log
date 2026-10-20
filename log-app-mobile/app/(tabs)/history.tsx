@@ -27,6 +27,7 @@ import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { formatLongDate } from "../../src/utils/date";
 import { formatNumber, muscleGroupFor } from "../../src/utils/derive";
+import { formatSetLoad } from "../../src/utils/bodyweight";
 import { muscleTagStyle } from "../../src/utils/tags";
 import type { DailyLog } from "../../src/api/types";
 
@@ -286,7 +287,7 @@ export default function HistoryScreen() {
                         .map((l) => (
                           <View key={l.id} style={styles.setRow}>
                             <Text style={typography.small}>
-                              {l.weight_kg} kg × {l.reps}
+                              {formatSetLoad(l.weight_kg, l.reps)}
                             </Text>
                             <Pressable
                               onPress={() =>

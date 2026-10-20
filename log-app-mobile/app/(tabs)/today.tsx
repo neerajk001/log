@@ -160,7 +160,12 @@ export default function TodayScreen() {
     for (const g of groupedLifts) {
       const prev = lastByExercise.get(g.name)?.weight_kg ?? null;
       if (prev == null || prev <= 0) continue;
-      const top = g.sets.reduce((m, s) => Math.max(m, s.weight_kg), 0);
+      const top = g.sets.reduce(
+        (m, s) => (s.weight_kg == null ? m : Math.max(m, s.weight_kg)),
+        0,
+      );
+      // A bodyweight-only exercise has no load delta to show.
+      if (top <= 0) continue;
       const delta = Math.round((top - prev) * 10) / 10;
       if (delta !== 0) map.set(g.name, delta);
     }

@@ -1,9 +1,9 @@
 import type { LiftLog } from "../api/types";
 import { addDays, startOfWeek, todayLocal } from "./date";
 
-/** Total tonnage for a single logged set. */
+/** Total tonnage for a single logged set. Bodyweight sets carry no load. */
 export function volumeOf(log: LiftLog): number {
-  return Number(log.weight_kg) * Number(log.reps);
+  return log.weight_kg == null ? 0 : Number(log.weight_kg) * Number(log.reps);
 }
 
 export function totalVolume(logs: LiftLog[]): number {
@@ -102,6 +102,7 @@ export function strengthChangePct(logs: LiftLog[], from: string = todayLocal()):
     const map = new Map<string, number>();
     for (const l of logs) {
       if (l.date < start || l.date >= end) continue;
+      if (l.weight_kg == null) continue;
       const w = Number(l.weight_kg);
       map.set(l.exercise_name, Math.max(map.get(l.exercise_name) ?? 0, w));
     }

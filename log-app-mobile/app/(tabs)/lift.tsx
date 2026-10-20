@@ -20,13 +20,14 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DayBanner } from "../../src/components/DayBanner";
 import { ExerciseRow } from "../../src/components/ExerciseRow";
 import { Banner, Button, Card, EmptyState, LoadingState, ErrorState, IconBadge } from "../../src/components/ui/primitives";
-import { Chip, ChipRow, IconButton, OverflowMenu, StepField, TextField } from "../../src/components/ui/controls";
+import { Chip, ChipRow, IconButton, OverflowMenu, SegmentedControl, StepField, TextField } from "../../src/components/ui/controls";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { usePlans } from "../../src/hooks/usePlans";
 import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { muscleGroupsForDay } from "../../src/utils/derive";
+import { isBodyweightName, type LoadMode } from "../../src/utils/bodyweight";
 import { requestIdForAttempt } from "../../src/utils/parse";
 import { successTick } from "../../src/hooks/useHaptics";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
@@ -76,7 +77,13 @@ export default function LiftScreen() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [quickName, setQuickName] = useState("");
   const [quickSets, setQuickSets] = useState<QuickSet[]>([blankQuickSet()]);
+  const [quickModeOverride, setQuickModeOverride] = useState<LoadMode | null>(null);
   const [quickSaving, setQuickSaving] = useState(false);
+
+  // Bodyweight exercises are detected from the name; the toggle below overrides it.
+  const quickMode: LoadMode =
+    quickModeOverride ?? (isBodyweightName(quickName) ? "bw" : "kg");
+  const quickBodyweight = quickMode === "bw";
 
   const day = useMemo(() => {
     if (overrideDayId) return days.find((d) => d.id === overrideDayId) ?? rotatedDay;
@@ -117,13 +124,23 @@ export default function LiftScreen() {
       if (name === quickName) return;
       setQuickName(name);
       const last = lastSetsByExercise.get(name)?.sets ?? [];
+      // Last session wins; otherwise fall back to the name heuristic.
+      const mode: LoadMode =
+        last.length > 0
+          ? last.every((set) => set.weight_kg == null)
+            ? "bw"
+            : "kg"
+          : isBodyweightName(name)
+            ? "bw"
+            : "kg";
+      setQuickModeOverride(mode);
       if (last.length === 0) return;
       const hasTyped = quickSets.some((q) => q.weight.trim() !== "" || q.reps.trim() !== "");
       if (hasTyped) return;
       setQuickSets(
         last.map((set) => ({
           ...blankQuickSet(),
-          weight: String(set.weight_kg),
+          weight: set.weight_kg == null ? "" : String(set.weight_kg),
           reps: String(set.reps),
         })),
       );
@@ -142,14 +159,21 @@ export default function LiftScreen() {
         key: q.key,
         requestId: q.requestId,
         lastAttempt: q.lastAttempt,
-        weight: parseFloat(q.weight),
+        weight: quickBodyweight ? null : parseFloat(q.weight),
         reps: parseInt(q.reps, 10),
       }))
       .filter(
-        (q) => !Number.isNaN(q.weight) && q.weight > 0 && Number.isInteger(q.reps) && q.reps > 0,
+        (q) =>
+          Number.isInteger(q.reps) &&
+          q.reps > 0 &&
+          (quickBodyweight || (q.weight != null && !Number.isNaN(q.weight) && q.weight > 0)),
       );
     if (valid.length === 0) {
-      Alert.alert("Enter weight and reps for at least one set.");
+      Alert.alert(
+        quickBodyweight
+          ? "Enter reps for at least one set."
+          : "Enter weight and reps for at least one set.",
+      );
       return;
     }
     // Ids stay stable while the values are unchanged (a retry replays the same
@@ -158,7 +182,7 @@ export default function LiftScreen() {
     // so the next retry continues from the right request.
     const prepared = valid.map((q) => ({
       ...q,
-      ...requestIdForAttempt(q, `${q.weight}|${q.reps}`, () => Crypto.randomUUID()),
+      ...requestIdForAttempt(q, `${q.weight ?? "bw"}|${q.reps}`, () => Crypto.randomUUID()),
     }));
     setQuickSets((prev) =>
       prev.map((q) => {
@@ -197,7 +221,7 @@ export default function LiftScreen() {
       if (results.every((r) => r.ok)) setQuickName("");
     }
     setQuickSaving(false);
-  }, [quickName, quickSets, addEntry, today]);
+  }, [quickName, quickSets, quickBodyweight, addEntry, today]);
 
   const completedExercises = useMemo(() => {
     if (!day) return 0;
@@ -347,9 +371,21 @@ export default function LiftScreen() {
           <TextField
             label="Exercise"
             value={quickName}
-            onChangeText={setQuickName}
+            onChangeText={(text) => {
+              setQuickName(text);
+              // A typed name re-derives the mode; the toggle still overrides it.
+              setQuickModeOverride(null);
+            }}
             placeholder="e.g. Barbell Bench Press"
             autoCapitalize="words"
+          />
+          <SegmentedControl
+            options={[
+              { value: "kg", label: "Weighted" },
+              { value: "bw", label: "Bodyweight" },
+            ]}
+            value={quickMode}
+            onChange={(mode) => setQuickModeOverride(mode)}
           />
           {recent.length > 0 ? (
             <ChipRow>
@@ -361,15 +397,24 @@ export default function LiftScreen() {
           {quickSets.map((q, i) => (
             <View key={q.key} style={styles.quickSet}>
               <Text style={styles.quickNum}>{i + 1}</Text>
-              <View style={styles.quickSmall}>
-                {i === 0 ? <Text style={typography.caption}>Weight (kg)</Text> : null}
-                <StepField
-                  value={q.weight}
-                  onChangeText={(t) => patchQuickSet(q.key, { weight: t })}
-                  placeholder="60"
-                  label="Weight"
-                />
-              </View>
+              {quickBodyweight ? (
+                <View style={styles.quickSmall}>
+                  {i === 0 ? <Text style={typography.caption}>Load</Text> : null}
+                  <View style={styles.quickBw}>
+                    <Text style={styles.quickBwText}>BW</Text>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.quickSmall}>
+                  {i === 0 ? <Text style={typography.caption}>Weight (kg)</Text> : null}
+                  <StepField
+                    value={q.weight}
+                    onChangeText={(t) => patchQuickSet(q.key, { weight: t })}
+                    placeholder="60"
+                    label="Weight"
+                  />
+                </View>
+              )}
               <View style={styles.quickSmall}>
                 {i === 0 ? <Text style={typography.caption}>Reps</Text> : null}
                 <StepField
@@ -436,6 +481,16 @@ const useStyles = makeUseStyles((t) =>
     quickSet: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     quickNum: { fontSize: 13, fontWeight: "700", color: t.colors.textDim, width: 16, textAlign: "center" },
     quickSmall: { flex: 1 },
+    quickBw: {
+      height: 44,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      backgroundColor: t.colors.surfaceAlt,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    quickBwText: { fontSize: 14, fontWeight: "700", color: t.colors.textDim, letterSpacing: 0.5 },
     quickRemove: { padding: 4 },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },

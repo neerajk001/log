@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { spacing } from "../../theme/spacing";
 import { Button, Card, EmptyState, SectionHeader } from "../ui/primitives";
+import { formatSetLoad } from "../../utils/bodyweight";
 import type { LiftLog } from "../../api/types";
 
 export interface LiftGroup {
@@ -9,9 +10,13 @@ export interface LiftGroup {
   sets: LiftLog[];
 }
 
-/** Best set today, measured by weight then reps. */
+/** Best set today, measured by weight then reps (bodyweight sets never outrank loaded ones). */
 function topSet(sets: LiftLog[]): LiftLog {
-  return sets.reduce((best, s) => (s.weight_kg > best.weight_kg ? s : best), sets[0]);
+  return sets.reduce((best, s) => {
+    if (s.weight_kg == null) return best;
+    if (best.weight_kg == null) return s;
+    return s.weight_kg > best.weight_kg ? s : best;
+  }, sets[0]);
 }
 
 /** Exercises for the given day's lift groups — compact cards beside each other. */
@@ -54,7 +59,7 @@ export function RecentLiftsRow({
                   {g.name}
                 </Text>
                 <Text style={typography.bodyStrong} numberOfLines={1}>
-                  {top.weight_kg} × {top.reps}
+                  {formatSetLoad(top.weight_kg, top.reps)}
                 </Text>
                 <Text style={[typography.caption, styles.liftCaption]} numberOfLines={1}>
                   {caption}

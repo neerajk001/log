@@ -79,7 +79,7 @@ export function useLiftLogs(date: string) {
             id,
             date: requestData.date,
             exercise_name: requestData.exercise_name,
-            weight_kg: requestData.weight_kg,
+            weight_kg: requestData.weight_kg ?? null,
             reps: requestData.reps,
             plan_day_id: requestData.plan_day_id ?? null,
           },

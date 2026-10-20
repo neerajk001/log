@@ -20,7 +20,7 @@ export function useLiftLogsApi() {
           `/api/logs/lift/metrics?from=${from}&to=${to}&prev_from=${prevFrom}&prev_to=${prevTo}`,
         ),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
-      updateLiftLog: (id: string, data: { weight_kg: number; reps: number }) =>
+      updateLiftLog: (id: string, data: { weight_kg: number | null; reps: number }) =>
         client.put<LiftLog>(`/api/logs/lift/${id}`, data),
     }),
     [client],
