@@ -32,6 +32,8 @@ greyed placeholder text, not committed values.
 ## R3 — Lift log
 
 - R3.1 User can log exercise name, weight (kg), reps for the current date.
+  Bodyweight exercises (hanging leg raise, plank, push-ups, pull-ups, dips) log
+  reps only; the weight is optional for those sets.
 - R3.2 If an active workout plan exists and today maps to a plan day, the
   Lift screen shows that day's exercises as tap-to-log cards.
 - R3.3 If no plan exists, or the user wants to log something off-plan, a

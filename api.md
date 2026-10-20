@@ -74,6 +74,10 @@ Body:
 }
 ```
 
+`weight_kg` may be `null` for a bodyweight set (reps only) — e.g. a hanging leg
+raise or plank. Bodyweight sets still count as logged sets/reps, but they add no
+volume and never set a kg record or strength delta.
+
 Without `id`, each request appends a new set and returns `201`. With a new
 client UUID, the server creates that row and returns `201`; retrying the same
 UUID with the same authenticated user and identical payload returns the
@@ -90,14 +94,15 @@ Returns lift history for one exercise, used by Trends deltas. Also accepts
 
 The Lift screen's "recent exercises" chips, its `Last:` cue and its set-by-set
 pre-fill, computed server-side:
-`{ names: string[], last_by_exercise: LiftLog[], last_sets_by_exercise: Record<string, { date: string, sets: { weight_kg: number, reps: number }[] }> }`
+`{ names: string[], last_by_exercise: LiftLog[], last_sets_by_exercise: Record<string, { date: string, sets: { weight_kg: number | null, reps: number }[] }> }`
 — up to 12 distinct exercise names ordered by most recently used, plus one row per
 exercise (newest session, heaviest set of it) and that session's full set list in
 logged order (capped at 20 sets). `before` is the athlete's local date; the "last"
 rows are strictly before it, so today's own sets never count as "last". This
 replaced a client-side download of every set in the window.
 
-Each set is `{ weight_kg: number, reps: number }`.
+Each set is `{ weight_kg: number | null, reps: number }` — `null` means the set was
+bodyweight, so the lift rows pre-fill reps only.
 
 ## `GET /api/logs/lift/metrics?from&to&prev_from&prev_to`
 

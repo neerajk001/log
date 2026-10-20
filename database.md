@@ -51,7 +51,7 @@ R3.4).
 | user_id       | uuid, FK → users.id, not null | |
 | date          | date, not null | |
 | exercise_name | text, not null | free text or from plan |
-| weight_kg     | numeric(6,2), not null | |
+| weight_kg     | numeric(6,2), nullable | `null` = bodyweight set (reps only), e.g. hanging leg raise |
 | reps          | integer, not null | |
 | plan_day_id   | uuid, FK → plan_days.id, nullable | set if logged against a plan exercise |
 | created_at    | timestamptz, default now() | |
