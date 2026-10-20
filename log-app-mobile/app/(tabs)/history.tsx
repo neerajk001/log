@@ -5,30 +5,24 @@ import type { ErrorBoundaryProps } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { StatTile } from "../../src/components/StatTile";
 import { CalendarMonth } from "../../src/components/CalendarMonth";
 import {
   Banner,
   Button,
-  Card,
-  Divider,
   EmptyState,
   ErrorState,
   IconBadge,
   LoadingState,
-  Tag,
-  type IoniconName,
 } from "../../src/components/ui/primitives";
-import { Chip, ChipRow, OverflowMenu } from "../../src/components/ui/controls";
+import { OverflowMenu } from "../../src/components/ui/controls";
 import { useHistory, type HistoryDay } from "../../src/hooks/useHistory";
 import { useMonthMarks } from "../../src/hooks/useMonthMarks";
 import { usePlans } from "../../src/hooks/usePlans";
 import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
-import { formatLongDate } from "../../src/utils/date";
-import { formatNumber, muscleGroupFor } from "../../src/utils/derive";
+import { formatLongDate, formatMediumDate, weekdayShort } from "../../src/utils/date";
+import { formatNumber } from "../../src/utils/derive";
 import { formatSetLoad } from "../../src/utils/bodyweight";
-import { muscleTagStyle } from "../../src/utils/tags";
 import type { DailyLog } from "../../src/api/types";
 
 const RANGE_OPTIONS = [
@@ -61,10 +55,33 @@ function workoutTitle(day: HistoryDay, planDayName: Map<string, string>): string
     const name = planDayId ? planDayName.get(planDayId) : null;
     if (name) return prettifyDayName(name);
     if (day.exercises.length === 1) return day.exercises[0];
-    return `${day.exercises.length}-exercise session`;
+    return "Workout";
   }
   if (day.activities.length > 0) return day.activities[0].name;
   return "Daily log";
+}
+
+/** Same-year dates skip the year so the list stays quiet. */
+function historyDate(iso: string, today: string): string {
+  return iso.slice(0, 4) === today.slice(0, 4)
+    ? `${weekdayShort(iso)}, ${formatMediumDate(iso)}`
+    : formatLongDate(iso);
+}
+
+/** The one line under a day's title: what kind of day it was. */
+function daySummary(day: HistoryDay): string {
+  if (day.lifts.length > 0) {
+    const sets = `${day.lifts.length} ${day.lifts.length === 1 ? "set" : "sets"}`;
+    // A single-exercise day already names the exercise in the title.
+    if (day.exercises.length === 1) return sets;
+    return `${day.exercises.length} exercises · ${sets}`;
+  }
+  if (day.activities.length > 0) {
+    const count = day.activities.length;
+    const minutes = day.activities.reduce((sum, a) => sum + a.duration_min, 0);
+    return `${count} ${count === 1 ? "activity" : "activities"} · ${minutes} min`;
+  }
+  return day.daily ? formatDaily(day.daily) : "";
 }
 
 export default function HistoryScreen() {
@@ -76,9 +93,8 @@ export default function HistoryScreen() {
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
   });
   const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
-  const { colors, scheme, typography } = useTheme();
+  const { colors, typography } = useTheme();
   const styles = useStyles();
-  const tagTheme = { colors, scheme };
   const today = useCurrentDate();
   const { profile } = useMe();
   const proteinTarget = profile?.protein_target_g ?? null;
@@ -127,6 +143,19 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
+      <ScreenHeader
+        variant="page"
+        title="History"
+        right={
+          <Pressable style={styles.filterChip} onPress={() => setFilterOpen(true)}>
+            <Ionicons name="funnel-outline" size={14} color={colors.text} />
+            <Text style={styles.filterText} numberOfLines={1}>
+              {rangeLabel.replace("Last ", "")}
+            </Text>
+          </Pressable>
+        }
+      />
+
       {/* FlatList (not ScrollView): "All time" can hold hundreds of days, so
           only the visible window is rendered. */}
       <FlatList
@@ -134,24 +163,14 @@ export default function HistoryScreen() {
         keyExtractor={(day) => day.date}
         extraData={openDates}
         contentContainerStyle={styles.scroll}
-        refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} tintColor={colors.primary} />}
+        refreshControl={
+          <RefreshControl refreshing={loading} onRefresh={refetch} tintColor={colors.primary} />
+        }
         initialNumToRender={6}
         windowSize={7}
         maxToRenderPerBatch={6}
         ListHeaderComponent={
-          <>
-            <ScreenHeader
-              variant="page"
-              title="History"
-              subtitle="Look back. See how far you've come."
-              right={
-                <Pressable style={styles.filterChip} onPress={() => setFilterOpen(true)}>
-                  <Ionicons name="funnel-outline" size={14} color={colors.text} />
-                  <Text style={styles.filterText} numberOfLines={1}>{rangeLabel.replace("Last ", "")}</Text>
-                </Pressable>
-              }
-            />
-
+          <View style={styles.header}>
             {error ? <ErrorState message={error} onRetry={refetch} /> : null}
             {mutationError ? (
               <Banner
@@ -162,26 +181,28 @@ export default function HistoryScreen() {
               />
             ) : null}
 
-            {/* Overall stats */}
-            <View style={styles.statRow}>
-              <View style={styles.statCell}>
-                <StatTile icon="barbell-outline" iconBg={colors.purpleSoft} iconColor={colors.purple} value={firstLoad ? "—" : String(stats.workouts)} label="Workouts" />
-              </View>
-              <View style={styles.statCell}>
-                <StatTile icon="calendar-outline" iconBg={colors.greenSoft} iconColor={colors.green} value={firstLoad ? "—" : String(stats.daysLogged)} label="Days logged" />
-              </View>
-              <View style={styles.statCell}>
-                <StatTile icon="cube-outline" iconBg={colors.orangeSoft} iconColor={colors.orange} value={firstLoad ? "—" : formatNumber(stats.totalVolume)} label="Total Volume (kg)" />
-              </View>
-              <View style={styles.statCell}>
-                <StatTile icon="trending-up-outline" iconBg={colors.blueSoft} iconColor={colors.blue} value={firstLoad ? "—" : strengthLabel} label="Strength" />
-              </View>
+            {/* One compact strip instead of four tall tiles. */}
+            <View style={styles.statsCard}>
+              <RangeStat label="Workouts" value={firstLoad ? "—" : String(stats.workouts)} />
+              <View style={styles.statDivider} />
+              <RangeStat label="Days" value={firstLoad ? "—" : String(stats.daysLogged)} />
+              <View style={styles.statDivider} />
+              <RangeStat
+                label="Volume kg"
+                value={firstLoad ? "—" : formatNumber(stats.totalVolume)}
+              />
+              <View style={styles.statDivider} />
+              <RangeStat label="Strength" value={firstLoad ? "—" : strengthLabel} />
             </View>
 
             <CalendarMonth
               month={month}
-              onPrevMonth={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() - 1, 1)))}
-              onNextMonth={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1)))}
+              onPrevMonth={() =>
+                setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() - 1, 1)))
+              }
+              onNextMonth={() =>
+                setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1)))
+              }
               selected={selectedDate ?? today}
               max={today}
               onSelect={(iso) => setSelectedDate((cur) => (cur === iso ? null : iso))}
@@ -189,16 +210,32 @@ export default function HistoryScreen() {
             />
 
             {selectedDate ? (
-              <ChipRow>
-                <Chip label={formatLongDate(selectedDate)} active onPress={() => setSelectedDate(null)} />
-                <Chip label="All dates" onPress={() => setSelectedDate(null)} />
-              </ChipRow>
+              <View style={styles.selectedBar}>
+                <Ionicons name="calendar-outline" size={13} color={colors.textDim} />
+                <Text style={styles.selectedText} numberOfLines={1}>
+                  {historyDate(selectedDate, today)}
+                </Text>
+                <Pressable
+                  onPress={() => setSelectedDate(null)}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Show all dates"
+                >
+                  <Text style={styles.clearText}>Show all</Text>
+                </Pressable>
+              </View>
             ) : null}
-          </>
+          </View>
         }
         ListEmptyComponent={
           loading && days.length === 0 ? (
             <LoadingState label="Loading history…" />
+          ) : selectedDate ? (
+            <EmptyState
+              icon="calendar-outline"
+              title="Nothing on this day"
+              subtitle="Pick another date, or show all dates."
+            />
           ) : (
             <EmptyState
               icon="time-outline"
@@ -209,8 +246,8 @@ export default function HistoryScreen() {
         }
         renderItem={({ item: day }) => {
           const isOpen = !!openDates[day.date];
-          const muscles = Array.from(new Set(day.exercises.map(muscleGroupFor)));
           const title = workoutTitle(day, planDayName);
+          const summary = daySummary(day);
           const dailySummary = day.daily ? formatDaily(day.daily) : "";
           const hitProteinTarget =
             proteinTarget != null &&
@@ -218,139 +255,113 @@ export default function HistoryScreen() {
             day.daily.protein_g >= proteinTarget;
 
           return (
-            <View style={styles.group}>
-              <View style={styles.groupHeader}>
-                <Text style={typography.bodyStrong}>{formatLongDate(day.date)}</Text>
-                {day.lifts.length > 0 ? (
-                  <Text style={typography.caption}>
-                    {day.exercises.length} exercise{day.exercises.length === 1 ? "" : "s"} · {formatNumber(day.volume)} kg
-                  </Text>
-                ) : null}
-              </View>
-
+            <View style={[styles.dayCard, isOpen && styles.dayCardOpen]}>
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ expanded: isOpen }}
                 accessibilityLabel={`${formatLongDate(day.date)} — ${title}`}
-                style={styles.workoutCard}
-                onPress={() => setOpenDates((prev) => ({ ...prev, [day.date]: !prev[day.date] }))}
+                onPress={() =>
+                  setOpenDates((prev) => ({ ...prev, [day.date]: !prev[day.date] }))
+                }
+                style={({ pressed }) => [styles.dayPress, pressed && styles.pressed]}
               >
-                <IconBadge name="barbell-outline" bg={colors.surface} color={colors.textDim} size={44} rounded={false} />
-                <View style={styles.workoutText}>
-                  <Text style={typography.bodyStrong} numberOfLines={1}>
+                <View style={styles.dayText}>
+                  <Text style={styles.dayDate}>{historyDate(day.date, today)}</Text>
+                  <Text style={styles.dayTitle} numberOfLines={1}>
                     {title}
                   </Text>
-
-                  {muscles.length > 0 ? (
-                    <View style={styles.muscleTags}>
-                      {muscles.slice(0, 3).map((m) => (
-                        <Tag key={m} label={m} bg={muscleTagStyle(m, tagTheme).bg} text={muscleTagStyle(m, tagTheme).text} />
-                      ))}
-                    </View>
-                  ) : null}
-
-                  {day.activities.length > 0 ? (
-                    <View style={styles.metaRow}>
-                      <Meta
-                        icon="walk-outline"
-                        value={`${day.activities.length} ${
-                          day.activities.length === 1 ? "activity" : "activities"
-                        }`}
-                      />
-                    </View>
-                  ) : null}
-
-                  {day.daily ? (
-                    <View style={styles.dailyRow}>
-                      <Text style={[typography.caption, styles.dailyLine]} numberOfLines={1}>
-                        {dailySummary}
-                      </Text>
-                      {hitProteinTarget ? (
-                        <View style={styles.hitBadge} accessibilityLabel="Hit your protein target">
-                          <Ionicons name="checkmark" size={11} color={colors.success} />
-                          <Text style={styles.hitBadgeText}>Protein</Text>
-                        </View>
-                      ) : null}
-                    </View>
+                  {summary ? (
+                    <Text style={styles.daySummary} numberOfLines={1}>
+                      {summary}
+                    </Text>
                   ) : null}
                 </View>
-                <Ionicons name={isOpen ? "chevron-up" : "chevron-forward"} size={18} color={colors.textMuted} />
+                <Ionicons
+                  name={isOpen ? "chevron-up" : "chevron-down"}
+                  size={16}
+                  color={colors.textMuted}
+                />
               </Pressable>
 
               {isOpen ? (
-                <Card style={styles.setsCard}>
-                  {day.exercises.map((ex) => (
-                    <View key={ex} style={styles.exerciseBlock}>
-                      <Text style={typography.bodyStrong}>{ex}</Text>
+                <View style={styles.dayBody}>
+                  {day.exercises.map((exercise) => (
+                    <View key={exercise} style={styles.exerciseBlock}>
+                      <Text style={styles.exerciseName}>{exercise}</Text>
                       {day.lifts
-                        .filter((l) => l.exercise_name === ex)
+                        .filter((l) => l.exercise_name === exercise)
                         .map((l) => (
-                          <View key={l.id} style={styles.setRow}>
-                            <Text style={typography.small}>
+                          <View key={l.id} style={styles.itemRow}>
+                            <Text style={styles.itemValue}>
                               {formatSetLoad(l.weight_kg, l.reps)}
                             </Text>
-                            <Pressable
+                            <DeleteButton
+                              label="Delete set"
                               onPress={() =>
-                                confirm("Delete set?", "This removes the logged set.", () => void deleteLiftLog(l.id))
+                                confirm("Delete set?", "This removes the logged set.", () =>
+                                  void deleteLiftLog(l.id),
+                                )
                               }
-                              hitSlop={14}
-                              accessibilityLabel="Delete set"
-                            >
-                              <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                            </Pressable>
+                            />
                           </View>
                         ))}
                     </View>
                   ))}
 
                   {day.daily ? (
-                    <>
-                      {day.exercises.length > 0 ? <Divider /> : null}
-                      <View style={styles.setRow}>
-                        <View style={styles.dailyText}>
-                          <Text style={typography.bodyStrong}>Daily log</Text>
-                          <Text style={typography.small}>{dailySummary || "No values"}</Text>
-                        </View>
-                        <Pressable
-                          onPress={() =>
-                            confirm("Delete daily log?", "This removes all values for this day.", () => void deleteDailyLog(day.date))
-                          }
-                          hitSlop={14}
-                          accessibilityLabel="Delete daily log"
-                        >
-                          <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                        </Pressable>
+                    <View style={styles.section}>
+                      <View style={styles.sectionHead}>
+                        <Text style={styles.sectionLabel}>Daily</Text>
+                        {hitProteinTarget ? (
+                          <Ionicons name="checkmark-circle" size={12} color={colors.success} />
+                        ) : null}
                       </View>
-                    </>
+                      <View style={styles.itemRow}>
+                        <Text style={[styles.itemValue, styles.flexText]}>
+                          {dailySummary || "No values"}
+                        </Text>
+                        <DeleteButton
+                          label="Delete daily log"
+                          onPress={() =>
+                            confirm(
+                              "Delete daily log?",
+                              "This removes all values for this day.",
+                              () => void deleteDailyLog(day.date),
+                            )
+                          }
+                        />
+                      </View>
+                    </View>
                   ) : null}
 
                   {day.activities.length > 0 ? (
-                    <>
-                      {day.exercises.length > 0 || day.daily ? <Divider /> : null}
+                    <View style={styles.section}>
+                      <Text style={styles.sectionLabel}>Activity</Text>
                       {day.activities.map((a) => (
-                        <View key={a.id} style={styles.setRow}>
-                          <View style={styles.dailyText}>
-                            <Text style={typography.bodyStrong}>{a.name}</Text>
-                            <Text style={typography.small}>
+                        <View key={a.id} style={styles.itemRow}>
+                          <View style={styles.flexText}>
+                            <Text style={styles.itemTitle}>{a.name}</Text>
+                            <Text style={styles.itemMeta}>
                               {a.duration_min} min
                               {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
                               {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
                             </Text>
                           </View>
-                          <Pressable
+                          <DeleteButton
+                            label="Delete activity"
                             onPress={() =>
-                              confirm("Delete activity?", "This removes the logged activity.", () => void deleteActivity(a.id))
+                              confirm(
+                                "Delete activity?",
+                                "This removes the logged activity.",
+                                () => void deleteActivity(a.id),
+                              )
                             }
-                            hitSlop={14}
-                            accessibilityLabel="Delete activity"
-                          >
-                            <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-                          </Pressable>
+                          />
                         </View>
                       ))}
-                    </>
+                    </View>
                   ) : null}
-                </Card>
+                </View>
               ) : null}
             </View>
           );
@@ -371,21 +382,47 @@ export default function HistoryScreen() {
   );
 }
 
-function Meta({ icon, value }: { icon: IoniconName; value: string }) {
-  const { colors, typography } = useTheme();
+/** One column of the range strip — value first, quiet label under it. */
+function RangeStat({ label, value }: { label: string; value: string }) {
   const styles = useStyles();
   return (
-    <View style={styles.meta}>
-      <Ionicons name={icon} size={13} color={colors.textDim} />
-      <Text style={typography.caption}>{value}</Text>
+    <View style={styles.statCell}>
+      <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
+  );
+}
+
+function DeleteButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={({ pressed }) => (pressed ? styles.pressed : undefined)}
+    >
+      <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
+    </Pressable>
   );
 }
 
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
-    scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
+    scroll: {
+      paddingHorizontal: spacing.screen,
+      paddingTop: spacing.md,
+      paddingBottom: spacing.xxxl,
+      gap: spacing.md,
+    },
+    header: { gap: spacing.md },
 
     filterChip: {
       flexDirection: "row",
@@ -396,48 +433,83 @@ const useStyles = makeUseStyles((t) =>
       borderColor: t.colors.border,
       borderRadius: radii.pill,
       paddingHorizontal: spacing.md,
-      height: 38,
+      height: 36,
       maxWidth: 170,
       flexShrink: 1,
     },
     filterText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
 
-    statRow: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: spacing.sm },
-    statCell: { width: "48%" },
-
-    group: { gap: spacing.sm },
-    groupHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    workoutCard: {
+    statsCard: {
       flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.md,
+      alignItems: "stretch",
       backgroundColor: t.colors.surface,
       borderRadius: radii.lg,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: t.colors.cardBorder,
-      padding: spacing.md,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
     },
-    workoutText: { flex: 1, gap: 4 },
-    muscleTags: { flexDirection: "row", gap: spacing.xs, flexWrap: "wrap" },
-    metaRow: { flexDirection: "row", gap: spacing.md, marginTop: 2 },
-    meta: { flexDirection: "row", alignItems: "center", gap: 3 },
-    dailyLine: { color: t.colors.textDim },
-    dailyRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-    hitBadge: {
+    statCell: { flex: 1, alignItems: "center", justifyContent: "center", gap: 2, minWidth: 0 },
+    statDivider: { width: StyleSheet.hairlineWidth, backgroundColor: t.colors.border, marginVertical: 2 },
+    statValue: { fontSize: 17, fontWeight: "700", color: t.colors.text, lineHeight: 20 },
+    statLabel: { ...t.typography.caption, color: t.colors.textMuted },
+
+    selectedBar: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 3,
-      backgroundColor: t.colors.successSoft,
+      gap: spacing.sm,
+      backgroundColor: t.colors.surfaceAlt,
       borderRadius: radii.sm,
-      paddingHorizontal: spacing.xs,
-      paddingVertical: 1,
+      paddingHorizontal: spacing.md,
+      height: 36,
     },
-    hitBadgeText: { fontSize: 10, fontWeight: "700", color: t.colors.success },
+    selectedText: { ...t.typography.small, color: t.colors.text, flex: 1 },
+    clearText: { ...t.typography.caption, color: t.colors.primary },
 
-    setsCard: { gap: spacing.md },
-    exerciseBlock: { gap: spacing.sm },
-    setRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
-    dailyText: { flex: 1, gap: 2 },
+    dayCard: {
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.lg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.cardBorder,
+      overflow: "hidden",
+    },
+    dayCardOpen: { borderColor: t.colors.primarySoftBorder },
+    dayPress: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      padding: spacing.md,
+    },
+    pressed: { opacity: 0.7 },
+    dayText: { flex: 1, gap: 2, minWidth: 0 },
+    dayDate: { ...t.typography.caption, color: t.colors.textMuted },
+    dayTitle: { ...t.typography.bodyStrong },
+    daySummary: { ...t.typography.small, color: t.colors.textDim },
+
+    dayBody: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: t.colors.border,
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.md,
+      gap: spacing.md,
+    },
+    exerciseBlock: { gap: 3 },
+    exerciseName: { ...t.typography.small, fontWeight: "700", color: t.colors.text },
+    section: { gap: 3 },
+    sectionHead: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+    sectionLabel: { ...t.typography.caption, color: t.colors.textMuted, textTransform: "uppercase" },
+    itemRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+      minHeight: 20,
+    },
+    itemValue: { ...t.typography.small, color: t.colors.textDim },
+    itemTitle: { ...t.typography.small, fontWeight: "600", color: t.colors.text },
+    itemMeta: { ...t.typography.caption, color: t.colors.textMuted },
+    flexText: { flex: 1, minWidth: 0 },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
     errorTitle: { textAlign: "center" },
@@ -446,8 +518,8 @@ const useStyles = makeUseStyles((t) =>
 );
 
 /**
- * Route-level fallback (expo-router picks this up): a render crash on History becomes
- * a friendly, retryable card instead of a red box.
+ * Route-level fallback (expo-router picks this up): a render crash on History becomes a
+ * friendly, retryable card instead of a red box.
  */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   const { colors, typography } = useTheme();
