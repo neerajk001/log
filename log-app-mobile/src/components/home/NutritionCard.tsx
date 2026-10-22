@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { spacing } from "../../theme/spacing";
-import { Button, Card, Divider, IconBadge, ProgressBar } from "../ui/primitives";
-import { DonutChart } from "../ui/charts";
+import { Button, Card, IconBadge, ProgressBar } from "../ui/primitives";
 import { formatNumber } from "../../utils/derive";
 import { MAX_DAILY, parsePositiveNumber } from "../../utils/parse";
 
@@ -71,7 +70,7 @@ function EditableValue({
   );
 }
 
-function NutritionColumn({
+function NutritionMacro({
   label,
   value,
   target,
@@ -86,42 +85,30 @@ function NutritionColumn({
   color: string;
   onEdit: (value: number | null) => void;
 }) {
-  const { colors, typography } = useTheme();
+  const { typography } = useTheme();
   const styles = useStyles();
   const hasTarget = target != null && target > 0;
   const pct = hasTarget ? Math.min(100, Math.round((value / (target as number)) * 100)) : null;
-  // Arc = logged / target. Without a target there's no progress to show, so the
-  // ring stays solid; with one, the remainder is drawn in the track colour.
-  const filled = hasTarget ? Math.min(value, target as number) : 1;
-  const remaining = hasTarget ? Math.max(0, (target as number) - value) : 0;
 
   return (
-    <View style={styles.col}>
-      <DonutChart
-        size={58}
-        thickness={9}
-        slices={[
-          { label, value: filled, color },
-          { label: `${label} remaining`, value: remaining, color: colors.chartTrack },
-        ]}
-      />
-      <View style={styles.colText}>
-        <View style={styles.labelRow}>
-          <Text style={[typography.small, styles.colLabel]} numberOfLines={1}>
-            {label}
-          </Text>
+    <View style={styles.macro}>
+      <View style={styles.macroTop}>
+        <Text style={[typography.small, styles.macroLabel]} numberOfLines={1}>
+          {label}
+        </Text>
+        <View style={styles.macroRight}>
+          <EditableValue value={value} target={target} unit={unit} onSave={onEdit} />
           {pct != null ? <Text style={[styles.pct, { color }]}>{pct}%</Text> : null}
         </View>
-        <EditableValue value={value} target={target} unit={unit} onSave={onEdit} />
-        <ProgressBar value={value} max={hasTarget ? (target as number) : 1} color={color} />
       </View>
+      {hasTarget ? <ProgressBar value={value} max={target as number} color={color} /> : null}
     </View>
   );
 }
 
 /**
- * Today's nutrition: calorie and protein rings on their targets beside a date
- * selector, then the day's meals and the "Log Meal" action under a divider.
+ * Today's nutrition: two macro rows (logged / target + bar) beside a one-tap
+ * log action. Meals are reachable from the count chip when any are logged.
  */
 export function NutritionCard({
   loggedCalories,
@@ -129,10 +116,6 @@ export function NutritionCard({
   loggedProtein,
   proteinTarget,
   mealCount,
-  mealCalories,
-  mealProtein,
-  dateLabel,
-  onPressDate,
   onLogMeal,
   onPressMeals,
   onEdit,
@@ -142,18 +125,12 @@ export function NutritionCard({
   loggedProtein: number;
   proteinTarget: number | null;
   mealCount: number;
-  mealCalories: number;
-  mealProtein: number;
-  dateLabel: string;
-  onPressDate: () => void;
   onLogMeal: () => void;
   onPressMeals: () => void;
   onEdit: (field: "calories" | "protein_g", value: number | null) => void;
 }) {
-  const { colors, typography } = useTheme();
+  const { colors } = useTheme();
   const styles = useStyles();
-  const { width } = useWindowDimensions();
-  const narrow = width < 380;
 
   return (
     <Card style={styles.card}>
@@ -161,23 +138,26 @@ export function NutritionCard({
         <View style={styles.headerLeft}>
           <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={34} rounded={false} />
           <Text style={styles.title}>Nutrition</Text>
+          {mealCount > 0 ? (
+            <Pressable
+              onPress={onPressMeals}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`${mealCount} meals logged`}
+              style={styles.mealChip}
+            >
+              <Text style={styles.mealChipText}>
+                {mealCount} {mealCount === 1 ? "meal" : "meals"}
+              </Text>
+              <Ionicons name="chevron-forward" size={12} color={colors.textDim} />
+            </Pressable>
+          ) : null}
         </View>
-        <Pressable
-          onPress={onPressDate}
-          accessibilityRole="button"
-          accessibilityLabel={`Change date, currently ${dateLabel}`}
-          style={styles.datePill}
-        >
-          <Ionicons name="calendar-outline" size={13} color={colors.textDim} />
-          <Text style={styles.dateText} numberOfLines={1}>
-            {dateLabel}
-          </Text>
-          <Ionicons name="chevron-down" size={13} color={colors.textDim} />
-        </Pressable>
+        <Button label="Log meal" icon="add" variant="soft" size="sm" onPress={onLogMeal} />
       </View>
 
-      <View style={styles.cols}>
-        <NutritionColumn
+      <View style={styles.macros}>
+        <NutritionMacro
           label="Calories"
           value={loggedCalories}
           target={calorieTarget}
@@ -185,61 +165,13 @@ export function NutritionCard({
           color={colors.primary}
           onEdit={(v) => onEdit("calories", v)}
         />
-        <View style={styles.vDivider} />
-        <NutritionColumn
+        <NutritionMacro
           label="Protein"
           value={loggedProtein}
           target={proteinTarget}
           unit="g"
           color={colors.success}
           onEdit={(v) => onEdit("protein_g", v)}
-        />
-      </View>
-
-      <Divider />
-
-      <View style={[styles.footer, narrow && styles.footerStack]}>
-        <View style={styles.mealsInfo}>
-          {mealCount > 0 ? (
-            <Pressable
-              onPress={onPressMeals}
-              accessibilityRole="button"
-              accessibilityLabel={`${mealCount} meals logged`}
-              style={styles.mealsPress}
-            >
-              <View style={styles.thumbs}>
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <View key={i} style={[styles.thumb, i >= mealCount && styles.thumbEmpty]}>
-                    <Ionicons
-                      name="restaurant"
-                      size={12}
-                      color={i < mealCount ? colors.green : colors.textMuted}
-                    />
-                  </View>
-                ))}
-              </View>
-              <Text
-                style={[typography.small, styles.mealsText]}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.8}
-              >
-                {mealCount} {mealCount === 1 ? "meal" : "meals"} · {formatNumber(mealCalories)} kcal ·{" "}
-                {formatNumber(mealProtein)} g
-              </Text>
-            </Pressable>
-          ) : (
-            <Text style={[typography.small, styles.mealsText]} numberOfLines={1}>
-              No meals logged yet
-            </Text>
-          )}
-        </View>
-        <Button
-          label="Log Meal"
-          icon="add"
-          size="sm"
-          onPress={onLogMeal}
-          style={narrow ? styles.fullButton : undefined}
         />
       </View>
     </Card>
@@ -249,52 +181,20 @@ export function NutritionCard({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     card: { gap: spacing.lg, borderColor: t.colors.cardBorder },
-    header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+    header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+    headerLeft: { flexDirection: "row", alignItems: "center", gap: spacing.sm, flexShrink: 1, minWidth: 0 },
     title: { fontSize: 17, fontWeight: "700", color: t.colors.text },
-    datePill: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.xs,
-      backgroundColor: t.colors.surfaceAlt,
-      borderRadius: 999,
-      paddingHorizontal: spacing.md,
-      height: 32,
-      maxWidth: 140,
-    },
-    dateText: { fontSize: 12, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
+    mealChip: { flexDirection: "row", alignItems: "center", gap: 2, flexShrink: 1, minWidth: 0 },
+    mealChipText: { ...t.typography.caption, color: t.colors.textDim },
 
-    cols: { flexDirection: "row", alignItems: "center" },
-    col: { flex: 1, flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
-    colText: { flex: 1, gap: 5, minWidth: 0 },
-    labelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-    colLabel: { color: t.colors.text },
+    macros: { gap: spacing.md },
+    macro: { gap: 6 },
+    macroTop: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: spacing.sm },
+    macroLabel: { color: t.colors.text, flexShrink: 0 },
+    macroRight: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm, flexShrink: 1, minWidth: 0 },
     pct: { fontSize: 13, fontWeight: "700" },
-    value: { fontSize: 18, fontWeight: "700", color: t.colors.text },
+    value: { fontSize: 17, fontWeight: "700", color: t.colors.text },
     valueTarget: { fontSize: 12, fontWeight: "500" },
     editInput: { padding: 0, minWidth: 48 },
-    vDivider: {
-      width: StyleSheet.hairlineWidth,
-      alignSelf: "stretch",
-      backgroundColor: t.colors.border,
-      marginHorizontal: spacing.md,
-    },
-
-    footer: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    footerStack: { flexDirection: "column", alignItems: "stretch" },
-    mealsInfo: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
-    mealsPress: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minWidth: 0 },
-    thumbs: { flexDirection: "row", gap: 3 },
-    thumb: {
-      width: 26,
-      height: 26,
-      borderRadius: 8,
-      backgroundColor: t.colors.greenSoft,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    thumbEmpty: { backgroundColor: t.colors.surfaceAlt },
-    mealsText: { flex: 1, color: t.colors.textDim, minWidth: 0 },
-    fullButton: { flexGrow: 0 },
   }),
 );

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, type ErrorBoundaryProps } from "expo-router";
-import { useClerk, useUser } from "@clerk/clerk-expo";
+import { useClerk } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
@@ -17,7 +17,6 @@ import { NutritionCard } from "../../src/components/home/NutritionCard";
 import { RecentLiftsRow } from "../../src/components/home/RecentLiftsRow";
 import {
   SectionHeader,
-  EmptyState,
   Button,
   Banner,
   Card,
@@ -32,11 +31,10 @@ import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useActivity } from "../../src/hooks/useActivity";
 import { useMeals } from "../../src/hooks/useMeals";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
-import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { useDailyComparison } from "../../src/hooks/useDailyComparison";
 import type { MealLog } from "../../src/api/types";
 import { formatMediumDate, parseIso } from "../../src/utils/date";
-import { muscleGroupsForDay, totalVolume } from "../../src/utils/derive";
+import { muscleGroupsForDay } from "../../src/utils/derive";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -45,24 +43,22 @@ function greeting(): string {
   return "Good Evening";
 }
 
-/** "MON, 12 OCT 2026" — the day the strip is pointed at. */
+/** "THU, OCT 22" — the day the strip is pointed at. */
 function dateLabel(iso: string): string {
-  return parseIso(iso)
-    .toLocaleDateString("en-GB", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-      timeZone: "UTC",
-    })
+  const date = parseIso(iso);
+  const weekday = date
+    .toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })
     .toUpperCase();
+  const month = date
+    .toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })
+    .toUpperCase();
+  return `${weekday}, ${month} ${date.getUTCDate()}`;
 }
 
 type Footnote = { text: string; tone?: "positive" | "negative" | "neutral" };
 
 export default function TodayScreen() {
   const today = useCurrentDate();
-  const { user } = useUser();
   const { signOut } = useClerk();
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -112,8 +108,7 @@ export default function TodayScreen() {
   } = useActivity(activeDate);
   const { meals, error: mealsError, refetch: refetchMeals } = useMeals(activeDate);
   const { day, error: planError, refetch: refetchPlan } = usePlanToday(activeDate);
-  const { lastByExercise } = useRecentExercises(30);
-  const { weightDeltaKg, sleepDeltaHours } = useDailyComparison(today);
+  const { weightDeltaKg } = useDailyComparison(today);
 
   const mealTotals = useMemo(
     () =>
@@ -148,29 +143,6 @@ export default function TodayScreen() {
     () => (day ? muscleGroupsForDay(day.day_name, workoutExerciseNames) : []),
     [day, workoutExerciseNames],
   );
-  // Rough set-based estimate — the app doesn't time sessions.
-  const workoutDurationMin = useMemo(
-    () => (day?.exercises ?? []).reduce((sum, ex) => sum + ex.sets, 0) * 3,
-    [day],
-  );
-  const workoutVolumeKg = useMemo(() => totalVolume(lifts), [lifts]);
-
-  const liftDeltas = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const g of groupedLifts) {
-      const prev = lastByExercise.get(g.name)?.weight_kg ?? null;
-      if (prev == null || prev <= 0) continue;
-      const top = g.sets.reduce(
-        (m, s) => (s.weight_kg == null ? m : Math.max(m, s.weight_kg)),
-        0,
-      );
-      // A bodyweight-only exercise has no load delta to show.
-      if (top <= 0) continue;
-      const delta = Math.round((top - prev) * 10) / 10;
-      if (delta !== 0) map.set(g.name, delta);
-    }
-    return map;
-  }, [groupedLifts, lastByExercise]);
 
   const confirmDeleteActivity = useCallback(
     (id: string) => {
@@ -229,18 +201,51 @@ export default function TodayScreen() {
   const sleepValue = data?.sleep_hours ?? null;
   const sleepQuality =
     sleepValue == null ? null : sleepValue >= 7 ? "Good" : sleepValue >= 6 ? "Fair" : "Low";
-  const sleepFootnote: Footnote | undefined = !isToday
-    ? undefined
-    : sleepDeltaHours != null && sleepDeltaHours !== 0
-      ? {
-          text: `${sleepQuality ? `${sleepQuality} · ` : ""}${sleepDeltaHours > 0 ? "+" : "−"}${Math.abs(
-            sleepDeltaHours,
-          )}h from last week`,
-          tone: sleepDeltaHours > 0 ? "positive" : "neutral",
-        }
-      : sleepQuality
-        ? { text: sleepQuality, tone: "neutral" }
-        : undefined;
+  const sleepFootnote: Footnote | undefined = sleepQuality
+    ? { text: sleepQuality, tone: "neutral" }
+    : undefined;
+
+  // One banner at a time — stacked errors buried the content they referred to.
+  const banner = error
+    ? { tone: "danger" as const, message: error, actionLabel: "Retry", onAction: refetch }
+    : meError && !profile
+      ? { tone: "danger" as const, message: meError, actionLabel: "Retry", onAction: refetchMe }
+      : retry
+        ? {
+            tone: "warning" as const,
+            message: "Couldn't save — your entry is kept.",
+            actionLabel: "Retry",
+            onAction: retrySave,
+          }
+        : planError
+          ? {
+              tone: "danger" as const,
+              message: planError,
+              actionLabel: "Retry",
+              onAction: () => refetchPlan(),
+            }
+          : mealsError
+            ? {
+                tone: "danger" as const,
+                message: mealsError,
+                actionLabel: "Retry",
+                onAction: refetchMeals,
+              }
+            : liftsError
+              ? {
+                  tone: "danger" as const,
+                  message: liftsError,
+                  actionLabel: "Retry",
+                  onAction: () => refetchLifts(),
+                }
+              : activitiesError
+                ? {
+                    tone: "danger" as const,
+                    message: activitiesError,
+                    actionLabel: "Retry",
+                    onAction: () => refetchActivities(),
+                  }
+                : null;
 
   return (
     <View style={styles.container}>
@@ -260,15 +265,12 @@ export default function TodayScreen() {
                 </Text>
               </Pressable>
               {profile?.ai_coach_enabled !== false ? (
-                <Pressable
-                  onPress={() => router.navigate("/coach" as never)}
-                  style={styles.coachChip}
-                  accessibilityRole="button"
+                <IconButton
+                  name="sparkles"
+                  color={colors.primary}
                   accessibilityLabel="Open AI coach"
-                >
-                  <Ionicons name="sparkles" size={15} color={colors.primary} />
-                  <Text style={styles.coachChipText}>Coach</Text>
-                </Pressable>
+                  onPress={() => router.navigate("/coach" as never)}
+                />
               ) : null}
               <IconButton name="ellipsis-horizontal" accessibilityLabel="More options" onPress={() => setMenuOpen(true)} />
             </>
@@ -282,50 +284,28 @@ export default function TodayScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.dateBlock}>
-          <Text style={styles.dateLabel}>{dateLabel(activeDate)}</Text>
+        <View style={styles.greetingBlock}>
+          <Text style={typography.h2}>{greeting()}</Text>
+          <Text style={styles.dateCaption}>{dateLabel(activeDate)}</Text>
           <DateStrip selected={activeDate} today={today} onSelect={setActiveDate} />
         </View>
 
-        <View style={styles.greetingRow}>
-          <View style={styles.greeting}>
-            <Text style={typography.h2}>
-              {greeting()}, {user?.firstName ?? "there"}
-            </Text>
-            <Text style={typography.small}>Consistency today, strength tomorrow.</Text>
-          </View>
-          <View style={styles.encouragement}>
-            <IconBadge name="trending-up" bg={colors.primarySoft} color={colors.primary} size={26} rounded={false} />
-            <Text style={styles.encouragementText}>Small steps{"\n"}big results.</Text>
-          </View>
-        </View>
-
-        {error ? <Banner tone="danger" message={error} actionLabel="Retry" onAction={refetch} style={styles.block} /> : null}
-        {/* Only worth showing when we truly don't know their settings yet. */}
-        {meError && !profile ? (
-          <Banner tone="danger" message={meError} actionLabel="Retry" onAction={refetchMe} style={styles.block} />
-        ) : null}
-        {retry ? (
+        {banner ? (
           <Banner
-            tone="warning"
-            message="Couldn't save — your entry is kept."
-            actionLabel="Retry"
-            onAction={retrySave}
+            tone={banner.tone}
+            message={banner.message}
+            actionLabel={banner.actionLabel}
+            onAction={banner.onAction}
             style={styles.block}
           />
-        ) : null}
-        {planError ? (
-          <Banner tone="danger" message={planError} actionLabel="Retry" onAction={() => refetchPlan()} style={styles.block} />
         ) : null}
 
         {day ? (
           <View style={styles.block}>
             <TodaysWorkoutCard
               dayName={day.day_name}
-              exerciseNames={workoutExerciseNames}
+              exerciseCount={day.exercises.length}
               muscles={workoutMuscles}
-              durationMin={workoutDurationMin}
-              volumeKg={workoutVolumeKg}
               onLogLift={() => goLiftDay(day.id)}
               onOpenDay={() => goLiftDay(day.id)}
             />
@@ -333,29 +313,20 @@ export default function TodayScreen() {
         ) : null}
 
         {profile?.meal_tracking_enabled !== false ? (
-          <>
-            <View style={styles.block}>
-              <NutritionCard
-                loggedCalories={loggedCalories}
-                calorieTarget={calorieTarget}
-                loggedProtein={loggedProtein}
-                proteinTarget={proteinTarget}
-                mealCount={meals.length}
-                mealCalories={mealTotals.calories}
-                mealProtein={mealTotals.protein}
-                dateLabel={activeDate === today ? "Today" : formatMediumDate(activeDate)}
-                onPressDate={() => setCalendarOpen(true)}
-                onLogMeal={goLogMeal}
-                onPressMeals={() => setMealsOpen(true)}
-                onEdit={(field, value) => {
-                  void save(field, value);
-                }}
-              />
-            </View>
-            {mealsError ? (
-              <Banner tone="danger" message={mealsError} actionLabel="Retry" onAction={refetchMeals} style={styles.block} />
-            ) : null}
-          </>
+          <View style={styles.block}>
+            <NutritionCard
+              loggedCalories={loggedCalories}
+              calorieTarget={calorieTarget}
+              loggedProtein={loggedProtein}
+              proteinTarget={proteinTarget}
+              mealCount={meals.length}
+              onLogMeal={goLogMeal}
+              onPressMeals={() => setMealsOpen(true)}
+              onEdit={(field, value) => {
+                void save(field, value);
+              }}
+            />
+          </View>
         ) : null}
 
         {loading && !data ? (
@@ -393,66 +364,51 @@ export default function TodayScreen() {
           </View>
         )}
 
-        {liftsError ? (
-          <Banner tone="danger" message={liftsError} actionLabel="Retry" onAction={() => refetchLifts()} style={styles.block} />
-        ) : null}
         {liftsLoading && lifts.length === 0 ? (
           <LoadingState label="Loading lifts…" />
         ) : (
-          <RecentLiftsRow
-            groups={groupedLifts}
-            deltas={liftDeltas}
-            onViewAll={goHistory}
-            onAddLift={goLift}
-          />
+          <RecentLiftsRow groups={groupedLifts} onViewAll={goHistory} onAddLift={goLift} />
         )}
 
         <View style={styles.section}>
-          <SectionHeader
-            title="Activity"
-            {...(activities.length > 0 ? { actionLabel: "Add", onAction: () => setActivityOpen(true) } : {})}
-          />
-          {activitiesError ? (
-            <Banner
-              tone="danger"
-              message={activitiesError}
-              actionLabel="Retry"
-              onAction={() => refetchActivities()}
-              style={styles.block}
-            />
-          ) : null}
           {activitiesLoading && activities.length === 0 ? (
             <LoadingState label="Loading activity…" />
           ) : activities.length === 0 ? (
-            <EmptyState
-              compact
-              icon="walk-outline"
-              title="No activity logged yet."
-              subtitle="Log your walk, run, cycle or more."
-            >
-              <Button label="Add Activity" icon="add" variant="outline" onPress={() => setActivityOpen(true)} />
-            </EmptyState>
+            <Card style={styles.activityEmpty}>
+              <IconBadge name="walk-outline" bg={colors.tealSoft} color={colors.teal} size={36} rounded={false} />
+              <View style={styles.activityText}>
+                <Text style={typography.bodyStrong} numberOfLines={1}>
+                  Activity
+                </Text>
+                <Text style={typography.small} numberOfLines={1}>
+                  Log your walk, run, cycle or more.
+                </Text>
+              </View>
+              <Button label="Add" icon="add" variant="outline" size="sm" onPress={() => setActivityOpen(true)} />
+            </Card>
           ) : (
-            <View style={styles.list}>
-              {activities.map((a) => (
-                <Card key={a.id} style={styles.activityRow}>
-                  <IconBadge name="walk-outline" bg={colors.tealSoft} color={colors.teal} size={36} rounded={false} />
-                  <View style={styles.activityText}>
-                    <Text style={typography.bodyStrong} numberOfLines={1}>
-                      {a.name}
-                    </Text>
-                    <Text style={typography.small} numberOfLines={1}>
-                      {a.duration_min} min
-                      {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
-                      {a.calories_burned != null ? ` · ${a.calories_burned} kcal` : ""}
-                    </Text>
-                  </View>
-                  <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={14} accessibilityLabel="Delete activity">
-                    <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                  </Pressable>
-                </Card>
-              ))}
-            </View>
+            <>
+              <SectionHeader title="Activity" actionLabel="Add" onAction={() => setActivityOpen(true)} />
+              <View style={styles.list}>
+                {activities.map((a) => (
+                  <Card key={a.id} style={styles.activityRow}>
+                    <IconBadge name="walk-outline" bg={colors.tealSoft} color={colors.teal} size={36} rounded={false} />
+                    <View style={styles.activityText}>
+                      <Text style={typography.bodyStrong} numberOfLines={1}>
+                        {a.name}
+                      </Text>
+                      <Text style={typography.small} numberOfLines={1}>
+                        {a.duration_min} min
+                        {a.distance_km != null ? ` · ${a.distance_km} km` : ""}
+                      </Text>
+                    </View>
+                    <Pressable onPress={() => confirmDeleteActivity(a.id)} hitSlop={14} accessibilityLabel="Delete activity">
+                      <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                    </Pressable>
+                  </Card>
+                ))}
+              </View>
+            </>
           )}
         </View>
 
@@ -526,30 +482,8 @@ const useStyles = makeUseStyles((t) =>
     list: { gap: spacing.sm },
     footerSpace: { height: spacing.xxl },
 
-    dateBlock: { marginTop: spacing.sm, gap: spacing.sm },
-    dateLabel: { ...t.typography.caption, color: t.colors.textDim },
-
-    greetingRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: spacing.sm,
-      marginTop: spacing.lg,
-    },
-    greeting: { flex: 1, gap: 2, minWidth: 0 },
-    encouragement: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.sm,
-      backgroundColor: t.colors.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: t.colors.border,
-      borderRadius: radii.lg,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      maxWidth: 156,
-    },
-    encouragementText: { ...t.typography.caption, color: t.colors.text, flexShrink: 1 },
+    greetingBlock: { gap: spacing.sm, marginTop: spacing.lg },
+    dateCaption: { ...t.typography.caption, color: t.colors.textDim },
 
     grid: {
       flexDirection: "row",
@@ -574,20 +508,6 @@ const useStyles = makeUseStyles((t) =>
     },
     todayChipText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
 
-    coachChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.xs,
-      backgroundColor: t.colors.primarySoft,
-      borderWidth: 1,
-      borderColor: t.colors.primary,
-      borderRadius: radii.pill,
-      paddingHorizontal: spacing.md,
-      height: 38,
-      flexShrink: 0,
-    },
-    coachChipText: { fontSize: 13, fontWeight: "700", color: t.colors.primary },
-
     backToday: {
       flexDirection: "row",
       alignItems: "center",
@@ -599,7 +519,8 @@ const useStyles = makeUseStyles((t) =>
     backTodayText: { fontSize: 13, fontWeight: "600", color: t.colors.primary },
 
     activityRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderColor: t.colors.cardBorder },
-    activityText: { flex: 1, gap: 2 },
+    activityEmpty: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+    activityText: { flex: 1, gap: 2, minWidth: 0 },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
     errorTitle: { textAlign: "center" },

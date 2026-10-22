@@ -94,7 +94,7 @@ export function MetricCard({
       style={[styles.tile, fieldError ? styles.tileError : null]}
     >
       <View style={styles.topRow}>
-        <IconBadge name={icon} bg={iconBg} color={iconColor} size={28} rounded={false} />
+        <IconBadge name={icon} bg={iconBg} color={iconColor} size={32} rounded={false} />
         <Text style={styles.label} numberOfLines={1}>
           {label}
         </Text>
@@ -113,7 +113,6 @@ export function MetricCard({
             />
           </Pressable>
         ) : null}
-        <Ionicons name="chevron-forward" size={14} color={colors.textMuted} />
       </View>
 
       <View style={styles.valueRow}>
