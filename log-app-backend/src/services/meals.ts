@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
@@ -24,7 +25,7 @@ interface MealRecord {
   source: string;
 }
 
-type DailyLogClient = Pick<PrismaClient, "dailyLog">;
+type DailyLogClient = Pick<PrismaClient, "$executeRaw">;
 
 const mealSelect = {
   id: true,
@@ -98,10 +99,11 @@ function idempotencyConflict(): AppError {
  * preserving weight/sleep. This keeps the weekly verdict and adherence (which
  * read `daily_logs.protein_g`) in sync with logged meals.
  *
- * The write is a single atomic increment — not find-then-write — so two meals
- * logged at the same time (two devices, two fast requests) can't read the same
- * starting total and overwrite each other's delta, which would leave meal rows
- * the day's totals never count.
+ * The write is one atomic upsert, not find-then-write: two meals logged at the
+ * same time (two devices, two fast requests) can't overwrite each other's
+ * delta. `COALESCE` is essential — a weight/sleep-only day starts with NULL
+ * macros, and `NULL + x` would stay NULL, silently dropping every meal logged
+ * into that day from trends and the weekly verdict.
  */
 export async function applyDailyDelta(
   userId: string,
@@ -109,38 +111,21 @@ export async function applyDailyDelta(
   delta: { calories: number; protein_g: number },
   client: DailyLogClient = prisma,
 ): Promise<void> {
-  const day = new Date(date);
-
-  await client.dailyLog.upsert({
-    where: { userId_date: { userId, date: day } },
-    create: {
-      userId,
-      date: day,
-      calories: Math.max(0, delta.calories),
-      proteinG: Math.max(0, delta.protein_g),
-    },
-    update: {
-      calories: { increment: delta.calories },
-      proteinG: { increment: delta.protein_g },
-    },
-    select: { id: true },
-  });
-
-  // Clamp at zero (e.g. a meal removed after the athlete typed a lower day
-  // total). Conditional, per-field atomic statements — a concurrent positive
-  // increment can never be lost the way it could with a read-modify-write.
-  if (delta.calories < 0) {
-    await client.dailyLog.updateMany({
-      where: { userId, date: day, calories: { lt: 0 } },
-      data: { calories: 0 },
-    });
-  }
-  if (delta.protein_g < 0) {
-    await client.dailyLog.updateMany({
-      where: { userId, date: day, proteinG: { lt: 0 } },
-      data: { proteinG: 0 },
-    });
-  }
+  await client.$executeRaw`
+    INSERT INTO daily_logs (id, user_id, date, calories, protein_g, updated_at)
+    VALUES (
+      ${randomUUID()}::uuid,
+      ${userId}::uuid,
+      ${date}::date,
+      GREATEST(0, ${delta.calories}),
+      GREATEST(0, ${delta.protein_g}),
+      now()
+    )
+    ON CONFLICT (user_id, date) DO UPDATE SET
+      calories = GREATEST(0, COALESCE(daily_logs.calories, 0) + ${delta.calories}),
+      protein_g = GREATEST(0, COALESCE(daily_logs.protein_g, 0) + ${delta.protein_g}),
+      updated_at = now()
+  `;
 }
 
 export async function listMeals(userId: string, date: string): Promise<MealRecord[]> {

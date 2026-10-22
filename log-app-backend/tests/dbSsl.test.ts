@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +11,18 @@ const dir = mkdtempSync(join(tmpdir(), "ca-"));
 const caPath = join(dir, "prod-ca-2021.crt");
 writeFileSync(caPath, pem);
 
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+const originalCa = process.env.DATABASE_SSL_CA;
+
+beforeEach(() => {
+  // The developer's .env may set the Supabase CA. Defaults must be tested without it.
+  delete process.env.DATABASE_SSL_CA;
+});
+
+afterAll(() => {
+  if (originalCa === undefined) delete process.env.DATABASE_SSL_CA;
+  else process.env.DATABASE_SSL_CA = originalCa;
+  rmSync(dir, { recursive: true, force: true });
+});
 
 describe("buildPoolSslConfig", () => {
   it("verifies by default (missing sslmode)", () => {

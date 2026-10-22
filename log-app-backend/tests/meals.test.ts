@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => {
       findFirstOrThrow: vi.fn(),
     },
     dailyLog: { upsert: vi.fn(), updateMany: vi.fn() },
+    $executeRaw: vi.fn(),
   };
   return {
     tx,
@@ -35,9 +36,17 @@ vi.mock("../src/db/client", () => ({
       upsert: mocks.tx.dailyLog.upsert,
       updateMany: mocks.tx.dailyLog.updateMany,
     },
+    $executeRaw: mocks.tx.$executeRaw,
     $transaction: mocks.transaction,
   },
 }));
+
+/** The SQL and bound values of the most recent tagged-template call. */
+function lastRawSql(mock: ReturnType<typeof vi.fn>) {
+  const call = mock.mock.calls[mock.mock.calls.length - 1];
+  const strings = call[0] as unknown as TemplateStringsArray;
+  return { sql: strings.join("?"), values: call.slice(1) };
+}
 
 import {
   applyDailyDelta,
@@ -90,6 +99,7 @@ beforeEach(() => {
   mocks.tx.mealLog.findFirstOrThrow.mockResolvedValue(record());
   mocks.tx.dailyLog.upsert.mockResolvedValue({ id: "log-1" });
   mocks.tx.dailyLog.updateMany.mockResolvedValue({ count: 0 });
+  mocks.tx.$executeRaw.mockResolvedValue(1);
 });
 
 describe("createMealSchema", () => {
@@ -122,56 +132,42 @@ describe("createMealSchema", () => {
 
 describe("applyDailyDelta", () => {
   function client() {
-    const upsert = vi.fn().mockResolvedValue({ id: "log-1" });
-    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    return { dailyLog: { upsert, updateMany } };
+    return { $executeRaw: vi.fn().mockResolvedValue(1) };
   }
 
-  it("increments the day's totals atomically instead of read-modify-writing", async () => {
+  it("increments the day's totals in one atomic upsert", async () => {
     const mock = client();
 
     await applyDailyDelta(userId, "2026-10-10", { calories: 500, protein_g: 30 }, mock as never);
 
-    expect(mock.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { userId_date: { userId, date: new Date("2026-10-10") } },
-        update: { calories: { increment: 500 }, proteinG: { increment: 30 } },
-      }),
-    );
-    // A positive delta can never push the total below zero — no clamp needed.
-    expect(mock.dailyLog.updateMany).not.toHaveBeenCalled();
+    const { sql, values } = lastRawSql(mock.$executeRaw);
+    expect(sql).toContain("INSERT INTO daily_logs");
+    expect(sql).toContain("ON CONFLICT (user_id, date) DO UPDATE");
+    expect(values).toContain(500);
+    expect(values).toContain(30);
+    expect(mock.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
-  it("starts from zero when the day has no log yet", async () => {
+  it("coalesces a NULL day total to zero instead of leaving it NULL", async () => {
     const mock = client();
 
     await applyDailyDelta(userId, "2026-10-10", { calories: 500, protein_g: 30 }, mock as never);
 
-    expect(mock.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        create: expect.objectContaining({ calories: 500, proteinG: 30 }),
-      }),
-    );
+    const { sql } = lastRawSql(mock.$executeRaw);
+    // A weight-only day has NULL macros; NULL + 500 would silently stay NULL.
+    expect(sql).toContain("COALESCE(daily_logs.calories, 0)");
+    expect(sql).toContain("COALESCE(daily_logs.protein_g, 0)");
   });
 
-  it("clamps a negative delta at zero after the atomic increment", async () => {
+  it("clamps a negative delta at zero in the same statement", async () => {
     const mock = client();
 
     await applyDailyDelta(userId, "2026-10-10", { calories: -500, protein_g: -30 }, mock as never);
 
-    expect(mock.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: { calories: { increment: -500 }, proteinG: { increment: -30 } },
-      }),
-    );
-    expect(mock.dailyLog.updateMany).toHaveBeenCalledWith({
-      where: { userId, date: new Date("2026-10-10"), calories: { lt: 0 } },
-      data: { calories: 0 },
-    });
-    expect(mock.dailyLog.updateMany).toHaveBeenCalledWith({
-      where: { userId, date: new Date("2026-10-10"), proteinG: { lt: 0 } },
-      data: { proteinG: 0 },
-    });
+    const { sql } = lastRawSql(mock.$executeRaw);
+    expect(sql).toContain("GREATEST(0,");
+    // No second statement can race the increment.
+    expect(mock.$executeRaw).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -187,11 +183,10 @@ describe("createMealIdempotent", () => {
         data: expect.objectContaining({ id: requestId, userId, calories: 240 }),
       }),
     );
-    expect(mocks.tx.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: { calories: { increment: 240 }, proteinG: { increment: 6 } },
-      }),
-    );
+    const { sql, values } = lastRawSql(mocks.tx.$executeRaw);
+    expect(sql).toContain("ON CONFLICT (user_id, date) DO UPDATE");
+    expect(values).toContain(240);
+    expect(values).toContain(6);
   });
 
   it("replays an exact same-user retry without creating a second row", async () => {
@@ -282,11 +277,9 @@ describe("updateMeal", () => {
       }),
     );
     // 300 − 240 = +60 kcal; 20 − 6 = +14 g protein.
-    expect(mocks.tx.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: { calories: { increment: 60 }, proteinG: { increment: 14 } },
-      }),
-    );
+    const { values } = lastRawSql(mocks.tx.$executeRaw);
+    expect(values).toContain(60);
+    expect(values).toContain(14);
   });
 
   it("refuses a stale edit instead of corrupting the day's totals", async () => {
@@ -297,7 +290,7 @@ describe("updateMeal", () => {
       statusCode: 409,
       code: "MEAL_CHANGED",
     });
-    expect(mocks.tx.dailyLog.upsert).not.toHaveBeenCalled();
+    expect(mocks.tx.$executeRaw).not.toHaveBeenCalled();
   });
 
   it("returns null for a meal the caller does not own", async () => {
@@ -316,16 +309,11 @@ describe("deleteMeal", () => {
     expect(mocks.tx.mealLog.deleteMany).toHaveBeenCalledWith({
       where: { id: requestId, userId, calories: 240, proteinG: 6 },
     });
-    expect(mocks.tx.dailyLog.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: { calories: { increment: -240 }, proteinG: { increment: -6 } },
-      }),
-    );
-    // The negative delta is clamped after the atomic subtraction.
-    expect(mocks.tx.dailyLog.updateMany).toHaveBeenCalledWith({
-      where: { userId, date: new Date("2026-10-10"), calories: { lt: 0 } },
-      data: { calories: 0 },
-    });
+    // The negative delta is clamped in the same statement.
+    const { sql, values } = lastRawSql(mocks.tx.$executeRaw);
+    expect(sql).toContain("GREATEST(0,");
+    expect(values).toContain(-240);
+    expect(values).toContain(-6);
   });
 
   it("refuses a stale delete", async () => {
@@ -336,7 +324,7 @@ describe("deleteMeal", () => {
       statusCode: 409,
       code: "MEAL_CHANGED",
     });
-    expect(mocks.tx.dailyLog.upsert).not.toHaveBeenCalled();
+    expect(mocks.tx.$executeRaw).not.toHaveBeenCalled();
   });
 
   it("returns false for a meal the caller does not own", async () => {
