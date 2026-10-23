@@ -70,6 +70,9 @@ Body:
   "exercise_name": "Barbell Bench Press",
   "weight_kg": 62.5,
   "reps": 5,
+  "plate_position": null,
+  "plate_increment": null,
+  "plate_unit": null,
   "plan_day_id": "uuid | null"
 }
 ```
@@ -77,6 +80,13 @@ Body:
 `weight_kg` may be `null` for a bodyweight set (reps only) — e.g. a hanging leg
 raise or plank. Bodyweight sets still count as logged sets/reps, but they add no
 volume and never set a kg record or strength delta.
+
+For a machine plate stack, send `weight_kg: null` plus `plate_position` (1-based
+stack number). Optionally include the calibration snapshot `plate_increment` and
+`plate_unit` (`"kg"` or `"lb"`); they must be supplied together. A position
+without calibration is valid. `plate_position` and a non-null `weight_kg` are
+mutually exclusive. Plate sets count as work but stay out of kg volume, records
+and strength trends; any estimated load is display-only.
 
 Without `id`, each request appends a new set and returns `201`. With a new
 client UUID, the server creates that row and returns `201`; retrying the same
@@ -94,15 +104,18 @@ Returns lift history for one exercise, used by Trends deltas. Also accepts
 
 The Lift screen's "recent exercises" chips, its `Last:` cue and its set-by-set
 pre-fill, computed server-side:
-`{ names: string[], last_by_exercise: LiftLog[], last_sets_by_exercise: Record<string, { date: string, sets: { weight_kg: number | null, reps: number }[] }> }`
+`{ names: string[], last_by_exercise: LiftLog[], last_sets_by_exercise: Record<string, { date: string, sets: LiftSetLoad[] }> }`
 — up to 12 distinct exercise names ordered by most recently used, plus one row per
 exercise (newest session, heaviest set of it) and that session's full set list in
 logged order (capped at 20 sets). `before` is the athlete's local date; the "last"
 rows are strictly before it, so today's own sets never count as "last". This
 replaced a client-side download of every set in the window.
 
-Each set is `{ weight_kg: number | null, reps: number }` — `null` means the set was
-bodyweight, so the lift rows pre-fill reps only.
+Each set is a `LiftSetLoad`: `{ weight_kg: number | null, reps: number,
+plate_position?, plate_increment?, plate_unit? }`. `weight_kg` null means the set
+was bodyweight (no plate fields) or a machine stack (`plate_position` set). Lift
+rows pre-fill a plate exercise's previous position (falling back to the plan's
+minimum) and never pre-fill a kg load for it.
 
 ## `GET /api/logs/lift/metrics?from&to&prev_from&prev_to`
 
@@ -179,15 +192,27 @@ Response (day resolves):
         "reps": "5",
         "weight_kg": 60,
         "set_targets": [{ "weight_kg": 60 }, { "weight_kg": 62.5 }],
+        "load_mode": "weight",
+        "plate_config": null,
         "logged": false,
         "last_log": null
       },
       {
-        "name": "Overhead Press",
+        "name": "Leg Press",
         "sets": 3,
-        "reps": "8-12",
+        "reps": "10",
+        "weight_kg": null,
+        "set_targets": null,
+        "load_mode": "plate",
+        "plate_config": { "unit": "kg", "increment": 5, "min_position": 1, "max_position": 20 },
         "logged": true,
-        "last_log": { "weight_kg": 40, "reps": 10 }
+        "last_log": {
+          "weight_kg": null,
+          "reps": 10,
+          "plate_position": 8,
+          "plate_increment": 5,
+          "plate_unit": "kg"
+        }
       }
     ]
   }
@@ -242,6 +267,23 @@ scheme for that set. Both are carried through unchanged and drive the target
 caption under each row on the Lift screen (`Plan · 62.5 kg × 8`) and the
 set-by-set pre-fill from the previous session. `set_targets` is capped at 99
 entries; plans saved without it behave exactly as before.
+
+For a machine stack, add `"load_mode": "plate"` and optionally a calibration:
+```json
+{
+  "name": "Leg Press",
+  "sets": 3,
+  "reps": "10",
+  "load_mode": "plate",
+  "plate_config": { "unit": "kg", "increment": 5, "min_position": 1, "max_position": 20 }
+}
+```
+`plate_config` requires `load_mode: "plate"`; omit it to log positions without
+load estimates. `increment` is the load one numbered position represents (so
+estimated load = position × increment), and positions are 1-based.
+`max_position` must be ≥ `min_position`. Plate exercises should omit
+`weight_kg`/`set_targets`; the Lift screen asks for a stack position instead of
+kg. The plan JSON is stored as-is, so existing kg-only exercises are unchanged.
 
 Persists the plan and its days/exercises, sets it as the active plan
 (deactivates any prior active plan for that user). Returns the created

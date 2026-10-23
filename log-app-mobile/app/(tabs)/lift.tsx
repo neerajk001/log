@@ -319,6 +319,8 @@ export default function LiftScreen() {
                     sets={ex.sets}
                     reps={ex.reps}
                     plannedWeight={ex.weight_kg ?? null}
+                    plateMode={ex.load_mode === "plate"}
+                    plateConfig={ex.plate_config ?? null}
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
                     lastLog={lastByExercise.get(ex.name) ?? null}
                     lastSession={lastSetsByExercise.get(ex.name) ?? null}

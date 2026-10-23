@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { spacing } from "../../theme/spacing";
 import { Button, Card, EmptyState, IconBadge, SectionHeader } from "../ui/primitives";
-import { formatSetLoad } from "../../utils/bodyweight";
+import { formatLiftSet } from "../../utils/plate";
 import type { LiftLog } from "../../api/types";
 
 export interface LiftGroup {
@@ -11,12 +11,24 @@ export interface LiftGroup {
   sets: LiftLog[];
 }
 
-/** Best set today, measured by weight then reps (bodyweight sets never outrank loaded ones). */
+/**
+ * Best set today: kg outranks a machine position, which outranks bodyweight;
+ * within a mode compare load/position (or reps for bodyweight).
+ */
 function topSet(sets: LiftLog[]): LiftLog {
-  return sets.reduce((best, s) => {
-    if (s.weight_kg == null) return best;
-    if (best.weight_kg == null) return s;
-    return s.weight_kg > best.weight_kg ? s : best;
+  const rank = (set: LiftLog): number =>
+    set.weight_kg != null ? 2 : set.plate_position != null ? 1 : 0;
+  return sets.reduce((best, set) => {
+    const a = rank(set);
+    const b = rank(best);
+    if (a !== b) return a > b ? set : best;
+    if (a === 2) {
+      return (set.weight_kg ?? 0) > (best.weight_kg ?? 0) ? set : best;
+    }
+    if (a === 1) {
+      return (set.plate_position ?? 0) > (best.plate_position ?? 0) ? set : best;
+    }
+    return set.reps > best.reps ? set : best;
   }, sets[0]);
 }
 
@@ -60,7 +72,7 @@ export function RecentLiftsRow({
                       {g.name}
                     </Text>
                     <Text style={[typography.small, styles.liftMeta]} numberOfLines={1}>
-                      {formatSetLoad(top.weight_kg, top.reps)} · {g.sets.length}{" "}
+                      {formatLiftSet(top)} · {g.sets.length}{" "}
                       {g.sets.length === 1 ? "set" : "sets"}
                     </Text>
                   </View>

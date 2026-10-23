@@ -18,21 +18,86 @@ export const dailyLogSchema = z.object({
   sleep_hours: z.number().positive().max(24).optional().nullable(),
 });
 
-export const liftLogSchema = z.object({
-  id: z.string().uuid().optional(),
-  date: dateString,
-  exercise_name: z.string().min(1).max(120),
-  /** Null = bodyweight set (reps only), e.g. a hanging leg raise. */
-  weight_kg: z.number().positive().max(9999).nullable(),
-  reps: z.number().int().positive().max(9999),
-  plan_day_id: z.string().uuid().optional().nullable(),
-});
+export const liftLogSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    date: dateString,
+    exercise_name: z.string().min(1).max(120),
+    /**
+     * Null = bodyweight set (reps only) or a machine plate-stack set. Plate sets
+     * carry `plate_position` instead of a weight.
+     */
+    weight_kg: z.number().positive().max(9999).nullable(),
+    reps: z.number().int().positive().max(9999),
+    /** Numbered stack position (1-based) for machine exercises. */
+    plate_position: z.number().int().min(1).max(999).optional().nullable(),
+    /** Calibration snapshot: load added per stack position, in `plate_unit`. */
+    plate_increment: z.number().positive().max(9999).optional().nullable(),
+    plate_unit: z.enum(["kg", "lb"]).optional().nullable(),
+    plan_day_id: z.string().uuid().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.weight_kg != null && data.plate_position != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_position"],
+        message: "a set cannot have both weight_kg and plate_position",
+      });
+    }
+    if ((data.plate_increment == null) !== (data.plate_unit == null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_increment"],
+        message: "plate_increment and plate_unit must be provided together",
+      });
+    }
+    if (
+      data.plate_position == null &&
+      (data.plate_increment != null || data.plate_unit != null)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_position"],
+        message: "plate_position is required with plate calibration",
+      });
+    }
+  });
 
-export const liftLogUpdateSchema = z.object({
-  /** Null = bodyweight set: clears any stored load. */
-  weight_kg: z.number().positive().max(9999).nullable(),
-  reps: z.number().int().positive().max(9999),
-});
+export const liftLogUpdateSchema = z
+  .object({
+    /** Null = bodyweight or plate set: clears any stored kg load. */
+    weight_kg: z.number().positive().max(9999).nullable(),
+    reps: z.number().int().positive().max(9999),
+    plate_position: z.number().int().min(1).max(999).optional().nullable(),
+    plate_increment: z.number().positive().max(9999).optional().nullable(),
+    plate_unit: z.enum(["kg", "lb"]).optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.weight_kg != null && data.plate_position != null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_position"],
+        message: "a set cannot have both weight_kg and plate_position",
+      });
+    }
+    if ((data.plate_increment == null) !== (data.plate_unit == null)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_increment"],
+        message: "plate_increment and plate_unit must be provided together",
+      });
+    }
+    if (
+      data.plate_position == null &&
+      (data.plate_increment != null || data.plate_unit != null)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_position"],
+        message: "plate_position is required with plate calibration",
+      });
+    }
+  });
 
 export const mealItemSchema = z.object({
   name: z.string().min(1).max(120),
@@ -122,18 +187,49 @@ export const planSetTargetSchema = z.object({
   reps: z.string().min(1).max(20).optional(),
 });
 
-export const planExerciseSchema = z.object({
-  name: z.string().min(1).max(120),
-  sets: z.number().int().positive().max(99),
-  reps: z.string().min(1).max(20),
-  /** Optional target weight the athlete plans to lift. */
-  weight_kg: z.number().positive().max(9999).optional(),
-  /**
-   * Per-set targets in set order (entry 1 = set 1), for pyramid work. Optional:
-   * `weight_kg` stays the default for any set without its own target.
-   */
-  set_targets: z.array(planSetTargetSchema).max(99).optional(),
-});
+/**
+ * Machine plate-stack calibration. `increment` is the load one numbered stack
+ * position represents, so estimated load = position × increment. Both positions
+ * are 1-based; `min_position` is usually 1.
+ */
+export const plateConfigSchema = z
+  .object({
+    unit: z.enum(["kg", "lb"]),
+    increment: z.number().positive().max(9999),
+    min_position: z.number().int().min(1).max(999),
+    max_position: z.number().int().min(1).max(999),
+  })
+  .refine((c) => c.max_position >= c.min_position, {
+    message: "max_position must be greater than or equal to min_position",
+    path: ["max_position"],
+  });
+
+export const planExerciseSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    sets: z.number().int().positive().max(99),
+    reps: z.string().min(1).max(20),
+    /** Optional target weight the athlete plans to lift (free-weight mode). */
+    weight_kg: z.number().positive().max(9999).optional(),
+    /**
+     * Per-set targets in set order (entry 1 = set 1), for pyramid work. Optional:
+     * `weight_kg` stays the default for any set without its own target.
+     */
+    set_targets: z.array(planSetTargetSchema).max(99).optional(),
+    /** How this exercise is loaded. Absent = free weights (kg). */
+    load_mode: z.enum(["weight", "plate"]).optional(),
+    /** Optional calibration for plate-stack exercises; absent = log position only. */
+    plate_config: plateConfigSchema.optional().nullable(),
+  })
+  .superRefine((exercise, ctx) => {
+    if (exercise.plate_config && exercise.load_mode !== "plate") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_config"],
+        message: "plate_config requires load_mode 'plate'",
+      });
+    }
+  });
 
 export const planDaySchema = z.object({
   day_name: z.string().min(1).max(200),

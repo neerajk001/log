@@ -1,19 +1,23 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../db/client";
 import { AppError } from "../middleware/errorHandler";
-import { liftLogSchema } from "../validation/schemas";
+import { liftLogSchema, liftLogUpdateSchema } from "../validation/schemas";
 import type { z } from "zod";
 
 export type LiftLogInput = z.infer<typeof liftLogSchema>;
+export type LiftLogUpdateInput = z.infer<typeof liftLogUpdateSchema>;
 
 type LiftLogRecord = {
   id: string;
   userId: string;
   date: Date;
   exerciseName: string;
-  /** Null = bodyweight set (reps only). */
+  /** Null = bodyweight set (reps only) or a machine plate-stack set. */
   weightKg: Prisma.Decimal | null;
   reps: number;
+  platePosition: number | null;
+  plateIncrement: Prisma.Decimal | null;
+  plateUnit: string | null;
   planDayId: string | null;
 };
 
@@ -26,6 +30,9 @@ const liftLogSelect = {
   exerciseName: true,
   weightKg: true,
   reps: true,
+  platePosition: true,
+  plateIncrement: true,
+  plateUnit: true,
   planDayId: true,
 } satisfies Prisma.LiftLogSelect;
 
@@ -36,22 +43,28 @@ export function serializeLiftLog(log: Omit<LiftLogRecord, "userId"> | LiftLogRec
     exercise_name: log.exerciseName,
     weight_kg: log.weightKg == null ? null : Number(log.weightKg),
     reps: log.reps,
+    plate_position: log.platePosition ?? null,
+    plate_increment: log.plateIncrement == null ? null : Number(log.plateIncrement),
+    plate_unit: log.plateUnit === "kg" || log.plateUnit === "lb" ? log.plateUnit : null,
     plan_day_id: log.planDayId,
   };
 }
 
+function sameDecimal(stored: Prisma.Decimal | null, input: number | null | undefined): boolean {
+  if (stored == null) return input == null;
+  return input != null && stored.equals(new Prisma.Decimal(input).toDecimalPlaces(2));
+}
+
 function sameLiftRequest(log: LiftLogRecord, userId: string, input: LiftLogInput): boolean {
-  const weightMatches =
-    log.weightKg == null
-      ? input.weight_kg == null
-      : input.weight_kg != null &&
-        log.weightKg.equals(new Prisma.Decimal(input.weight_kg).toDecimalPlaces(2));
   return (
     log.userId === userId &&
     log.date.toISOString().slice(0, 10) === input.date &&
     log.exerciseName === input.exercise_name &&
-    weightMatches &&
+    sameDecimal(log.weightKg, input.weight_kg) &&
     log.reps === input.reps &&
+    (log.platePosition ?? null) === (input.plate_position ?? null) &&
+    sameDecimal(log.plateIncrement, input.plate_increment) &&
+    (log.plateUnit ?? null) === (input.plate_unit ?? null) &&
     log.planDayId === (input.plan_day_id ?? null)
   );
 }
@@ -104,6 +117,9 @@ export async function createLiftLogIdempotent(
         exerciseName: input.exercise_name,
         weightKg: input.weight_kg ?? null,
         reps: input.reps,
+        platePosition: input.plate_position ?? null,
+        plateIncrement: input.plate_increment ?? null,
+        plateUnit: input.plate_unit ?? null,
         planDayId: input.plan_day_id ?? null,
       },
       select: liftLogSelect,
@@ -129,12 +145,34 @@ export async function createLiftLogIdempotent(
 export async function updateLiftLog(
   userId: string,
   id: string,
-  input: { weight_kg: number | null; reps: number },
+  input: LiftLogUpdateInput,
   client: LiftLogClient = prisma,
 ): Promise<LiftLogRecord | null> {
+  const data: Prisma.LiftLogUpdateManyMutationInput = {
+    weightKg: input.weight_kg,
+    reps: input.reps,
+  };
+  if (input.weight_kg != null) {
+    // A kg set replaces any plate-stack data on the row.
+    data.platePosition = null;
+    data.plateIncrement = null;
+    data.plateUnit = null;
+  } else if (input.plate_position !== undefined) {
+    data.platePosition = input.plate_position;
+    if (input.plate_position == null) {
+      // Clearing the position clears its calibration.
+      if (input.plate_increment === undefined) data.plateIncrement = null;
+      if (input.plate_unit === undefined) data.plateUnit = null;
+    }
+    if (input.plate_increment !== undefined) data.plateIncrement = input.plate_increment;
+    if (input.plate_unit !== undefined) data.plateUnit = input.plate_unit;
+  }
+  // When plate fields are omitted (e.g. a coach correcting reps), keep the
+  // existing plate snapshot instead of silently turning the set into bodyweight.
+
   const result = await client.liftLog.updateMany({
     where: { id, userId },
-    data: { weightKg: input.weight_kg, reps: input.reps },
+    data,
   });
   if (result.count === 0) return null;
   return findExisting(client, id);
@@ -142,9 +180,14 @@ export async function updateLiftLog(
 
 /** One set of a previous session, in the order it was logged. */
 export interface ExerciseSet {
-  /** Null = bodyweight set (reps only). */
+  /** Null = bodyweight set (reps only) or machine plate-stack set. */
   weight_kg: number | null;
   reps: number;
+  /** Numbered stack position for machine sets; null otherwise. */
+  plate_position: number | null;
+  /** Calibration snapshot for the set, so history stays correct. */
+  plate_increment: number | null;
+  plate_unit: string | null;
 }
 
 /** The sets of an exercise's previous session. */
@@ -305,7 +348,11 @@ export async function getLiftSummary(
   // Bodyweight sets (null) sort after weighted ones, so a loaded set stays the cue.
   const lastByExercise = await client.liftLog.findMany({
     where: { userId, exerciseName: { in: names }, date: { lt: before } },
-    orderBy: [{ date: "desc" }, { weightKg: { sort: "desc", nulls: "last" } }],
+    orderBy: [
+      { date: "desc" },
+      { weightKg: { sort: "desc", nulls: "last" } },
+      { platePosition: { sort: "desc", nulls: "last" } },
+    ],
     distinct: ["exerciseName"],
     select: liftLogSelect,
   });
@@ -332,6 +379,9 @@ export async function getLiftSummary(
       .map((row) => ({
         weight_kg: row.weightKg == null ? null : Number(row.weightKg),
         reps: row.reps,
+        plate_position: row.platePosition ?? null,
+        plate_increment: row.plateIncrement == null ? null : Number(row.plateIncrement),
+        plate_unit: row.plateUnit === "kg" || row.plateUnit === "lb" ? row.plateUnit : null,
       }));
     if (sets.length > 0) lastSetsByExercise[exercise] = { date, sets };
   }

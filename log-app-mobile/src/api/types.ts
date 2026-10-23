@@ -23,13 +23,34 @@ export interface DailyDefaults {
 
 export type DailyField = "weight_kg" | "calories" | "protein_g" | "sleep_hours";
 
-export interface LiftLog {
+export type PlateUnit = "kg" | "lb";
+
+/** Machine stack calibration: estimated load = position × increment. */
+export interface PlateConfig {
+  unit: PlateUnit;
+  increment: number;
+  /** 1-based stack positions; `min_position` is usually 1. */
+  min_position: number;
+  max_position: number;
+}
+
+/** A logged set's load: kg, bodyweight, or a numbered machine position. */
+export interface LiftSetLoad {
+  /** Null = bodyweight or plate-stack set. */
+  weight_kg: number | null;
+  reps: number;
+  plate_position?: number | null;
+  plate_increment?: number | null;
+  plate_unit?: PlateUnit | null;
+}
+
+export interface LiftLog extends LiftSetLoad {
   id: string;
   date: string;
   exercise_name: string;
-  /** Null = bodyweight set (reps only). */
-  weight_kg: number | null;
-  reps: number;
+  plate_position: number | null;
+  plate_increment: number | null;
+  plate_unit: PlateUnit | null;
   plan_day_id: string | null;
 }
 
@@ -37,10 +58,22 @@ export interface LiftLogCreate {
   id?: string;
   date: string;
   exercise_name: string;
-  /** Null = bodyweight set (reps only). */
+  /** Null = bodyweight or plate-stack set. */
   weight_kg?: number | null;
   reps: number;
+  plate_position?: number | null;
+  plate_increment?: number | null;
+  plate_unit?: PlateUnit | null;
   plan_day_id?: string | null;
+}
+
+export interface LiftLogUpdate {
+  weight_kg: number | null;
+  reps: number;
+  /** Omit to keep the set's existing plate position. */
+  plate_position?: number | null;
+  plate_increment?: number | null;
+  plate_unit?: PlateUnit | null;
 }
 
 export type ActivityType = "run" | "cycle" | "walk" | "swim" | "other";
@@ -111,6 +144,10 @@ export interface PlanExercise {
   weight_kg?: number | null;
   /** Per-set targets in set order (entry 1 = set 1); optional. */
   set_targets?: PlanSetTarget[] | null;
+  /** How the exercise is loaded. Absent = free weights (kg). */
+  load_mode?: "weight" | "plate";
+  /** Optional calibration for machine plate-stack exercises. */
+  plate_config?: PlateConfig | null;
 }
 
 export interface PlanDay {
@@ -141,8 +178,10 @@ export interface ParsedPlanPreview {
 
 export interface PlanTodayExercise extends PlanExercise {
   weight_kg: number | null;
+  load_mode: "weight" | "plate";
+  plate_config: PlateConfig | null;
   logged: boolean;
-  last_log: { weight_kg: number | null; reps: number } | null;
+  last_log: LiftSetLoad | null;
 }
 
 export interface PlanDayToday {
@@ -380,8 +419,8 @@ export type CoachProposal = (
       set_id: string;
       date: string;
       exercise: string;
-      from: { weight_kg: number | null; reps: number };
-      to: { weight_kg: number | null; reps: number };
+      from: LiftSetLoad;
+      to: LiftSetLoad;
     }
   | {
       kind: "set_delete";
@@ -390,6 +429,9 @@ export type CoachProposal = (
       exercise: string;
       weight_kg: number | null;
       reps: number;
+      plate_position?: number | null;
+      plate_increment?: number | null;
+      plate_unit?: PlateUnit | null;
     }
   | {
       kind: "meal_log";
@@ -442,7 +484,7 @@ export interface DismissedMeal {
 /** One previous session's sets, in the order they were logged. */
 export interface LastSessionSets {
   date: string;
-  sets: { weight_kg: number | null; reps: number }[];
+  sets: LiftSetLoad[];
 }
 
 /** Recent exercise names, plus the top set from each one's previous session. */

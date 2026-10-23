@@ -9,6 +9,7 @@ import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { Button, Card, EmptyState, ErrorState, LoadingState, IconBadge, SectionHeader } from "../../src/components/ui/primitives";
 import { usePlans } from "../../src/hooks/usePlans";
 import { muscleGroupsForDay } from "../../src/utils/derive";
+import { formatPlanLoad } from "../../src/utils/plate";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
 function accents(colors: Palette) {
@@ -183,7 +184,7 @@ export default function PlanScreen() {
                                 </Text>
                                 <Text style={typography.small}>
                                   {ex.sets} × {ex.reps}
-                                  {ex.weight_kg != null ? ` · ${ex.weight_kg} kg` : ""}
+                                  {formatPlanLoad(ex) ? ` · ${formatPlanLoad(ex)}` : ""}
                                 </Text>
                               </View>
                             ))}

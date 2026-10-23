@@ -12,7 +12,11 @@ import { usePlansApi } from "../../src/api/plans";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { ApiError } from "../../src/api/client";
 import { filePart } from "../../src/utils/upload";
-import { emptyDay, type EditableDay } from "../../src/components/PlanDaysEditor";
+import {
+  emptyDay,
+  plateFieldsFromExercise,
+  type EditableDay,
+} from "../../src/components/PlanDaysEditor";
 import { editorWeightsFromExercise } from "../../src/utils/planTargets";
 
 /** Keep in step with the server's cap (routes/plans.ts) — it sends the file to the model. */
@@ -28,6 +32,13 @@ function toEditableDays(
       reps: string;
       weight_kg?: number | null;
       set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+      load_mode?: "weight" | "plate" | null;
+      plate_config?: {
+        unit: "kg" | "lb";
+        increment: number;
+        min_position: number;
+        max_position: number;
+      } | null;
     }[];
   }[],
 ): EditableDay[] {
@@ -38,6 +49,7 @@ function toEditableDays(
       sets: String(e.sets),
       reps: e.reps,
       setWeights: editorWeightsFromExercise(e),
+      ...plateFieldsFromExercise(e),
     })),
   }));
 }

@@ -1,6 +1,12 @@
 import { useMemo } from "react";
 import { useApiClient } from "./client";
-import type { LiftLog, LiftLogCreate, LiftMetrics, LiftSummary } from "./types";
+import type {
+  LiftLog,
+  LiftLogCreate,
+  LiftLogUpdate,
+  LiftMetrics,
+  LiftSummary,
+} from "./types";
 
 export function useLiftLogsApi() {
   const client = useApiClient();
@@ -20,7 +26,7 @@ export function useLiftLogsApi() {
           `/api/logs/lift/metrics?from=${from}&to=${to}&prev_from=${prevFrom}&prev_to=${prevTo}`,
         ),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
-      updateLiftLog: (id: string, data: { weight_kg: number | null; reps: number }) =>
+      updateLiftLog: (id: string, data: LiftLogUpdate) =>
         client.put<LiftLog>(`/api/logs/lift/${id}`, data),
     }),
     [client],

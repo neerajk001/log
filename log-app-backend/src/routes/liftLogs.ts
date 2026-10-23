@@ -11,6 +11,7 @@ import {
   getLiftSummary,
   serializeLiftLog,
   updateLiftLog,
+  type LiftLogUpdateInput,
 } from "../services/liftLogs";
 import { assertRangeSize } from "../utils/range";
 
@@ -30,6 +31,9 @@ router.post("/lift", requireAuth, validate(liftLogSchema), async (req, res: Resp
       exercise_name: req.body.exercise_name,
       weight_kg: req.body.weight_kg,
       reps: req.body.reps,
+      plate_position: req.body.plate_position ?? null,
+      plate_increment: req.body.plate_increment ?? null,
+      plate_unit: req.body.plate_unit ?? null,
       plan_day_id: req.body.plan_day_id ?? null,
     });
   }
@@ -44,6 +48,9 @@ router.post("/lift", requireAuth, validate(liftLogSchema), async (req, res: Resp
       exercise_name: log.exerciseName,
       weight_kg: log.weightKg == null ? null : Number(log.weightKg),
       reps: log.reps,
+      plate_position: log.platePosition,
+      plate_increment: log.plateIncrement == null ? null : Number(log.plateIncrement),
+      plate_unit: log.plateUnit,
       plan_day_id: log.planDayId,
     });
   }
@@ -98,6 +105,9 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
       exerciseName: true,
       weightKg: true,
       reps: true,
+      platePosition: true,
+      plateIncrement: true,
+      plateUnit: true,
       planDayId: true,
     },
   });
@@ -166,7 +176,7 @@ router.put(
   validate(liftLogUpdateSchema),
   async (req, res: Response) => {
     const { id } = req.params as unknown as { id: string };
-    const input = req.body as { weight_kg: number | null; reps: number };
+    const input = req.body as LiftLogUpdateInput;
 
     const log = await updateLiftLog(req.userId, id, input);
     if (!log) {

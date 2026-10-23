@@ -11,7 +11,8 @@ import { useLiftLogsApi } from "../../api/liftLogs";
 import { useMealsApi } from "../../api/meals";
 import { setPendingPlan } from "../../state/parsedPlan";
 import { formatMediumDate } from "../../utils/date";
-import { formatSetLoad } from "../../utils/bodyweight";
+import { formatLiftSet } from "../../utils/plate";
+import { emptyExercise } from "../PlanDaysEditor";
 import type { IoniconName } from "../ui/primitives";
 import type { ChatProposal } from "../../hooks/useCoachChat";
 import type { MealItem } from "../../api/types";
@@ -103,10 +104,10 @@ export function ProposalCard({
               day_name: d.day_name,
               rationale: d.rationale,
               exercises: d.exercises.map((e) => ({
+                ...emptyExercise(),
                 name: e.name,
                 sets: String(e.sets),
                 reps: e.reps,
-                setWeights: [],
               })),
             }))
           : [],
@@ -137,6 +138,13 @@ export function ProposalCard({
       await liftApi.updateLiftLog(proposal.set_id, {
         weight_kg: proposal.to.weight_kg,
         reps: proposal.to.reps,
+        ...(proposal.to.plate_position !== undefined
+          ? {
+              plate_position: proposal.to.plate_position,
+              plate_increment: proposal.to.plate_increment ?? null,
+              plate_unit: proposal.to.plate_unit ?? null,
+            }
+          : {}),
       });
       resolve("applied", "Set updated.");
     } catch (err) {
@@ -234,7 +242,7 @@ export function ProposalCard({
       case "set_delete":
         Alert.alert(
           "Delete set?",
-          `${proposal.exercise} · ${formatSetLoad(proposal.weight_kg, proposal.reps)} will be removed.`,
+          `${proposal.exercise} · ${formatLiftSet(proposal)} will be removed.`,
           [
             { text: "Cancel", style: "cancel" },
             { text: "Delete", style: "destructive", onPress: () => void applyDelete() },
@@ -269,9 +277,9 @@ export function ProposalCard({
       case "plan_delete":
         return `Delete "${proposal.plan_name}"? This can't be undone.`;
       case "set_update":
-        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — ${formatSetLoad(proposal.from.weight_kg, proposal.from.reps)} → ${formatSetLoad(proposal.to.weight_kg, proposal.to.reps)}`;
+        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — ${formatLiftSet(proposal.from)} → ${formatLiftSet(proposal.to)}`;
       case "set_delete":
-        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${formatSetLoad(proposal.weight_kg, proposal.reps)}`;
+        return `${proposal.exercise} · ${formatMediumDate(proposal.date)} — remove ${formatLiftSet(proposal)}`;
       case "meal_log": {
         const provenance =
           proposal.source === "photo"

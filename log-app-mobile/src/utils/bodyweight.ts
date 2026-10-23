@@ -49,8 +49,8 @@ export function isBodyweightName(name: string): boolean {
  */
 export function inferLoadMode(input: {
   name: string;
-  lastSets?: { weight_kg: number | null }[] | null;
-  lastLog?: { weight_kg: number | null } | null;
+  lastSets?: { weight_kg: number | null; plate_position?: number | null }[] | null;
+  lastLog?: { weight_kg: number | null; plate_position?: number | null } | null;
   plannedWeight?: number | null;
   setTargets?: PlanSetTarget[] | null;
 }): LoadMode {
@@ -61,6 +61,9 @@ export function inferLoadMode(input: {
         ? [input.lastLog]
         : null;
   if (history) {
+    // A machine stack is unloaded in kg but is not bodyweight; the quick-log
+    // path has no position field, so treat it as a normal weighted entry.
+    if (history.some((set) => set.plate_position != null)) return "kg";
     return history.every((set) => set.weight_kg == null) ? "bw" : "kg";
   }
 

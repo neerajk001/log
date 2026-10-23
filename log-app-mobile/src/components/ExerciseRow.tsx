@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Crypto from "expo-crypto";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
@@ -9,9 +9,24 @@ import { muscleTagStyle, typeTagStyle } from "../utils/tags";
 import { parsePositiveInt, parsePositiveNumber, requestIdForAttempt } from "../utils/parse";
 import { buildSetSeeds } from "../utils/liftPrefill";
 import { formatTargetWeight, planHintFor } from "../utils/planTargets";
-import { formatSetLoad, inferLoadMode, type LoadMode } from "../utils/bodyweight";
+import { inferLoadMode, type LoadMode } from "../utils/bodyweight";
+import {
+  clampPlatePosition,
+  clampPositionToRange,
+  estimatedPlateLoad,
+  formatLiftSet,
+  formatPlateSet,
+  formatPlanLoad,
+} from "../utils/plate";
 import { formatMediumDate } from "../utils/date";
-import type { LastSessionSets, LiftLog, LiftLogCreate, PlanSetTarget } from "../api/types";
+import type {
+  LastSessionSets,
+  LiftLog,
+  LiftLogCreate,
+  LiftSetLoad,
+  PlanSetTarget,
+  PlateConfig,
+} from "../api/types";
 import { successTick } from "../hooks/useHaptics";
 import { SegmentedControl, StepField } from "./ui/controls";
 import { IconBadge, Tag } from "./ui/primitives";
@@ -28,12 +43,15 @@ interface Draft {
   ordinal: number;
   weight: string;
   reps: string;
+  /** Machine stack position; empty for kg/bodyweight rows. */
+  position: string;
   status: RowStatus;
   /** What the server actually stored, so a saved row keeps its load across mode switches. */
   savedWeight?: number | null;
+  savedPosition?: number | null;
 }
 
-function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
+function makeDraft(ordinal: number, weight = "", reps = "", position = ""): Draft {
   return {
     key: Crypto.randomUUID(),
     requestId: Crypto.randomUUID(),
@@ -41,13 +59,15 @@ function makeDraft(ordinal: number, weight = "", reps = ""): Draft {
     ordinal,
     weight,
     reps,
+    position,
     status: "idle",
   };
 }
 
-function canLogDraft(draft: Draft, bodyweight: boolean): boolean {
+function canLogDraft(draft: Draft, bodyweight: boolean, plate: boolean): boolean {
   const reps = parsePositiveInt(draft.reps.trim(), 9999) != null;
   if (!reps) return false;
+  if (plate) return parsePositiveInt(draft.position.trim(), 999) != null;
   return bodyweight || parsePositiveNumber(draft.weight.trim(), 9999) != null;
 }
 
@@ -55,11 +75,20 @@ function canLogDraft(draft: Draft, bodyweight: boolean): boolean {
  * One-line summary of a previous session: the load range plus how many sets.
  * A straight set reads "60 kg × 8 · 3 sets"; a pyramid reads "60–65 kg · 3 sets".
  */
-function lastSessionSummary(
-  sets: { weight_kg: number | null; reps: number }[],
-): string | null {
+function lastSessionSummary(sets: LiftSetLoad[]): string | null {
   if (sets.length === 0) return null;
   const count = `${sets.length} ${sets.length === 1 ? "set" : "sets"}`;
+  const positions = sets
+    .map((set) => set.plate_position ?? null)
+    .filter((position): position is number => position != null);
+  if (positions.length === sets.length) {
+    const reps = new Set(sets.map((set) => set.reps));
+    const min = Math.min(...positions);
+    const max = Math.max(...positions);
+    const load =
+      min === max ? `Pos ${min}` : `Pos ${min}–${max}`;
+    return reps.size === 1 ? `${load} × ${sets[0].reps} · ${count}` : `${load} · ${count}`;
+  }
   const weights = sets
     .map((set) => set.weight_kg)
     .filter((weight): weight is number => weight != null);
@@ -83,6 +112,8 @@ export function ExerciseRow({
   sets,
   reps,
   plannedWeight,
+  plateMode = false,
+  plateConfig,
   muscle,
   lastLog,
   lastSession,
@@ -103,9 +134,13 @@ export function ExerciseRow({
   reps: string;
   /** Target weight from the plan; used to pre-fill the inputs. */
   plannedWeight?: number | null;
+  /** Plan exercise uses a numbered machine stack instead of kg. */
+  plateMode?: boolean;
+  /** Optional calibration for the stack; without it only positions are logged. */
+  plateConfig?: PlateConfig | null;
   muscle?: string;
   /** The previous session's top set, when no per-set history exists. */
-  lastLog?: { weight_kg: number | null; reps: number } | null;
+  lastLog?: LiftSetLoad | null;
   /** The previous session in full (date + every set), for the reference line. */
   lastSession?: LastSessionSets | null;
   /** The plan's per-set targets, in order — shown as the caption under each row. */
@@ -143,6 +178,8 @@ export function ExerciseRow({
   const inFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const focusedRowRef = useRef<string | null>(null);
   const lastSets = lastSession?.sets ?? null;
+  const plateMin = plateConfig?.min_position ?? 1;
+  const plateMax = plateConfig?.max_position ?? 999;
 
   const applyDrafts = useCallback((update: (current: Draft[]) => Draft[]) => {
     const next = update(draftsRef.current);
@@ -174,7 +211,7 @@ export function ExerciseRow({
     if (initializedScopeRef.current === scopeKey) return;
     initializedScopeRef.current = scopeKey;
     setHistoryOpen(false);
-    const mode = inferLoadMode({ name, lastSets, lastLog, plannedWeight, setTargets });
+    const mode = plateMode ? "kg" : inferLoadMode({ name, lastSets, lastLog, plannedWeight, setTargets });
     loadModeRef.current = mode;
     setLoadMode(mode);
     const count = Math.max(1, sets - confirmedLogged.length);
@@ -188,11 +225,21 @@ export function ExerciseRow({
       plannedWeight,
       plannedReps: reps,
       lastLog,
-      bodyweight: mode === "bw",
+      bodyweight: !plateMode && mode === "bw",
+      plate: plateMode,
+      minPlatePosition: plateMin,
     });
-    const next = seeds.map((seed, draftIndex) =>
-      makeDraft(confirmedLogged.length + draftIndex + 1, seed.weight, seed.reps),
-    );
+    const next = seeds.map((seed, draftIndex) => {
+      const seedPosition = Number(seed.position);
+      return makeDraft(
+        confirmedLogged.length + draftIndex + 1,
+        seed.weight,
+        seed.reps,
+        seed.position.trim() !== "" && Number.isFinite(seedPosition)
+          ? String(clampPlatePosition(seedPosition, plateConfig))
+          : "",
+      );
+    });
     draftsRef.current = next;
     setDrafts(next);
   }, [
@@ -202,6 +249,9 @@ export function ExerciseRow({
     lastSets,
     logsLoading,
     name,
+    plateConfig,
+    plateMin,
+    plateMode,
     plannedWeight,
     reps,
     scopeKey,
@@ -221,16 +271,26 @@ export function ExerciseRow({
       if (!draft) return Promise.resolve();
       const bodyweight = loadModeRef.current === "bw";
       const parsedWeight = parsePositiveNumber(draft.weight.trim(), 9999);
+      const parsedPosition = parsePositiveInt(draft.position.trim(), 999);
       const repsNum = parsePositiveInt(draft.reps.trim(), 9999);
-      if (repsNum == null || (!bodyweight && parsedWeight == null)) return Promise.resolve();
-      const weight = bodyweight ? null : parsedWeight;
+      if (repsNum == null) return Promise.resolve();
+      if (plateMode && parsedPosition == null) return Promise.resolve();
+      if (!plateMode && !bodyweight && parsedWeight == null) return Promise.resolve();
+      const position =
+        plateMode && parsedPosition != null
+          ? clampPlatePosition(parsedPosition, plateConfig)
+          : null;
+      const weight = plateMode || bodyweight ? null : parsedWeight;
 
       // Same values => same request id (a lost response replays safely);
       // edited values => a fresh id, because replaying the old one with a
       // changed payload is a permanent 409.
+      const attempt = plateMode
+        ? `pos:${position}|${repsNum}`
+        : `${weight ?? "bw"}|${repsNum}`;
       const { requestId, lastAttempt } = requestIdForAttempt(
         draft,
-        `${weight ?? "bw"}|${repsNum}`,
+        attempt,
         () => Crypto.randomUUID(),
       );
       const requestScope = scopeKey;
@@ -246,6 +306,13 @@ export function ExerciseRow({
         exercise_name: name,
         weight_kg: weight,
         reps: repsNum,
+        ...(plateMode
+          ? {
+              plate_position: position,
+              plate_increment: plateConfig?.increment ?? null,
+              plate_unit: plateConfig?.unit ?? null,
+            }
+          : {}),
         plan_day_id: planDayId ?? null,
       })
         .then(() => {
@@ -254,7 +321,9 @@ export function ExerciseRow({
           // doesn't vanish and the set doesn't jump to the list above.
           applyDrafts((current) =>
             current.map((entry) =>
-              entry.key === key ? { ...entry, status: "saved", savedWeight: weight } : entry,
+              entry.key === key
+                ? { ...entry, status: "saved", savedWeight: weight, savedPosition: position }
+                : entry,
             ),
           );
           successTick();
@@ -276,11 +345,11 @@ export function ExerciseRow({
       inFlightRef.current.set(key, request);
       return request;
     },
-    [applyDrafts, date, name, onAddSet, planDayId, scopeKey],
+    [applyDrafts, date, name, onAddSet, planDayId, plateConfig, plateMode, scopeKey],
   );
 
   const patchDraft = useCallback(
-    (key: string, patch: Partial<Pick<Draft, "weight" | "reps">>) => {
+    (key: string, patch: Partial<Pick<Draft, "weight" | "reps" | "position">>) => {
       applyDrafts((current) =>
         current.map((entry) => {
           if (entry.key !== key) return entry;
@@ -322,7 +391,12 @@ export function ExerciseRow({
     );
     applyDrafts((current) => [
       ...current,
-      makeDraft(highestOrdinal + 1, current[current.length - 1]?.weight ?? "", current[current.length - 1]?.reps ?? ""),
+      makeDraft(
+        highestOrdinal + 1,
+        current[current.length - 1]?.weight ?? "",
+        current[current.length - 1]?.reps ?? "",
+        current[current.length - 1]?.position ?? "",
+      ),
     ]);
   }, [applyDrafts, doneCount]);
 
@@ -366,13 +440,15 @@ export function ExerciseRow({
     [activeRequestIds, logged],
   );
   const canExpand = !!onToggle;
-  const bodyweight = loadMode === "bw";
-  const targetText = formatTargetWeight({ sets, weight_kg: plannedWeight, set_targets: setTargets });
+  const bodyweight = !plateMode && loadMode === "bw";
+  const targetText = plateMode
+    ? formatPlanLoad({ load_mode: "plate", plate_config: plateConfig })
+    : formatTargetWeight({ sets, weight_kg: plannedWeight, set_targets: setTargets });
   /** The previous session in one glance; tapping it opens every set. */
   const lastSummary = lastSession
     ? lastSessionSummary(lastSession.sets)
     : lastLog
-      ? formatSetLoad(lastLog.weight_kg, lastLog.reps)
+      ? formatLiftSet(lastLog)
       : null;
 
   return (
@@ -459,9 +535,12 @@ export function ExerciseRow({
           {historyOpen && lastSession ? (
             <View style={styles.historyPanel}>
               {lastSession.sets.map((set, i) => (
-                <View key={`${i}-${set.weight_kg}-${set.reps}`} style={styles.setPill}>
+                <View
+                  key={`${i}-${set.weight_kg}-${set.plate_position ?? "x"}-${set.reps}`}
+                  style={styles.setPill}
+                >
                   <Text style={styles.setPillIndex}>{i + 1}</Text>
-                  <Text style={styles.setPillValue}>{formatSetLoad(set.weight_kg, set.reps)}</Text>
+                  <Text style={styles.setPillValue}>{formatLiftSet(set)}</Text>
                 </View>
               ))}
             </View>
@@ -471,22 +550,28 @@ export function ExerciseRow({
 
       {expanded ? (
         <View style={styles.expanded}>
-          <SegmentedControl
-            options={[
-              { value: "kg", label: "Weighted" },
-              { value: "bw", label: "Bodyweight" },
-            ]}
-            value={loadMode}
-            onChange={changeLoadMode}
-          />
+          {plateMode ? (
+            <Text style={[typography.small, styles.plateModeNote]}>
+              {plateConfig
+                ? `Machine stack · ${plateConfig.increment}${plateConfig.unit} per position`
+                : "Machine stack · log the numbered position"}
+            </Text>
+          ) : (
+            <SegmentedControl
+              options={[
+                { value: "kg", label: "Weighted" },
+                { value: "bw", label: "Bodyweight" },
+              ]}
+              value={loadMode}
+              onChange={changeLoadMode}
+            />
+          )}
           {visibleLogged.length > 0 ? (
             <View style={styles.loggedList}>
               {visibleLogged.map((entry) => (
                 <View key={entry.id} style={styles.loggedRow}>
                   <Ionicons name="checkmark-circle" size={16} color={colors.success} />
-                  <Text style={typography.bodyStrong}>
-                    {formatSetLoad(entry.weight_kg, entry.reps)}
-                  </Text>
+                  <Text style={typography.bodyStrong}>{formatLiftSet(entry)}</Text>
                   <Pressable
                     onPress={() => confirmDelete(entry.id)}
                     hitSlop={14}
@@ -501,12 +586,22 @@ export function ExerciseRow({
           ) : null}
 
           {drafts.map((draft) => {
-            const hint = planHintFor(draft.ordinal - 1, {
-              sets,
-              reps,
-              weight_kg: plannedWeight,
-              set_targets: setTargets,
-            });
+            const hint = plateMode
+              ? planHintFor(draft.ordinal - 1, { sets, reps, weight_kg: null })
+              : planHintFor(draft.ordinal - 1, {
+                  sets,
+                  reps,
+                  weight_kg: plannedWeight,
+                  set_targets: setTargets,
+                });
+            const draftReps = parsePositiveInt(draft.reps, 9999) ?? 0;
+            const rawPosition = parsePositiveInt(draft.position, 999);
+            const draftPosition =
+              rawPosition != null ? clampPlatePosition(rawPosition, plateConfig) : null;
+            const estimate =
+              plateMode && draftPosition != null
+                ? estimatedPlateLoad(draftPosition, plateConfig)
+                : null;
             // Logged sets stay where they were entered instead of jumping up to
             // the list above, so the row you were on is still under your thumb.
             if (draft.status === "saved") {
@@ -517,7 +612,19 @@ export function ExerciseRow({
                   </View>
                   <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                   <Text style={[typography.bodyStrong, styles.savedValues]}>
-                    {formatSetLoad(draft.savedWeight, parsePositiveInt(draft.reps, 9999) ?? 0)}
+                    {plateMode
+                      ? formatPlateSet(
+                          {
+                            plate_position: draft.savedPosition ?? null,
+                            plate_increment: plateConfig?.increment ?? null,
+                            plate_unit: plateConfig?.unit ?? null,
+                          },
+                          draftReps,
+                        )
+                      : formatLiftSet({
+                          weight_kg: draft.savedWeight ?? null,
+                          reps: draftReps,
+                        })}
                   </Text>
                   <Pressable
                     onPress={() => deleteSaved(draft)}
@@ -539,6 +646,16 @@ export function ExerciseRow({
                     <View style={styles.bwField}>
                       <Text style={styles.bwFieldText}>BW</Text>
                     </View>
+                  ) : plateMode ? (
+                    <PlatePositionField
+                      value={draft.position}
+                      min={plateMin}
+                      max={plateMax}
+                      onChangeText={(text) => patchDraft(draft.key, { position: text })}
+                      onFocus={() => handleFocus(draft.key)}
+                      onBlur={() => handleBlur(draft.key)}
+                      editable={draft.status !== "saving"}
+                    />
                   ) : (
                     <StepField
                       value={draft.weight}
@@ -572,18 +689,30 @@ export function ExerciseRow({
                         clearTimer(draft.key);
                         void commitSet(draft.key);
                       }}
-                      disabled={!canLogDraft(draft, bodyweight)}
+                      disabled={!canLogDraft(draft, bodyweight, plateMode)}
                       hitSlop={8}
                       style={styles.tick}
                     >
                       <Ionicons
                         name="checkmark-circle"
                         size={26}
-                        color={canLogDraft(draft, bodyweight) ? colors.primary : colors.borderStrong}
+                        color={
+                          canLogDraft(draft, bodyweight, plateMode)
+                            ? colors.primary
+                            : colors.borderStrong
+                        }
                       />
                     </Pressable>
                   )}
                 </View>
+                {estimate != null ? (
+                  <View style={styles.planHint}>
+                    <Ionicons name="calculator-outline" size={12} color={colors.textDim} />
+                    <Text style={styles.planHintText}>
+                      ≈ {estimate} {plateConfig?.unit}
+                    </Text>
+                  </View>
+                ) : null}
                 {hint ? (
                   <View style={styles.planHint}>
                     <Ionicons name="flag-outline" size={12} color={colors.textDim} />
@@ -608,6 +737,79 @@ export function ExerciseRow({
           </Pressable>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** Numbered stack position input with ± that stays inside the plan's range. */
+function PlatePositionField({
+  value,
+  min,
+  max,
+  onChangeText,
+  onFocus,
+  onBlur,
+  editable,
+}: {
+  value: string;
+  min: number;
+  max: number;
+  onChangeText: (text: string) => void;
+  onFocus: () => void;
+  onBlur: () => void;
+  editable: boolean;
+}) {
+  const { colors } = useTheme();
+  const styles = useStyles();
+
+  const nudge = (direction: 1 | -1) => {
+    const parsed = Number(value);
+    const current =
+      value.trim() !== "" && Number.isFinite(parsed) ? parsed : null;
+    const next =
+      current == null
+        ? direction === 1
+          ? min
+          : null
+        : clampPositionToRange(current + direction, min, max);
+    onChangeText(next != null ? String(next) : "");
+  };
+
+  return (
+    <View style={styles.positionField}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Decrease position"
+        onPress={() => nudge(-1)}
+        disabled={!editable}
+        hitSlop={6}
+        style={({ pressed }) => [styles.positionButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="remove" size={18} color={colors.textDim} />
+      </Pressable>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder="pos"
+        placeholderTextColor={colors.textMuted}
+        keyboardType="numeric"
+        editable={editable}
+        selectTextOnFocus
+        accessibilityLabel="Stack position"
+        style={styles.positionInput}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Increase position"
+        onPress={() => nudge(1)}
+        disabled={!editable}
+        hitSlop={6}
+        style={({ pressed }) => [styles.positionButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="add" size={18} color={colors.textDim} />
+      </Pressable>
     </View>
   );
 }
@@ -688,6 +890,7 @@ const useStyles = makeUseStyles((t) =>
     setPillValue: { fontSize: 12, fontWeight: "600", color: t.colors.text },
     tags: { flexDirection: "row", gap: spacing.xs, marginTop: 2, flexWrap: "wrap" },
     expanded: { marginTop: spacing.md, gap: spacing.sm },
+    plateModeNote: { color: t.colors.textDim },
     loggedList: { gap: spacing.xs },
     loggedRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     savedRow: {
@@ -715,6 +918,26 @@ const useStyles = makeUseStyles((t) =>
       justifyContent: "center",
     },
     bwFieldText: { fontSize: 14, fontWeight: "700", color: t.colors.textDim, letterSpacing: 0.5 },
+    positionField: {
+      flexDirection: "row",
+      alignItems: "center",
+      flex: 1,
+      backgroundColor: t.colors.surface,
+      borderWidth: 1,
+      borderColor: t.colors.border,
+      borderRadius: radii.md,
+      height: 44,
+      overflow: "hidden",
+    },
+    positionButton: { width: 30, height: 42, alignItems: "center", justifyContent: "center" },
+    positionInput: {
+      flex: 1,
+      minWidth: 24,
+      padding: 0,
+      textAlign: "center",
+      fontSize: 15,
+      color: t.colors.text,
+    },
     setRowError: { borderWidth: 1, borderColor: t.colors.danger, borderRadius: radii.sm, padding: 2 },
     setBadge: {
       width: 28,

@@ -10,6 +10,7 @@ import { Button, Banner, Card, EmptyState } from "../../src/components/ui/primit
 import { TextField } from "../../src/components/ui/controls";
 import { parsePositiveInt } from "../../src/utils/parse";
 import { exerciseTargetsPayload, firstInvalidSetWeight } from "../../src/utils/planTargets";
+import { plateConfigError, platePlanFields } from "../../src/utils/plate";
 import { usePlansApi } from "../../src/api/plans";
 import { clearPendingPlan, getPendingPlan } from "../../src/state/parsedPlan";
 import type { CreatePlanInput } from "../../src/api/types";
@@ -59,12 +60,20 @@ export default function PlanPreviewScreen() {
           setError("Every exercise needs a name (≤120), sets 1–99 and reps (≤20 chars).");
           return;
         }
-        // Weight is optional, but a non-empty one must be a real number —
-        // otherwise the entered value (e.g. 12.5) would vanish silently.
-        const badSet = firstInvalidSetWeight(e.setWeights);
-        if (badSet != null) {
-          setError(`Set ${badSet}'s target weight must be a positive number (e.g. 12.5) or left empty.`);
-          return;
+        if (e.loadMode === "plate") {
+          const plateError = plateConfigError(e);
+          if (plateError) {
+            setError(plateError);
+            return;
+          }
+        } else {
+          // Weight is optional, but a non-empty one must be a real number —
+          // otherwise the entered value (e.g. 12.5) would vanish silently.
+          const badSet = firstInvalidSetWeight(e.setWeights);
+          if (badSet != null) {
+            setError(`Set ${badSet}'s target weight must be a positive number (e.g. 12.5) or left empty.`);
+            return;
+          }
         }
       }
     }
@@ -80,7 +89,9 @@ export default function PlanPreviewScreen() {
           name: e.name.trim().slice(0, 120),
           sets: parsePositiveInt(e.sets, 99) ?? 0,
           reps: e.reps.trim().slice(0, 20),
-          ...exerciseTargetsPayload(e.setWeights),
+          ...(e.loadMode === "plate"
+            ? platePlanFields(e)
+            : exerciseTargetsPayload(e.setWeights)),
         })),
       })),
     };

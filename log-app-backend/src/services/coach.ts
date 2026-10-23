@@ -69,7 +69,10 @@ const PLAN_PROPOSAL_RULES = `- You can PROPOSE changes to the athlete's plan and
   create a proposal the athlete reviews and confirms in the app. Use get_plans to see their plans and
   current prescriptions, and get_lift_history (each set includes its id) to target a logged set. Only
   propose when the athlete asks for a change or clearly agrees to one, and NEVER say a change is done
-  — say you've prepared it and it's waiting for their confirmation, then briefly state what you proposed.`;
+  — say you've prepared it and it's waiting for their confirmation, then briefly state what you proposed.
+- A set can be bodyweight (weight_kg null, no plate_position) or a machine plate stack (weight_kg null,
+  plate_position set). Never describe a plate set as bodyweight or invent a kg load for it: talk about
+  the stack position, and use plate_increment/plate_unit only when present as a calibration snapshot.`;
 
 const MEAL_RULES = `- The athlete can log what they ate right here in chat. Estimate calories and protein per item from a
   common portion and put the assumed portion in the item's "quantity" (e.g. "1 cup cooked"). Keep
@@ -220,7 +223,16 @@ export async function buildAthleteContext(
     }),
     prisma.liftLog.findMany({
       where: { userId, date: { gte: since } },
-      select: { date: true, exerciseName: true, weightKg: true, reps: true, planDayId: true },
+      select: {
+        date: true,
+        exerciseName: true,
+        weightKg: true,
+        reps: true,
+        platePosition: true,
+        plateIncrement: true,
+        plateUnit: true,
+        planDayId: true,
+      },
     }),
     prisma.weeklyVerdict.findMany({
       where: { userId },
@@ -363,15 +375,24 @@ export async function buildAthleteContext(
     );
   }
 
-  const byExercise = new Map<string, { top: number; volume: number; sets: number }>();
+  const byExercise = new Map<
+    string,
+    { top: number; volume: number; sets: number; plateTop: number; plateUnit: string | null }
+  >();
   for (const l of lifts) {
-    const entry = byExercise.get(l.exerciseName) ?? { top: 0, volume: 0, sets: 0 };
+    const entry =
+      byExercise.get(l.exerciseName) ??
+      { top: 0, volume: 0, sets: 0, plateTop: 0, plateUnit: null };
     entry.sets += 1;
-    // Bodyweight sets count as work but contribute no load/volume.
+    // Bodyweight sets count as work but contribute no load/volume. Plate sets
+    // are also unloaded in kg: rank them by stack position, never by weight.
     if (l.weightKg != null) {
       const w = Number(l.weightKg);
       entry.top = Math.max(entry.top, w);
       entry.volume += w * l.reps;
+    } else if (l.platePosition != null) {
+      entry.plateTop = Math.max(entry.plateTop, l.platePosition);
+      if (l.plateUnit === "kg" || l.plateUnit === "lb") entry.plateUnit = l.plateUnit;
     }
     byExercise.set(l.exerciseName, entry);
   }
@@ -382,7 +403,9 @@ export async function buildAthleteContext(
       .map(([name, e]) =>
         e.top > 0
           ? `${name}: ${e.top}kg top / ${Math.round(e.volume)}kg vol`
-          : `${name}: ${e.sets} sets (bodyweight)`,
+          : e.plateTop > 0
+            ? `${name}: position ${e.plateTop}${e.plateUnit ? ` (${e.plateUnit}/plate)` : ""} top / ${e.sets} sets — machine stack, not kg`
+            : `${name}: ${e.sets} sets (bodyweight)`,
       );
     lines.push(`LIFTS (last ${CONTEXT_WINDOW_DAYS}d): ${ranked.join("; ")}`);
   }
@@ -520,10 +543,25 @@ export async function buildAthleteContext(
           sets: number;
           reps: string;
           weight_kg?: number | null;
+          load_mode?: "weight" | "plate";
+          plate_config?: {
+            unit: "kg" | "lb";
+            increment: number;
+            min_position: number;
+            max_position: number;
+          } | null;
         }[]
       )
         .slice(0, 8)
-        .map((e) => `${e.name} ${e.sets}x${e.reps}${e.weight_kg != null ? ` @${e.weight_kg}kg` : ""}`);
+        .map((e) => {
+          if (e.load_mode === "plate") {
+            const calibration = e.plate_config
+              ? ` (${e.plate_config.increment}${e.plate_config.unit}/position, positions ${e.plate_config.min_position}-${e.plate_config.max_position})`
+              : "";
+            return `${e.name} ${e.sets}x${e.reps} [machine stack${calibration}]`;
+          }
+          return `${e.name} ${e.sets}x${e.reps}${e.weight_kg != null ? ` @${e.weight_kg}kg` : ""}`;
+        });
       if (prescribed.length > 0) {
         lines.push(`TODAY'S SESSION (${todayDay.dayName}): ${prescribed.join("; ")}`);
       }
@@ -934,6 +972,11 @@ const COACH_TOOLS = [
           type: "boolean",
           description: "True to mark the set as bodyweight (reps only, clears the load).",
         },
+        plate_position: {
+          type: "number",
+          description:
+            "New 1-based machine stack position. Omit to keep the set's current position.",
+        },
         reps: { type: "number" },
       },
       required: ["set_id", "reps"],
@@ -1181,6 +1224,65 @@ function daysAgo(days: number, today: string): Date {
   return d;
 }
 
+type LoggedSetRow = {
+  weightKg: unknown;
+  reps: number;
+  platePosition?: number | null;
+  plateIncrement?: unknown;
+  plateUnit?: string | null;
+};
+
+/**
+ * Best set for a session: a kg-loaded set outranks a plate-stack set, which
+ * outranks bodyweight. Within a mode, rank by load/position (or reps for
+ * bodyweight). Returns the same shape used in coach proposals.
+ */
+function topSetFrom(rows: LoggedSetRow[]): LoggedSetLoad | null {
+  let top: LoggedSetLoad | null = null;
+  const rank = (s: LoggedSetLoad): number =>
+    s.weight_kg != null ? 2 : s.plate_position != null ? 1 : 0;
+  for (const row of rows) {
+    const candidate: LoggedSetLoad = {
+      weight_kg: row.weightKg == null ? null : Number(row.weightKg),
+      reps: row.reps,
+      plate_position: row.platePosition ?? null,
+      plate_increment: row.plateIncrement == null ? null : Number(row.plateIncrement),
+      plate_unit:
+        row.plateUnit === "kg" || row.plateUnit === "lb" ? row.plateUnit : null,
+    };
+    if (top == null) {
+      top = candidate;
+      continue;
+    }
+    const a = rank(candidate);
+    const b = rank(top);
+    const better =
+      a > b ||
+      (a === 2 &&
+        b === 2 &&
+        candidate.weight_kg != null &&
+        top.weight_kg != null &&
+        candidate.weight_kg > top.weight_kg) ||
+      (a === 1 &&
+        b === 1 &&
+        candidate.plate_position != null &&
+        top.plate_position != null &&
+        candidate.plate_position > top.plate_position) ||
+      (a === 0 && b === 0 && candidate.reps > top.reps);
+    if (better) top = candidate;
+  }
+  return top;
+}
+
+/** One logged set as shown in a proposal: kg, bodyweight, or a machine position. */
+export interface LoggedSetLoad {
+  weight_kg: number | null;
+  reps: number;
+  plate_position: number | null;
+  plate_increment: number | null;
+  plate_unit: "kg" | "lb" | null;
+}
+
 export type CoachProposal = (
   | {
       kind: "plan_update";
@@ -1204,16 +1306,19 @@ export type CoachProposal = (
       set_id: string;
       date: string;
       exercise: string;
-      from: { weight_kg: number; reps: number };
-      to: { weight_kg: number; reps: number };
+      from: LoggedSetLoad;
+      to: LoggedSetLoad;
     }
   | {
       kind: "set_delete";
       set_id: string;
       date: string;
       exercise: string;
-      weight_kg: number;
+      weight_kg: number | null;
       reps: number;
+      plate_position: number | null;
+      plate_increment: number | null;
+      plate_unit: "kg" | "lb" | null;
     }
   | {
       kind: "meal_log";
@@ -1544,7 +1649,16 @@ export async function executeCoachTool(
           where,
           orderBy: { date: "desc" },
           take: 100,
-          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
+          select: {
+            id: true,
+            date: true,
+            exerciseName: true,
+            weightKg: true,
+            reps: true,
+            platePosition: true,
+            plateIncrement: true,
+            plateUnit: true,
+          },
         });
         return rows.map((r) => ({
           id: r.id,
@@ -1552,6 +1666,10 @@ export async function executeCoachTool(
           exercise: r.exerciseName,
           weight_kg: r.weightKg == null ? null : Number(r.weightKg),
           reps: r.reps,
+          plate_position: r.platePosition ?? null,
+          plate_increment: r.plateIncrement == null ? null : Number(r.plateIncrement),
+          plate_unit:
+            r.plateUnit === "kg" || r.plateUnit === "lb" ? r.plateUnit : null,
         }));
       }
 
@@ -1562,7 +1680,14 @@ export async function executeCoachTool(
           prisma.liftLog.findMany({
             where: { userId, date: day },
             orderBy: { createdAt: "asc" },
-            select: { exerciseName: true, weightKg: true, reps: true },
+            select: {
+              exerciseName: true,
+              weightKg: true,
+              reps: true,
+              platePosition: true,
+              plateIncrement: true,
+              plateUnit: true,
+            },
           }),
           prisma.dailyLog.findFirst({
             where: { userId, date: day },
@@ -1574,23 +1699,11 @@ export async function executeCoachTool(
           }),
         ]);
 
-        // Bodyweight sets rank by reps; a loaded set always outranks them.
-        const byExercise = new Map<
-          string,
-          { sets: number; top: { weight_kg: number | null; reps: number } }
-        >();
+        const byExercise = new Map<string, { sets: number; rows: LoggedSetRow[] }>();
         for (const l of lifts) {
-          const w = l.weightKg == null ? null : Number(l.weightKg);
-          const entry = byExercise.get(l.exerciseName) ?? {
-            sets: 0,
-            top: { weight_kg: null, reps: 0 },
-          };
+          const entry = byExercise.get(l.exerciseName) ?? { sets: 0, rows: [] };
           entry.sets += 1;
-          const better =
-            w != null
-              ? entry.top.weight_kg == null || w > entry.top.weight_kg
-              : entry.top.weight_kg == null && l.reps > entry.top.reps;
-          if (better) entry.top = { weight_kg: w, reps: l.reps };
+          entry.rows.push(l);
           byExercise.set(l.exerciseName, entry);
         }
 
@@ -1599,7 +1712,7 @@ export async function executeCoachTool(
           lifts: Array.from(byExercise.entries()).map(([exercise, e]) => ({
             exercise,
             sets: e.sets,
-            top_set: e.top,
+            top_set: topSetFrom(e.rows),
           })),
           daily: daily
             ? {
@@ -1662,12 +1775,25 @@ export async function executeCoachTool(
         const day = resolvePlanDayForDate(plan.createdAt, plan.planDays, new Date(`${dateStr}T00:00:00Z`));
         if (!day) return { date: dateStr, day: null };
 
-        const prescribed = day.exercises as unknown as { name: string; sets: number; reps: string }[];
+        const prescribed = day.exercises as unknown as {
+          name: string;
+          sets: number;
+          reps: string;
+          load_mode?: "weight" | "plate";
+          plate_config?: { unit: "kg" | "lb"; increment: number; min_position: number; max_position: number } | null;
+        }[];
         // Fetch EVERY logged set that day (not just prescribed names) so off-plan
         // work is visible instead of looking like "not logged".
         const logs = await prisma.liftLog.findMany({
           where: { userId, date: new Date(`${dateStr}T00:00:00Z`) },
-          select: { exerciseName: true, weightKg: true, reps: true },
+          select: {
+            exerciseName: true,
+            weightKg: true,
+            reps: true,
+            platePosition: true,
+            plateIncrement: true,
+            plateUnit: true,
+          },
         });
         const prescribedNames = new Set(prescribed.map((e) => e.name));
         const offPlan = Array.from(
@@ -1679,22 +1805,14 @@ export async function executeCoachTool(
           day: day.dayName,
           prescribed: prescribed.map((e) => {
             const mine = logs.filter((l) => l.exerciseName === e.name);
-            // A loaded set wins; bodyweight work falls back to the best rep set.
-            let top: { weight_kg: number | null; reps: number } | null = null;
-            for (const l of mine) {
-              const kg = l.weightKg == null ? null : Number(l.weightKg);
-              const better =
-                top == null ||
-                (kg != null && (top.weight_kg == null || kg > top.weight_kg)) ||
-                (kg == null && top.weight_kg == null && l.reps > top.reps);
-              if (better) top = { weight_kg: kg, reps: l.reps };
-            }
             return {
               name: e.name,
               target_sets: e.sets,
               target_reps: e.reps,
+              load_mode: e.load_mode ?? "weight",
+              plate_config: e.plate_config ?? null,
               logged_sets: mine.length,
-              top_set: top,
+              top_set: topSetFrom(mine),
             };
           }),
           also_logged_off_plan: offPlan,
@@ -1804,24 +1922,65 @@ export async function executeCoachTool(
         const setId = typeof args.set_id === "string" ? args.set_id : "";
         const row = await prisma.liftLog.findFirst({
           where: { id: setId, userId },
-          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
+          select: {
+            id: true,
+            date: true,
+            exerciseName: true,
+            weightKg: true,
+            reps: true,
+            platePosition: true,
+            plateIncrement: true,
+            plateUnit: true,
+          },
         });
         if (!row) return { error: "That logged set wasn't found." };
         const reps = positiveInt(args.reps, 9999);
         if (reps == null) {
           return { error: "Provide a whole number of reps." };
         }
-        let weight: number | null;
+        const from: LoggedSetLoad = {
+          weight_kg: row.weightKg == null ? null : Number(row.weightKg),
+          reps: row.reps,
+          plate_position: row.platePosition,
+          plate_increment: row.plateIncrement == null ? null : Number(row.plateIncrement),
+          plate_unit:
+            row.plateUnit === "kg" || row.plateUnit === "lb" ? row.plateUnit : null,
+        };
+        let to: LoggedSetLoad;
         if (args.bodyweight === true) {
-          weight = null;
+          to = {
+            weight_kg: null,
+            reps,
+            plate_position: null,
+            plate_increment: null,
+            plate_unit: null,
+          };
         } else if (args.weight_kg === undefined || args.weight_kg === null) {
-          // Omitted: keep the set's current load rather than silently clearing it.
-          weight = row.weightKg == null ? null : Number(row.weightKg);
+          if (args.plate_position !== undefined && args.plate_position !== null) {
+            if (from.weight_kg != null) {
+              return { error: "That set is logged in kg; provide weight_kg or bodyweight=true." };
+            }
+            const position = positiveInt(args.plate_position, 999);
+            if (position == null) {
+              return { error: "Provide a positive stack position, or weight_kg." };
+            }
+            to = { ...from, reps, plate_position: position };
+          } else {
+            // Omitted: keep the set's current load (including a plate position).
+            to = { ...from, reps };
+          }
         } else {
-          weight = positiveNumber(args.weight_kg, 9999);
+          const weight = positiveNumber(args.weight_kg, 9999);
           if (weight == null) {
             return { error: "Provide a positive weight in kg, or bodyweight=true." };
           }
+          to = {
+            weight_kg: weight,
+            reps,
+            plate_position: null,
+            plate_increment: null,
+            plate_unit: null,
+          };
         }
         return {
           __proposal: {
@@ -1830,11 +1989,8 @@ export async function executeCoachTool(
             set_id: row.id,
             date: fmtDate(row.date),
             exercise: row.exerciseName,
-            from: {
-              weight_kg: row.weightKg == null ? null : Number(row.weightKg),
-              reps: row.reps,
-            },
-            to: { weight_kg: weight, reps },
+            from,
+            to,
           },
         };
       }
@@ -1843,7 +1999,16 @@ export async function executeCoachTool(
         const setId = typeof args.set_id === "string" ? args.set_id : "";
         const row = await prisma.liftLog.findFirst({
           where: { id: setId, userId },
-          select: { id: true, date: true, exerciseName: true, weightKg: true, reps: true },
+          select: {
+            id: true,
+            date: true,
+            exerciseName: true,
+            weightKg: true,
+            reps: true,
+            platePosition: true,
+            plateIncrement: true,
+            plateUnit: true,
+          },
         });
         if (!row) return { error: "That logged set wasn't found." };
         return {
@@ -1855,6 +2020,10 @@ export async function executeCoachTool(
             exercise: row.exerciseName,
             weight_kg: row.weightKg == null ? null : Number(row.weightKg),
             reps: row.reps,
+            plate_position: row.platePosition,
+            plate_increment: row.plateIncrement == null ? null : Number(row.plateIncrement),
+            plate_unit:
+              row.plateUnit === "kg" || row.plateUnit === "lb" ? row.plateUnit : null,
           },
         };
       }

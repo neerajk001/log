@@ -57,9 +57,14 @@ model LiftLog {
   userId        String     @map("user_id") @db.Uuid
   date          DateTime   @db.Date
   exerciseName  String     @map("exercise_name") @db.Text
-  /// Null = bodyweight set (reps only), e.g. a hanging leg raise.
+  /// Null = bodyweight set or a machine plate-stack set (see platePosition).
   weightKg      Decimal?   @map("weight_kg") @db.Decimal(6, 2)
   reps          Int
+  /// Numbered stack position for machine exercises. Snapshot of the plan's
+  /// calibration is stored alongside it so history stays correct after edits.
+  platePosition  Int?      @map("plate_position")
+  plateIncrement Decimal?  @map("plate_increment") @db.Decimal(6, 2)
+  plateUnit      String?   @map("plate_unit") @db.Text
   planDayId     String?    @map("plan_day_id") @db.Uuid
   createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
   user          User       @relation(fields: [userId], references: [id])

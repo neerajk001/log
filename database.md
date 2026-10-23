@@ -51,8 +51,11 @@ R3.4).
 | user_id       | uuid, FK → users.id, not null | |
 | date          | date, not null | |
 | exercise_name | text, not null | free text or from plan |
-| weight_kg     | numeric(6,2), nullable | `null` = bodyweight set (reps only), e.g. hanging leg raise |
+| weight_kg     | numeric(6,2), nullable | `null` = bodyweight or machine plate-stack set (see `plate_position`) |
 | reps          | integer, not null | |
+| plate_position | integer, nullable | 1-based numbered stack position for machine exercises; mutually exclusive with `weight_kg` |
+| plate_increment | numeric(6,2), nullable | calibration snapshot: load per stack position |
+| plate_unit    | text, nullable | `"kg"` or `"lb"`; paired with `plate_increment` |
 | plan_day_id   | uuid, FK → plan_days.id, nullable | set if logged against a plan exercise |
 | created_at    | timestamptz, default now() | |
 
@@ -62,6 +65,14 @@ R3.4).
 Authenticated clients may supply `id` when creating a set. Exact retries use
 the existing row; a conflicting owner or payload is rejected. This uses the
 existing primary key and does not add a schema constraint or migration.
+
+A plate-stack set stores `weight_kg = null`, `plate_position`, and (when the
+plan is calibrated) `plate_increment` + `plate_unit`. The position and
+calibration are snapshotted per set, so editing a plan later does not rewrite
+history. `plate_increment` and `plate_unit` must be both present or both absent;
+`plate_position` and `weight_kg` are mutually exclusive. Plate sets count as
+logged sets and training days but contribute no kg volume, kg PR, or strength
+trend — estimated load (`position × increment`) is display-only.
 
 ### `workout_plans`
 
@@ -82,7 +93,7 @@ existing primary key and does not add a schema constraint or migration.
 | plan_id     | uuid, FK → workout_plans.id, not null | |
 | day_name    | text, not null | e.g. "Push", "Pull", "Legs" |
 | day_order   | integer, not null | 1-based order within the plan cycle |
-| exercises   | jsonb, not null | array of `{name: string, sets: number, reps: string}` — denormalized, no separate exercises table for MVP |
+| exercises   | jsonb, not null | array of `{name, sets, reps, weight_kg?, set_targets?, load_mode?, plate_config?}` — denormalized, no separate exercises table for MVP. `load_mode: "plate"` + optional `plate_config: {unit, increment, min_position, max_position}` marks a machine stack. |
 
 ### `weekly_verdicts`
 

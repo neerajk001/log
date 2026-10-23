@@ -22,7 +22,7 @@ import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
 import { formatLongDate, formatMediumDate, weekdayShort } from "../../src/utils/date";
 import { formatNumber } from "../../src/utils/derive";
-import { formatSetLoad } from "../../src/utils/bodyweight";
+import { formatLiftSet } from "../../src/utils/plate";
 import type { DailyLog } from "../../src/api/types";
 
 const RANGE_OPTIONS = [
@@ -93,7 +93,7 @@ export default function HistoryScreen() {
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
   });
   const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
-  const { colors, typography } = useTheme();
+  const { colors } = useTheme();
   const styles = useStyles();
   const today = useCurrentDate();
   const { profile } = useMe();
@@ -293,7 +293,7 @@ export default function HistoryScreen() {
                         .map((l) => (
                           <View key={l.id} style={styles.itemRow}>
                             <Text style={styles.itemValue}>
-                              {formatSetLoad(l.weight_kg, l.reps)}
+                              {formatLiftSet(l)}
                             </Text>
                             <DeleteButton
                               label="Delete set"

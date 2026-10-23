@@ -5,14 +5,24 @@ import { radii, spacing } from "../theme/spacing";
 import { muscleGroupsForDay } from "../utils/derive";
 import { muscleTagStyle } from "../utils/tags";
 import { MAX_EDITOR_SET_FIELDS, editorSetCount } from "../utils/planTargets";
+import { plateConfigError } from "../utils/plate";
+import type { PlateUnit } from "../api/types";
+import { Chip } from "./ui/controls";
 import { Tag } from "./ui/primitives";
 
 export interface EditableExercise {
   name: string;
   sets: string;
   reps: string;
+  /** Free weights (kg) or a numbered machine stack. */
+  loadMode: "weight" | "plate";
   /** One target weight (kg) per set, in set order. Blank = no target for that set. */
   setWeights: string[];
+  /** Optional plate-stack calibration, in the editor's string form. */
+  plateUnit: PlateUnit;
+  plateIncrement: string;
+  plateMin: string;
+  plateMax: string;
 }
 
 export interface EditableDay {
@@ -23,11 +33,44 @@ export interface EditableDay {
 }
 
 export function emptyExercise(): EditableExercise {
-  return { name: "", sets: "", reps: "", setWeights: [] };
+  return {
+    name: "",
+    sets: "",
+    reps: "",
+    loadMode: "weight",
+    setWeights: [],
+    plateUnit: "kg",
+    plateIncrement: "",
+    plateMin: "",
+    plateMax: "",
+  };
 }
 
 export function emptyDay(): EditableDay {
   return { day_name: "", exercises: [emptyExercise()] };
+}
+
+/** Editor fields for a stored exercise's plate mode + calibration. */
+export function plateFieldsFromExercise(exercise: {
+  load_mode?: "weight" | "plate" | null;
+  plate_config?: {
+    unit: PlateUnit;
+    increment: number;
+    min_position: number;
+    max_position: number;
+  } | null;
+}): Pick<
+  EditableExercise,
+  "loadMode" | "plateUnit" | "plateIncrement" | "plateMin" | "plateMax"
+> {
+  const config = exercise.plate_config;
+  return {
+    loadMode: exercise.load_mode === "plate" ? "plate" : "weight",
+    plateUnit: config?.unit ?? "kg",
+    plateIncrement: config ? String(config.increment) : "",
+    plateMin: config ? String(config.min_position) : "",
+    plateMax: config ? String(config.max_position) : "",
+  };
 }
 
 /** Editable plan days + exercises (design 03.03 / 03.05). */
@@ -99,7 +142,15 @@ export function PlanDaysEditor({
               </Pressable>
             </View>
 
-            {day.exercises.map((ex, ei) => (
+            {day.exercises.map((ex, ei) => {
+              const calibrationError = plateConfigError({
+                loadMode: ex.loadMode,
+                plateUnit: ex.plateUnit,
+                plateIncrement: ex.plateIncrement,
+                plateMin: ex.plateMin,
+                plateMax: ex.plateMax,
+              });
+              return (
               <View key={ei} style={styles.exerciseBlock}>
                 <View style={styles.exerciseRow}>
                   <Ionicons name="reorder-three-outline" size={18} color={colors.textMuted} />
@@ -144,32 +195,96 @@ export function PlanDaysEditor({
                   </Pressable>
                 </View>
 
-                {/* One target weight per set, so pyramids can be prescribed. */}
-                <View style={styles.setWeights}>
-                  <Text style={styles.setWeightsLabel}>
-                    Target weight per set (kg)
-                    {editorSetCount(ex.sets) < (parseInt(ex.sets, 10) || 1)
-                      ? ` · first ${MAX_EDITOR_SET_FIELDS}`
-                      : ""}
-                  </Text>
-                  <View style={styles.setWeightsRow}>
-                    {Array.from({ length: editorSetCount(ex.sets) }, (_, si) => (
-                      <View key={si} style={styles.setWeightField}>
-                        <Text style={styles.setWeightIndex}>{si + 1}</Text>
-                        <TextInput
-                          style={styles.setWeightInput}
-                          value={ex.setWeights[si] ?? ""}
-                          onChangeText={(t) => updateSetWeight(di, ei, si, t)}
-                          placeholder="kg"
-                          placeholderTextColor={colors.textMuted}
-                          keyboardType="numeric"
-                        />
-                      </View>
-                    ))}
-                  </View>
+                <View style={styles.modeRow}>
+                  <Text style={styles.setWeightsLabel}>Load</Text>
+                  <Chip
+                    label="Weight"
+                    active={ex.loadMode !== "plate"}
+                    onPress={() => updateExercise(di, ei, { loadMode: "weight" })}
+                  />
+                  <Chip
+                    label="Plate stack"
+                    active={ex.loadMode === "plate"}
+                    onPress={() => updateExercise(di, ei, { loadMode: "plate" })}
+                  />
                 </View>
+
+                {ex.loadMode === "plate" ? (
+                  <View style={styles.plateFields}>
+                    <Text style={styles.setWeightsLabel}>Calibration (optional)</Text>
+                    <View style={styles.plateRow}>
+                      <Chip
+                        label="kg"
+                        active={ex.plateUnit === "kg"}
+                        onPress={() => updateExercise(di, ei, { plateUnit: "kg" })}
+                      />
+                      <Chip
+                        label="lb"
+                        active={ex.plateUnit === "lb"}
+                        onPress={() => updateExercise(di, ei, { plateUnit: "lb" })}
+                      />
+                      <TextInput
+                        style={[styles.setWeightInput, styles.plateIncrement]}
+                        value={ex.plateIncrement}
+                        onChangeText={(t) => updateExercise(di, ei, { plateIncrement: t })}
+                        placeholder="per position"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                      />
+                      <TextInput
+                        style={styles.setWeightInput}
+                        value={ex.plateMin}
+                        onChangeText={(t) => updateExercise(di, ei, { plateMin: t })}
+                        placeholder="min"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                      />
+                      <TextInput
+                        style={styles.setWeightInput}
+                        value={ex.plateMax}
+                        onChangeText={(t) => updateExercise(di, ei, { plateMax: t })}
+                        placeholder="max"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                      />
+                    </View>
+                    <Text style={styles.plateHint}>
+                      Positions are logged on the Lift screen. Leave calibration blank to log
+                      positions only.
+                    </Text>
+                    {calibrationError ? (
+                      <Text style={styles.plateError}>{calibrationError}</Text>
+                    ) : null}
+                  </View>
+                ) : (
+                  /* One target weight per set, so pyramids can be prescribed. */
+                  <View style={styles.setWeights}>
+                    <Text style={styles.setWeightsLabel}>
+                      Target weight per set (kg)
+                      {editorSetCount(ex.sets) < (parseInt(ex.sets, 10) || 1)
+                        ? ` · first ${MAX_EDITOR_SET_FIELDS}`
+                        : ""}
+                    </Text>
+                    <View style={styles.setWeightsRow}>
+                      {Array.from({ length: editorSetCount(ex.sets) }, (_, si) => (
+                        <View key={si} style={styles.setWeightField}>
+                          <Text style={styles.setWeightIndex}>{si + 1}</Text>
+                          <TextInput
+                            style={styles.setWeightInput}
+                            value={ex.setWeights[si] ?? ""}
+                            onChangeText={(t) => updateSetWeight(di, ei, si, t)}
+                            placeholder="kg"
+                            placeholderTextColor={colors.textMuted}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )}
               </View>
-            ))}
+              );
+            })}
 
             {days.length > 1 ? (
               <Pressable
@@ -223,6 +338,12 @@ const useStyles = makeUseStyles((t) =>
     addLink: { fontSize: 13, fontWeight: "600", color: t.colors.primary },
     exerciseRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     exerciseBlock: { gap: spacing.xs },
+    modeRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingLeft: 26 },
+    plateFields: { gap: 4, paddingLeft: 26 },
+    plateRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
+    plateIncrement: { width: 96 },
+    plateHint: { ...t.typography.caption, color: t.colors.textMuted },
+    plateError: { ...t.typography.caption, color: t.colors.danger },
     setWeights: { gap: 4, paddingLeft: 26 },
     setWeightsLabel: { ...t.typography.caption, color: t.colors.textMuted },
     setWeightsRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },

@@ -627,7 +627,16 @@ describe("executeCoachTool", () => {
     );
 
     expect(result).toEqual([
-      { id: "set-1", date: "2026-10-08", exercise: "Bench", weight_kg: 60, reps: 8 },
+      {
+        id: "set-1",
+        date: "2026-10-08",
+        exercise: "Bench",
+        weight_kg: 60,
+        reps: 8,
+        plate_position: null,
+        plate_increment: null,
+        plate_unit: null,
+      },
     ]);
     const where = mocks.findManyLift.mock.calls[0][0].where as Record<string, unknown>;
     expect(where.userId).toBe("user-1");
@@ -659,8 +668,28 @@ describe("executeCoachTool", () => {
 
     expect(result.date).toBe("2026-10-09");
     expect(result.lifts).toEqual([
-      { exercise: "Romanian Deadlift", sets: 2, top_set: { weight_kg: 15, reps: 8 } },
-      { exercise: "Cable Crunch", sets: 1, top_set: { weight_kg: 12, reps: 10 } },
+      {
+        exercise: "Romanian Deadlift",
+        sets: 2,
+        top_set: {
+          weight_kg: 15,
+          reps: 8,
+          plate_position: null,
+          plate_increment: null,
+          plate_unit: null,
+        },
+      },
+      {
+        exercise: "Cable Crunch",
+        sets: 1,
+        top_set: {
+          weight_kg: 12,
+          reps: 10,
+          plate_position: null,
+          plate_increment: null,
+          plate_unit: null,
+        },
+      },
     ]);
     expect(result.daily).toEqual({
       weight_kg: 64.5,
@@ -671,6 +700,74 @@ describe("executeCoachTool", () => {
     expect((mocks.findManyLift.mock.calls[0][0] as { where: { userId: string } }).where.userId).toBe(
       "user-1",
     );
+  });
+
+  it("labels machine stack sets by position, never bodyweight", async () => {
+    mocks.findManyLift.mockResolvedValue([
+      {
+        exerciseName: "Leg Press",
+        weightKg: null,
+        reps: 10,
+        platePosition: 8,
+        plateIncrement: 5,
+        plateUnit: "kg",
+      },
+    ]);
+
+    const result = (await executeCoachTool("user-1", "get_day_logs", "{}", "2026-10-09")) as {
+      lifts: { exercise: string; top_set: Record<string, unknown> }[];
+    };
+    expect(result.lifts).toEqual([
+      {
+        exercise: "Leg Press",
+        sets: 1,
+        top_set: {
+          weight_kg: null,
+          reps: 10,
+          plate_position: 8,
+          plate_increment: 5,
+          plate_unit: "kg",
+        },
+      },
+    ]);
+
+    const context = await buildAthleteContext("user-1", "2026-10-09");
+    expect(context).toContain("Leg Press: position 8 (kg/plate)");
+    expect(context).not.toContain("Leg Press: 1 sets (bodyweight)");
+  });
+
+  it("keeps a plate position when correcting only reps", async () => {
+    mocks.findFirstLift.mockResolvedValue({
+      id: "s1",
+      date: new Date("2026-10-08"),
+      exerciseName: "Leg Press",
+      weightKg: null,
+      reps: 10,
+      platePosition: 8,
+      plateIncrement: 5,
+      plateUnit: "kg",
+    });
+
+    const result = (await executeCoachTool(
+      "user-1",
+      "update_logged_set",
+      JSON.stringify({ set_id: "s1", reps: 12 }),
+    )) as { __proposal: { from: Record<string, unknown>; to: Record<string, unknown> } };
+
+    expect(result.__proposal.from).toMatchObject({
+      weight_kg: null,
+      reps: 10,
+      plate_position: 8,
+      plate_increment: 5,
+      plate_unit: "kg",
+    });
+    expect(result.__proposal.to).toMatchObject({
+      weight_kg: null,
+      reps: 12,
+      plate_position: 8,
+      plate_increment: 5,
+      plate_unit: "kg",
+    });
   });
 
   it("does not hide off-plan work from the plan comparison", async () => {

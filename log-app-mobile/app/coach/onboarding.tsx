@@ -19,7 +19,10 @@ import { pickPhoto, preparePhoto, type PhotoSource } from "../../src/utils/image
 import { filePart } from "../../src/utils/upload";
 import { formatMediumDate } from "../../src/utils/date";
 import type { CoachProfile, CoachProfileInput, PhysiqueReading } from "../../src/api/types";
-import type { EditableDay } from "../../src/components/PlanDaysEditor";
+import {
+  plateFieldsFromExercise,
+  type EditableDay,
+} from "../../src/components/PlanDaysEditor";
 
 const GOALS: { value: string; subtitle: string; icon: IoniconName }[] = [
   { value: "Lose fat", subtitle: "Cut weight while keeping your strength", icon: "flame-outline" },
@@ -78,6 +81,13 @@ function toEditableDays(
       reps: string;
       weight_kg?: number | null;
       set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+      load_mode?: "weight" | "plate" | null;
+      plate_config?: {
+        unit: "kg" | "lb";
+        increment: number;
+        min_position: number;
+        max_position: number;
+      } | null;
     }[];
   }[],
 ): EditableDay[] {
@@ -89,6 +99,7 @@ function toEditableDays(
       sets: String(e.sets),
       reps: e.reps,
       setWeights: editorWeightsFromExercise(e),
+      ...plateFieldsFromExercise(e),
     })),
   }));
 }

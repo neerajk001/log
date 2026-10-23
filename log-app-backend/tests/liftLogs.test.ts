@@ -35,6 +35,9 @@ function record(overrides: Record<string, unknown> = {}) {
     exerciseName: "Barbell Press",
     weightKg: new Prisma.Decimal(60),
     reps: 8,
+    platePosition: null,
+    plateIncrement: null,
+    plateUnit: null,
     planDayId: null,
     ...overrides,
   };
@@ -210,6 +213,7 @@ describe("getLiftSummary", () => {
     expect(lastArgs.orderBy).toEqual([
       { date: "desc" },
       { weightKg: { sort: "desc", nulls: "last" } },
+      { platePosition: { sort: "desc", nulls: "last" } },
     ]);
   });
 
@@ -239,9 +243,9 @@ describe("getLiftSummary", () => {
     expect(summary.lastSetsByExercise["Bench Press"]).toEqual({
       date: "2026-10-06",
       sets: [
-        { weight_kg: 60, reps: 8 },
-        { weight_kg: 62.5, reps: 8 },
-        { weight_kg: 65, reps: 6 },
+        { weight_kg: 60, reps: 8, plate_position: null, plate_increment: null, plate_unit: null },
+        { weight_kg: 62.5, reps: 8, plate_position: null, plate_increment: null, plate_unit: null },
+        { weight_kg: 65, reps: 6, plate_position: null, plate_increment: null, plate_unit: null },
       ],
     });
 
@@ -274,7 +278,9 @@ describe("getLiftSummary", () => {
 
     expect(summary.lastSetsByExercise["Hanging Leg Raise"]).toEqual({
       date: "2026-10-06",
-      sets: [{ weight_kg: null, reps: 12 }],
+      sets: [
+        { weight_kg: null, reps: 12, plate_position: null, plate_increment: null, plate_unit: null },
+      ],
     });
   });
 
@@ -448,6 +454,9 @@ describe("serializeLiftLog", () => {
       exercise_name: "Barbell Press",
       weight_kg: 60,
       reps: 8,
+      plate_position: null,
+      plate_increment: null,
+      plate_unit: null,
       plan_day_id: null,
     });
   });
@@ -487,7 +496,13 @@ describe("updateLiftLog", () => {
 
     expect(mock.liftLog.updateMany).toHaveBeenCalledWith({
       where: { id: requestId, userId },
-      data: { weightKg: 62.5, reps: 8 },
+      data: {
+        weightKg: 62.5,
+        reps: 8,
+        platePosition: null,
+        plateIncrement: null,
+        plateUnit: null,
+      },
     });
     expect(result?.weightKg.toString()).toBe("62.5");
   });

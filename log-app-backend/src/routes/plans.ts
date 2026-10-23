@@ -55,6 +55,15 @@ interface PlanExercise {
   weight_kg?: number;
   /** Per-set targets in set order (entry 1 = set 1); optional. */
   set_targets?: { weight_kg?: number | null; reps?: string }[];
+  /** Absent = free weights. `plate` = numbered machine stack position. */
+  load_mode?: "weight" | "plate";
+  /** Optional plate-stack calibration; absent = log position without load estimates. */
+  plate_config?: {
+    unit: "kg" | "lb";
+    increment: number;
+    min_position: number;
+    max_position: number;
+  } | null;
 }
 
 function planExerciseNames(exercises: Prisma.JsonValue): string[] {
@@ -262,7 +271,15 @@ router.get(
       const logged = await prisma.liftLog.findMany({
         where: { userId: req.userId, date: new Date(scopeDate) },
         orderBy: { createdAt: "asc" },
-        select: { exerciseName: true, weightKg: true, reps: true, planDayId: true },
+        select: {
+          exerciseName: true,
+          weightKg: true,
+          reps: true,
+          platePosition: true,
+          plateIncrement: true,
+          plateUnit: true,
+          planDayId: true,
+        },
       });
 
       const trainedDay = resolveTrainedPlanDay(
@@ -289,11 +306,20 @@ router.get(
               reps: exercise.reps,
               weight_kg: exercise.weight_kg ?? null,
               set_targets: exercise.set_targets ?? null,
+              load_mode: exercise.load_mode ?? "weight",
+              plate_config: exercise.plate_config ?? null,
               logged: logs.length > 0,
               last_log: lastLog
                 ? {
                     weight_kg: lastLog.weightKg == null ? null : Number(lastLog.weightKg),
                     reps: lastLog.reps,
+                    plate_position: lastLog.platePosition,
+                    plate_increment:
+                      lastLog.plateIncrement == null ? null : Number(lastLog.plateIncrement),
+                    plate_unit:
+                      lastLog.plateUnit === "kg" || lastLog.plateUnit === "lb"
+                        ? lastLog.plateUnit
+                        : null,
                   }
                 : null,
             };

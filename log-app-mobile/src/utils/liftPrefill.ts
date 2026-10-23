@@ -13,6 +13,8 @@
 export interface LiftSeed {
   weight: string;
   reps: string;
+  /** Machine stack position; empty for kg/bodyweight rows. */
+  position: string;
 }
 
 export interface LiftSeedInput {
@@ -21,7 +23,11 @@ export interface LiftSeedInput {
   /** Sets already logged today for this exercise. */
   loggedSetCount: number;
   /** The previous session's sets, in order. */
-  lastSets?: { weight_kg: number | null; reps: number }[] | null;
+  lastSets?: {
+    weight_kg: number | null;
+    reps: number;
+    plate_position?: number | null;
+  }[] | null;
   /** The plan's per-set targets, in order. */
   setTargets?: { weight_kg?: number | null; reps?: string | null }[] | null;
   /** The plan's single target weight (fallback). */
@@ -29,9 +35,13 @@ export interface LiftSeedInput {
   /** The plan's rep scheme, e.g. "8-12" (its first number is used). */
   plannedReps?: string | null;
   /** The previous session's top set, when no per-set history exists. */
-  lastLog?: { weight_kg: number | null; reps: number } | null;
+  lastLog?: { weight_kg: number | null; reps: number; plate_position?: number | null } | null;
   /** Bodyweight mode: seed reps only, never a load. */
   bodyweight?: boolean;
+  /** Plate-stack mode: seed the previous position (or the configured minimum). */
+  plate?: boolean;
+  /** First valid stack position when there is no history. */
+  minPlatePosition?: number;
 }
 
 /** First integer in a rep scheme, e.g. "8-12" → 8. */
@@ -50,6 +60,8 @@ export function buildSetSeeds({
   plannedReps,
   lastLog,
   bodyweight = false,
+  plate = false,
+  minPlatePosition = 1,
 }: LiftSeedInput): LiftSeed[] {
   const seeds: LiftSeed[] = [];
   for (let row = 0; row < count; row++) {
@@ -57,15 +69,20 @@ export function buildSetSeeds({
     // History first (what they actually did); repeat the final set beyond it.
     const history = lastSets?.[index] ?? lastSets?.[lastSets.length - 1] ?? lastLog ?? null;
     const target = setTargets?.[index] ?? null;
-    // A bodyweight exercise has no load to pre-fill, even if the plan mentions one.
-    const weight = bodyweight
-      ? null
-      : history?.weight_kg ?? target?.weight_kg ?? plannedWeight ?? null;
+    // Bodyweight and plate exercises never pre-fill a kg load.
+    const weight =
+      bodyweight || plate
+        ? null
+        : history?.weight_kg ?? target?.weight_kg ?? plannedWeight ?? null;
+    const position = plate
+      ? history?.plate_position ?? minPlatePosition
+      : null;
     const reps =
       history?.reps ?? firstInt(target?.reps) ?? firstInt(plannedReps) ?? lastLog?.reps ?? null;
     seeds.push({
       weight: weight != null ? String(weight) : "",
       reps: reps != null ? String(reps) : "",
+      position: position != null ? String(position) : "",
     });
   }
   return seeds;
