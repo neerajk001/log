@@ -5,6 +5,10 @@ name: backend-deploy
 # then SSHs into the VPS and redeploys the compose stack:
 #   git pull -> compose build -> migrate -> compose up -> health check
 # (see deployment.md). The VPS .env file is never touched by CI.
+#
+# If a deploy fails in an infrastructure step (SSH, Docker build, health gate),
+# re-run the failed job from the Actions tab; no code change is needed. Pushing
+# another backend commit also retriggers this workflow.
 
 on:
   push:
