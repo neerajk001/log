@@ -78,6 +78,22 @@ describe("plan plate config", () => {
     ).toBe(true);
   });
 
+  it("defaults calibration bounds when only the per-position load is given", () => {
+    const parsed = planExerciseSchema.parse({
+      name: "Leg Press",
+      sets: 3,
+      reps: "10",
+      load_mode: "plate",
+      plate_config: { unit: "lb", increment: 10 },
+    });
+    expect(parsed.plate_config).toMatchObject({
+      unit: "lb",
+      increment: 10,
+      min_position: 1,
+      max_position: 999,
+    });
+  });
+
   it("rejects calibration without plate mode or with an inverted range", () => {
     expect(
       planExerciseSchema.safeParse({

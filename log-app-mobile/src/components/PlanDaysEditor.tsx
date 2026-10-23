@@ -211,7 +211,7 @@ export function PlanDaysEditor({
 
                 {ex.loadMode === "plate" ? (
                   <View style={styles.plateFields}>
-                    <Text style={styles.setWeightsLabel}>Calibration (optional)</Text>
+                    <Text style={styles.setWeightsLabel}>Load per stack position (optional)</Text>
                     <View style={styles.plateRow}>
                       <Chip
                         label="kg"
@@ -227,30 +227,14 @@ export function PlanDaysEditor({
                         style={[styles.setWeightInput, styles.plateIncrement]}
                         value={ex.plateIncrement}
                         onChangeText={(t) => updateExercise(di, ei, { plateIncrement: t })}
-                        placeholder="per position"
-                        placeholderTextColor={colors.textMuted}
-                        keyboardType="numeric"
-                      />
-                      <TextInput
-                        style={styles.setWeightInput}
-                        value={ex.plateMin}
-                        onChangeText={(t) => updateExercise(di, ei, { plateMin: t })}
-                        placeholder="min"
-                        placeholderTextColor={colors.textMuted}
-                        keyboardType="numeric"
-                      />
-                      <TextInput
-                        style={styles.setWeightInput}
-                        value={ex.plateMax}
-                        onChangeText={(t) => updateExercise(di, ei, { plateMax: t })}
-                        placeholder="max"
+                        placeholder="e.g. 5"
                         placeholderTextColor={colors.textMuted}
                         keyboardType="numeric"
                       />
                     </View>
                     <Text style={styles.plateHint}>
-                      Positions are logged on the Lift screen. Leave calibration blank to log
-                      positions only.
+                      Log the numbered position on the Lift screen. Leave this blank to log
+                      positions without a weight estimate.
                     </Text>
                     {calibrationError ? (
                       <Text style={styles.plateError}>{calibrationError}</Text>

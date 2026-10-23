@@ -64,7 +64,7 @@ export function formatPlanLoad(exercise: {
   if (isPlateMode(exercise)) {
     const config = exercise.plate_config;
     if (!config) return "Plate stack";
-    return `Pos ${config.min_position}–${config.max_position} · ${config.increment}${config.unit}/plate`;
+    return `${config.increment}${config.unit}/position`;
   }
   return exercise.weight_kg != null ? `${exercise.weight_kg} kg` : null;
 }
@@ -73,51 +73,52 @@ export interface PlateEditorValues {
   loadMode: "weight" | "plate";
   plateUnit: PlateUnit;
   plateIncrement: string;
+  /** Retained for older plans; no longer shown in the editor. */
   plateMin: string;
   plateMax: string;
 }
 
 /**
- * Validates the calibration fields in the plan editor. Blank calibration is
- * valid (log positions only); a partial or inverted one is not.
+ * Validates the optional "load per stack position" field. Blank is valid
+ * (log positions only); a filled one must be a positive number.
  */
 export function plateConfigError(values: PlateEditorValues): string | null {
   if (values.loadMode !== "plate") return null;
   const increment = values.plateIncrement.trim();
-  const min = values.plateMin.trim();
-  const max = values.plateMax.trim();
-  if (!increment && !min && !max) return null;
-  if (!increment || !min || !max) {
-    return "Enter the load per position and both position bounds, or leave all three blank.";
-  }
+  if (!increment) return null;
   const incrementValue = Number(increment);
-  const minValue = Number(min);
-  const maxValue = Number(max);
   if (!Number.isFinite(incrementValue) || incrementValue <= 0) {
-    return "Load per position must be a positive number.";
+    return "Load per stack position must be a positive number.";
   }
-  if (!Number.isInteger(minValue) || minValue < 1) {
-    return "Min position must be a whole number of 1 or more.";
-  }
-  if (!Number.isInteger(maxValue) || maxValue < 1) {
-    return "Max position must be a whole number of 1 or more.";
-  }
-  if (maxValue < minValue) return "Max position must be at least the min position.";
   return null;
 }
 
-/** Server payload for the calibration fields; null when fully blank. */
+/**
+ * Server payload for the optional calibration. Only the unit and load per
+ * position are user-facing; bounds default to 1–999 (or keep an older plan's
+ * saved bounds when they are still valid).
+ */
 export function plateConfigFromEditor(values: PlateEditorValues): PlateConfig | null {
   if (values.loadMode !== "plate" || plateConfigError(values) != null) return null;
   const increment = values.plateIncrement.trim();
-  const min = values.plateMin.trim();
-  const max = values.plateMax.trim();
-  if (!increment || !min || !max) return null;
+  if (!increment) return null;
+  const rawMin = Number(values.plateMin);
+  const rawMax = Number(values.plateMax);
+  const min =
+    values.plateMin.trim() !== "" && Number.isInteger(rawMin) && rawMin >= 1
+      ? Math.min(999, rawMin)
+      : 1;
+  const max =
+    values.plateMax.trim() !== "" &&
+    Number.isInteger(rawMax) &&
+    rawMax >= min
+      ? Math.min(999, rawMax)
+      : 999;
   return {
     unit: values.plateUnit,
     increment: Number(increment),
-    min_position: Number(min),
-    max_position: Number(max),
+    min_position: min,
+    max_position: Math.max(min, max),
   };
 }
 

@@ -93,7 +93,7 @@ trend — estimated load (`position × increment`) is display-only.
 | plan_id     | uuid, FK → workout_plans.id, not null | |
 | day_name    | text, not null | e.g. "Push", "Pull", "Legs" |
 | day_order   | integer, not null | 1-based order within the plan cycle |
-| exercises   | jsonb, not null | array of `{name, sets, reps, weight_kg?, set_targets?, load_mode?, plate_config?}` — denormalized, no separate exercises table for MVP. `load_mode: "plate"` + optional `plate_config: {unit, increment, min_position, max_position}` marks a machine stack. |
+| exercises   | jsonb, not null | array of `{name, sets, reps, weight_kg?, set_targets?, load_mode?, plate_config?}` — denormalized, no separate exercises table for MVP. `load_mode: "plate"` + optional `plate_config: {unit, increment, min_position?, max_position?}` marks a machine stack (bounds default to 1/999). |
 
 ### `weekly_verdicts`
 

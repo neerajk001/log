@@ -275,13 +275,14 @@ For a machine stack, add `"load_mode": "plate"` and optionally a calibration:
   "sets": 3,
   "reps": "10",
   "load_mode": "plate",
-  "plate_config": { "unit": "kg", "increment": 5, "min_position": 1, "max_position": 20 }
+  "plate_config": { "unit": "kg", "increment": 5 }
 }
 ```
 `plate_config` requires `load_mode: "plate"`; omit it to log positions without
 load estimates. `increment` is the load one numbered position represents (so
 estimated load = position × increment), and positions are 1-based.
-`max_position` must be ≥ `min_position`. Plate exercises should omit
+`min_position`/`max_position` are optional and default to `1`/`999`; when
+supplied, `max_position` must be ≥ `min_position`. Plate exercises should omit
 `weight_kg`/`set_targets`; the Lift screen asks for a stack position instead of
 kg. The plan JSON is stored as-is, so existing kg-only exercises are unchanged.
 

@@ -196,8 +196,9 @@ export const plateConfigSchema = z
   .object({
     unit: z.enum(["kg", "lb"]),
     increment: z.number().positive().max(9999),
-    min_position: z.number().int().min(1).max(999),
-    max_position: z.number().int().min(1).max(999),
+    /** Optional bounds; the app normally only asks for load per position. */
+    min_position: z.number().int().min(1).max(999).default(1),
+    max_position: z.number().int().min(1).max(999).default(999),
   })
   .refine((c) => c.max_position >= c.min_position, {
     message: "max_position must be greater than or equal to min_position",
