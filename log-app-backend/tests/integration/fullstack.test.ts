@@ -110,7 +110,12 @@ describeDb("full-stack API against a real database", () => {
 
       const conflict = await a("/api/meals", {
         method: "POST",
-        body: JSON.stringify({ ...body, calories: 300, protein_g: 20 }),
+        body: JSON.stringify({
+          ...body,
+          items: [{ name: "Roti", quantity: "2 medium", calories: 300, protein_g: 20 }],
+          calories: 300,
+          protein_g: 20,
+        }),
       });
       expect(conflict.status).toBe(409);
       expect(((await conflict.json()) as { error: { code: string } }).error.code).toBe(
@@ -144,7 +149,14 @@ describeDb("full-stack API against a real database", () => {
       const a = asUser(app, carol);
       const date = "2026-10-11";
 
-      const bodies = Array.from({ length: 5 }, () => mealBody({ date, calories: 100, protein_g: 10 }));
+      const bodies = Array.from({ length: 5 }, () =>
+        mealBody({
+          date,
+          items: [{ name: "Rice", calories: 100, protein_g: 10 }],
+          calories: 100,
+          protein_g: 10,
+        }),
+      );
       const results = await Promise.all(
         bodies.map((body) => a("/api/meals", { method: "POST", body: JSON.stringify(body) })),
       );
