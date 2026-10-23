@@ -408,7 +408,7 @@ export type CoachProposal = (
       days: {
         day_name: string;
         rationale?: string;
-        exercises: { name: string; sets: number; reps: string }[];
+        exercises: PlanExercise[];
       }[];
       summary: string;
     }

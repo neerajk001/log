@@ -208,7 +208,10 @@ describe("getLiftSummary", () => {
 
     // "Last" means strictly before that date, one row per exercise, heaviest first.
     const lastArgs = mock.liftLog.findMany.mock.calls[0][0];
-    expect(lastArgs.where.date).toEqual({ lt: new Date("2026-10-08T00:00:00Z") });
+    expect(lastArgs.where.date).toEqual({
+      gte: new Date("2026-06-10T00:00:00Z"),
+      lt: new Date("2026-10-08T00:00:00Z"),
+    });
     expect(lastArgs.distinct).toEqual(["exerciseName"]);
     expect(lastArgs.orderBy).toEqual([
       { date: "desc" },

@@ -1,4 +1,5 @@
 import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { BrandThemeProvider } from "../../src/theme/ThemeContext";
 import { brandPalette } from "../../src/theme/brand";
 
@@ -6,6 +7,7 @@ import { brandPalette } from "../../src/theme/brand";
 export default function OnboardingLayout() {
   return (
     <BrandThemeProvider>
+      <StatusBar style="light" />
       <Stack
         screenOptions={{
           headerShown: false,

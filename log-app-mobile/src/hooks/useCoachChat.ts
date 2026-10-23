@@ -5,6 +5,7 @@ import { CoachStreamError, streamCoachChat, useCoachApi } from "../api/coach";
 import { ApiError } from "../api/client";
 import { clearAllCache } from "../api/cache";
 import { captureTiming } from "../utils/perf";
+import { useLatest } from "./useLatest";
 import type { AgentId, CoachProposal, CoachUsage, DismissedMeal } from "../api/types";
 import { todayLocal } from "../utils/date";
 
@@ -43,7 +44,11 @@ export interface ChatMessage {
 }
 
 /** Coach chat for one session (or a fresh one when `initialSessionId` is absent). */
-export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) {
+export function useCoachChat(
+  initialSessionId?: string,
+  initialAgent?: AgentId,
+  localDate: string = todayLocal(),
+) {
   const api = useCoachApi();
   const { getToken, signOut } = useAuth();
   const posthog = usePostHog();
@@ -55,6 +60,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingCorrection, setPendingCorrection] = useState<DismissedMeal | null>(null);
+  const { begin, isCurrent } = useLatest();
   const abortRef = useRef<AbortController | null>(null);
   /**
    * Synchronous in-flight flag: `streaming` state only lands on the next render,
@@ -69,10 +75,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
       setLoading(false);
       return;
     }
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
       const res = await api.getSessionMessages(initialSessionId);
+      if (!isCurrent(token)) return;
       setAgent(res.agent);
       setMessages(
         res.messages.map((m) => ({
@@ -88,11 +96,12 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
         })),
       );
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load this chat");
     } finally {
-      setLoading(false);
+      if (isCurrent(token)) setLoading(false);
     }
-  }, [api, initialSessionId]);
+  }, [api, initialSessionId, begin, isCurrent]);
 
   useEffect(() => {
     load();
@@ -146,7 +155,7 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
               token,
               message,
               sessionId: resolvedSessionId,
-              localDate: todayLocal(),
+              localDate,
               agent,
               dismissedMeal: correction ?? undefined,
               retry: isRetry || attempt > 0,
@@ -253,19 +262,19 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
         }
       }
     },
-    [getToken, signOut, posthog, sessionId, agent],
+    [getToken, signOut, posthog, sessionId, agent, localDate],
   );
 
   const send = useCallback(
     (text: string) => {
       const message = text.trim();
-      if (!message || streamingRef.current) return;
+      if (!message || streamingRef.current || loading) return;
       // A dismissed meal rides along with the next thing the athlete says.
       const correction = pendingCorrection;
       if (correction) setPendingCorrection(null);
       void runStream(message, true, correction);
     },
-    [runStream, pendingCorrection],
+    [runStream, pendingCorrection, loading],
   );
 
   const stop = useCallback(() => {
@@ -274,14 +283,14 @@ export function useCoachChat(initialSessionId?: string, initialAgent?: AgentId) 
   }, []);
 
   const retry = useCallback(() => {
-    if (streamingRef.current) return;
+    if (streamingRef.current || loading) return;
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
     if (!lastUser) return;
     setMessages((prev) => prev.filter((m) => !m.failed));
     // `isRetry` tells the server the prompt is already stored — retrying must
     // not append the same user message to the transcript a second time.
     void runStream(lastUser.content, false, null, true);
-  }, [messages, runStream]);
+  }, [messages, runStream, loading]);
 
   const resolveProposal = useCallback(
     (messageId: string, proposalId: string, status: "applied" | "dismissed" | "error", note?: string) => {

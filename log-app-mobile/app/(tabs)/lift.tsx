@@ -15,7 +15,7 @@ import { router, useLocalSearchParams, type ErrorBoundaryProps } from "expo-rout
 import * as Crypto from "expo-crypto";
 import { useClerk } from "@clerk/clerk-expo";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
-import { spacing } from "../../src/theme/spacing";
+import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { DayBanner } from "../../src/components/DayBanner";
 import { ExerciseRow } from "../../src/components/ExerciseRow";
@@ -28,7 +28,8 @@ import { useLiftLogs } from "../../src/hooks/useLiftLogs";
 import { useRecentExercises } from "../../src/hooks/useRecentExercises";
 import { muscleGroupsForDay } from "../../src/utils/derive";
 import { isBodyweightName, type LoadMode } from "../../src/utils/bodyweight";
-import { requestIdForAttempt } from "../../src/utils/parse";
+import { requestIdForAttempt, parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
+import { formatMediumDate } from "../../src/utils/date";
 import { successTick } from "../../src/hooks/useHaptics";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 
@@ -50,11 +51,15 @@ function blankQuickSet(): QuickSet {
 
 export default function LiftScreen() {
   const today = useCurrentDate();
+  const params = useLocalSearchParams<{ dayId?: string; date?: string }>();
+  const requestedDate = typeof params.date === "string" ? params.date : null;
+  // Never write a future day; a stale/forged param falls back to today.
+  const logDate = requestedDate && requestedDate <= today ? requestedDate : today;
   const { signOut } = useClerk();
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
-  const { planId, day: rotatedDay, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(today);
+  const { planId, day: rotatedDay, loading: planLoading, error: planError, refetch: refetchPlan } = usePlanToday(logDate);
   const { days, error: plansError, refetch: refetchPlans } = usePlans();
   const {
     entries,
@@ -66,12 +71,21 @@ export default function LiftScreen() {
     pendingIds,
     clearMutationError,
     refetch: refetchLifts,
-  } = useLiftLogs(today);
+  } = useLiftLogs(logDate);
   const { names: recent, lastByExercise, lastSetsByExercise } = useRecentExercises();
+  const quickRecent = useMemo(
+    () =>
+      recent.filter(
+        (name) =>
+          !(lastSetsByExercise.get(name)?.sets ?? []).some(
+            (set) => set.plate_position != null,
+          ),
+      ),
+    [recent, lastSetsByExercise],
+  );
 
   // The selected plan day lives in the route param, so Today's workout strip can
   // open this screen on its day — and the choice sticks for the next set.
-  const params = useLocalSearchParams<{ dayId?: string }>();
   const overrideDayId = typeof params.dayId === "string" ? params.dayId : null;
   const [menuOpen, setMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -124,10 +138,13 @@ export default function LiftScreen() {
       if (name === quickName) return;
       setQuickName(name);
       const last = lastSetsByExercise.get(name)?.sets ?? [];
-      // Last session wins; otherwise fall back to the name heuristic.
+      // Last session wins; otherwise fall back to the name heuristic. Plate sets
+      // are not quick-loggable (they need a position), but if one is selected by
+      // name anyway, treat it as weighted rather than bodyweight.
+      const hasPlate = last.some((set) => set.plate_position != null);
       const mode: LoadMode =
         last.length > 0
-          ? last.every((set) => set.weight_kg == null)
+          ? !hasPlate && last.every((set) => set.weight_kg == null)
             ? "bw"
             : "kg"
           : isBodyweightName(name)
@@ -159,14 +176,12 @@ export default function LiftScreen() {
         key: q.key,
         requestId: q.requestId,
         lastAttempt: q.lastAttempt,
-        weight: quickBodyweight ? null : parseFloat(q.weight),
-        reps: parseInt(q.reps, 10),
+        weight: quickBodyweight ? null : parsePositiveNumber(q.weight.trim(), 9999),
+        reps: parsePositiveInt(q.reps.trim(), 9999),
       }))
       .filter(
-        (q) =>
-          Number.isInteger(q.reps) &&
-          q.reps > 0 &&
-          (quickBodyweight || (q.weight != null && !Number.isNaN(q.weight) && q.weight > 0)),
+        (q): q is typeof q & { reps: number; weight: number | null } =>
+          q.reps != null && (quickBodyweight || q.weight != null),
       );
     if (valid.length === 0) {
       Alert.alert(
@@ -196,7 +211,7 @@ export default function LiftScreen() {
         try {
           await addEntry({
             id: q.requestId,
-            date: today,
+            date: logDate,
             exercise_name: name,
             weight_kg: q.weight,
             reps: q.reps,
@@ -221,7 +236,7 @@ export default function LiftScreen() {
       if (results.every((r) => r.ok)) setQuickName("");
     }
     setQuickSaving(false);
-  }, [quickName, quickSets, quickBodyweight, addEntry, today]);
+  }, [quickName, quickSets, quickBodyweight, addEntry, logDate]);
 
   const completedExercises = useMemo(() => {
     if (!day) return 0;
@@ -285,9 +300,28 @@ export default function LiftScreen() {
           />
         ) : null}
 
+        {logDate !== today ? (
+          <Pressable
+            onPress={() => router.setParams({ date: undefined, dayId: undefined })}
+            style={styles.dateNotice}
+            accessibilityRole="button"
+            accessibilityLabel="Switch back to logging today"
+          >
+            <Ionicons name="calendar-outline" size={15} color={colors.primary} />
+            <Text style={styles.dateNoticeText}>
+              Logging for {formatMediumDate(logDate)}
+            </Text>
+            <Text style={styles.dateNoticeAction}>Today</Text>
+          </Pressable>
+        ) : null}
+
         {days.length > 1 ? (
           <ChipRow style={styles.dayChips}>
-            <Chip label="Today" active={overrideDayId == null} onPress={() => router.setParams({ dayId: undefined })} />
+            <Chip
+              label="Today"
+              active={overrideDayId == null && logDate === today}
+              onPress={() => router.setParams({ date: undefined, dayId: undefined })}
+            />
             {days.map((d) => (
               <Chip
                 key={d.id}
@@ -310,12 +344,13 @@ export default function LiftScreen() {
 
             <View style={styles.list}>
               {day.exercises.map((ex, i) => {
-                const key = `${day.id}:${ex.name}`;
+                const key = `${day.id}:${i}`;
                 return (
                   <ExerciseRow
-                    key={`${today}:${day.id}:${ex.name}`}
+                    key={`${logDate}:${day.id}:${i}`}
                     index={i + 1}
                     name={ex.name}
+                    instanceKey={String(i)}
                     sets={ex.sets}
                     reps={ex.reps}
                     plannedWeight={ex.weight_kg ?? null}
@@ -327,7 +362,7 @@ export default function LiftScreen() {
                     setTargets={ex.set_targets ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
                     planDayId={day.id}
-                    date={today}
+                    date={logDate}
                     expanded={expanded === key}
                     onToggle={() => setExpanded((cur) => (cur === key ? null : key))}
                     onAddSet={addEntry}
@@ -389,9 +424,9 @@ export default function LiftScreen() {
             value={quickMode}
             onChange={(mode) => setQuickModeOverride(mode)}
           />
-          {recent.length > 0 ? (
+          {quickRecent.length > 0 ? (
             <ChipRow>
-              {recent.map((r) => (
+              {quickRecent.map((r) => (
                 <Chip key={r} label={r} active={r === quickName} onPress={() => pickRecentExercise(r)} />
               ))}
             </ChipRow>
@@ -444,11 +479,11 @@ export default function LiftScreen() {
           <Button label={`Log ${quickSets.length > 1 ? `${quickSets.length} sets` : "set"}`} icon="checkmark" onPress={quickLog} loading={quickSaving} />
         </Card>
 
-        {!day && recent.length > 0 ? (
+        {!day && quickRecent.length > 0 ? (
           <View style={styles.recentWrap}>
             <Text style={typography.caption}>Recent exercises</Text>
             <ChipRow>
-              {recent.map((r) => (
+              {quickRecent.map((r) => (
                 <Chip key={r} label={r} onPress={() => pickRecentExercise(r)} />
               ))}
             </ChipRow>
@@ -473,6 +508,18 @@ const useStyles = makeUseStyles((t) =>
     container: { flex: 1, backgroundColor: t.colors.bg },
     padded: { padding: spacing.screen },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
+    dateNotice: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: t.colors.primarySoft,
+      borderRadius: radii.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    dateNoticeText: { flex: 1, fontSize: 13, fontWeight: "600", color: t.colors.primary },
+    dateNoticeAction: { fontSize: 13, fontWeight: "700", color: t.colors.primary },
     dayChips: { marginTop: spacing.xs },
     list: { gap: spacing.sm, marginTop: spacing.sm },
     actions: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.sm },

@@ -154,6 +154,7 @@ export function TextField({
           multiline={multiline}
           autoCapitalize={autoCapitalize}
           textAlignVertical={multiline ? "top" : "center"}
+          accessibilityLabel={label}
           style={styles.input}
         />
         {unit ? <Text style={styles.inputUnit}>{unit}</Text> : null}
@@ -239,6 +240,7 @@ export function StepField({
         keyboardType="numeric"
         editable={editable}
         selectTextOnFocus
+        accessibilityLabel={label}
         style={styles.stepInput}
       />
       <Pressable

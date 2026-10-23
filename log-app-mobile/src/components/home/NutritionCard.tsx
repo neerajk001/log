@@ -5,7 +5,7 @@ import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { spacing } from "../../theme/spacing";
 import { Button, Card, IconBadge, ProgressBar } from "../ui/primitives";
 import { formatNumber } from "../../utils/derive";
-import { MAX_DAILY, parsePositiveNumber } from "../../utils/parse";
+import { MAX_DAILY, parsePositiveInt } from "../../utils/parse";
 
 /** Inline numeric editor for a column's logged total (tap the value to type). */
 function EditableValue({
@@ -31,7 +31,7 @@ function EditableValue({
       onSave(null);
       return;
     }
-    const num = parsePositiveNumber(trimmed, MAX_DAILY.calories);
+    const num = parsePositiveInt(trimmed, MAX_DAILY.calories);
     if (num != null) onSave(num);
   };
 

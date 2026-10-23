@@ -110,6 +110,7 @@ export async function apiFetch<T = unknown>(
       },
     });
   } catch (err) {
+    clearTimeout(timeout);
     // The detail matters: a wrong base URL, a blocked port and an unreadable upload
     // file all land here, and they look identical from the UI.
     if (__DEV__) {
@@ -122,8 +123,6 @@ export async function apiFetch<T = unknown>(
       throw new ApiError(0, "NETWORK_ERROR", "Request timed out. Check your connection.");
     }
     throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
-  } finally {
-    clearTimeout(timeout);
   }
 
   if (__DEV__) {
@@ -132,6 +131,7 @@ export async function apiFetch<T = unknown>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    clearTimeout(timeout);
     const error = (body as { error?: { code?: string; message?: string } })?.error ?? {};
     throw new ApiError(
       res.status,
@@ -140,9 +140,24 @@ export async function apiFetch<T = unknown>(
     );
   }
 
-  if (res.status === 204) return undefined as T;
+  if (res.status === 204) {
+    clearTimeout(timeout);
+    return undefined as T;
+  }
 
-  const text = await res.text();
+  // Keep the timeout alive until the body is fully read; a server can send
+  // headers and then stall forever.
+  let text: string;
+  try {
+    text = await res.text();
+  } catch {
+    clearTimeout(timeout);
+    if (timedOut) {
+      throw new ApiError(0, "NETWORK_ERROR", "Request timed out. Check your connection.");
+    }
+    throw new ApiError(0, "NETWORK_ERROR", "Can't reach the server. Check your connection.");
+  }
+  clearTimeout(timeout);
   if (!text) return undefined as T;
   try {
     return JSON.parse(text) as T;
@@ -210,29 +225,33 @@ export function useApiClient() {
             return data;
           }),
         ),
-      post: <T = unknown>(path: string, body: unknown, opts?: { timeoutMs?: number }) =>
+      post: <T = unknown>(
+        path: string,
+        body: unknown,
+        opts?: { timeoutMs?: number; invalidate?: boolean },
+      ) =>
         wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current(), {
             method: "POST",
             body: JSON.stringify(body),
             timeoutMs: opts?.timeoutMs,
           }).then((data) => {
-            invalidateForWrite(path);
+            if (opts?.invalidate !== false) invalidateForWrite(path);
             return data;
           }),
         ),
       postFormData: <T = unknown>(
         path: string,
         formData: FormData,
-        timeoutMs = PDF_UPLOAD_TIMEOUT_MS,
+        opts?: { timeoutMs?: number; invalidate?: boolean },
       ) =>
         wrap(() =>
           apiFetch<T>(path, () => getTokenRef.current(), {
             method: "POST",
             body: formData,
-            timeoutMs,
+            timeoutMs: opts?.timeoutMs ?? PDF_UPLOAD_TIMEOUT_MS,
           }).then((data) => {
-            invalidateForWrite(path);
+            if (opts?.invalidate !== false) invalidateForWrite(path);
             return data;
           }),
         ),

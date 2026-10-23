@@ -5,9 +5,9 @@ import { planTodayQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
 import { recordDecision } from "../services/coachDecisions";
 import {
+  buildPerExerciseDeltas,
   computeVerdict,
   verdictIsUnchanged,
-  type PerExerciseDelta,
   type PreviousVerdict,
 } from "../services/verdictEngine";
 
@@ -29,22 +29,6 @@ function addDays(d: Date, n: number): Date {
   const out = new Date(d);
   out.setUTCDate(out.getUTCDate() + n);
   return out;
-}
-
-function topSetByWeek(
-  lifts: { date: Date; exerciseName: string; weightKg: unknown }[],
-  weekStart: Date,
-  weekEnd: Date,
-): number | null {
-  let max: number | null = null;
-  for (const l of lifts) {
-    if (l.date < weekStart || l.date >= weekEnd) continue;
-    // Bodyweight sets have no load to compare; they still count in week.sets.
-    if (l.weightKg == null) continue;
-    const w = Number(l.weightKg);
-    if (max == null || w > max) max = w;
-  }
-  return max;
 }
 
 router.get("/weekly", requireAuth, validate(planTodayQuerySchema, "query"), async (req: Request, res: Response, next: NextFunction) => {
@@ -120,15 +104,18 @@ router.get("/weekly", requireAuth, validate(planTodayQuerySchema, "query"), asyn
     // weigh-ins), fall back to the last 28 days *ending today*. The engine uses the
     // real day offsets, so two weigh-ins a week apart still give kg/week.
     const weeklyPoints = collectWeights(trailing7Start, 7);
-    const weightSeriesKg =
-      weeklyPoints.length >= 4 ? weeklyPoints : collectWeights(addDays(todayUtcMidnight, -27), 28);
+    const trackedWeight =
+      user?.trackWeight === false
+        ? []
+        : weeklyPoints.length >= 4
+          ? weeklyPoints
+          : collectWeights(addDays(todayUtcMidnight, -27), 28);
 
-    const exerciseNames = Array.from(new Set(liftLogs.map((l) => l.exerciseName))).slice(0, 200);
-    const perExercise: PerExerciseDelta[] = exerciseNames.map((name) => ({
-      name,
-      thisWeekKg: topSetByWeek(liftLogs, currentWeekStart, addDays(currentWeekStart, 7)),
-      lastWeekKg: topSetByWeek(liftLogs, previousWeekStart, currentWeekStart),
-    }));
+    const perExercise = buildPerExerciseDeltas(
+      liftLogs,
+      currentWeekStart,
+      previousWeekStart,
+    );
 
     const elapsedDays = Math.max(
       1,
@@ -161,7 +148,7 @@ router.get("/weekly", requireAuth, validate(planTodayQuerySchema, "query"), asyn
         : null;
 
     const result = computeVerdict({
-      weightSeriesKg,
+      weightSeriesKg: trackedWeight,
       perExercise,
       adherencePct,
       previousVerdict,

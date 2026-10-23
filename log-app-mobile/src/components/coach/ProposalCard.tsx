@@ -12,7 +12,7 @@ import { useMealsApi } from "../../api/meals";
 import { setPendingPlan } from "../../state/parsedPlan";
 import { formatMediumDate } from "../../utils/date";
 import { formatLiftSet } from "../../utils/plate";
-import { emptyExercise } from "../PlanDaysEditor";
+import { editableExerciseFromPlan } from "../PlanDaysEditor";
 import type { IoniconName } from "../ui/primitives";
 import type { ChatProposal } from "../../hooks/useCoachChat";
 import type { MealItem } from "../../api/types";
@@ -103,12 +103,7 @@ export function ProposalCard({
           ? proposal.days.map((d) => ({
               day_name: d.day_name,
               rationale: d.rationale,
-              exercises: d.exercises.map((e) => ({
-                ...emptyExercise(),
-                name: e.name,
-                sets: String(e.sets),
-                reps: e.reps,
-              })),
+              exercises: d.exercises.map((e) => editableExerciseFromPlan(e)),
             }))
           : [],
     });

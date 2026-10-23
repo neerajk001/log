@@ -38,7 +38,10 @@ export function useCoachApi() {
       // Plan generation is a long reasoning call; the default 15s client timeout
       // aborted it and surfaced as a connection error. Give it the AI allowance.
       generatePlan: (body: { goal?: string; notes?: string }) =>
-        client.post<ParsedPlanPreview>("/api/coach/plan", body, { timeoutMs: 120_000 }),
+        client.post<ParsedPlanPreview>("/api/coach/plan", body, {
+          timeoutMs: 120_000,
+          invalidate: false,
+        }),
       analyzePhoto: (formData: FormData) =>
         client.postFormData<PhysiqueReading>("/api/coach/analyze", formData),
     }),
@@ -100,7 +103,7 @@ export async function streamCoachChat({
   onUsage?: (usage: CoachUsage) => void;
   signal?: AbortSignal;
 }): Promise<string> {
-  if (!token) throw new Error("Signed out. Please sign in again.");
+  if (!token) throw new ApiError(401, "UNAUTHORIZED", "Signed out. Please sign in again.");
 
   const sentAt = Date.now();
   let res: Awaited<ReturnType<typeof expoFetch>>;

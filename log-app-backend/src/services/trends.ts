@@ -197,8 +197,11 @@ export async function computeTrends(
   const todayUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const currentWeekStart = startOfIsoWeek(todayUtcMidnight);
   const lastWeekStart = addDays(currentWeekStart, -7);
-  // Wide enough for the 1y monthly buckets and the six-month rollup.
-  const historyStart = addMonths(startOfMonth(todayUtcMidnight), -(MONTHS_BACK + 5));
+  // Wide enough for the 1y monthly buckets, the six-month rollup, and the
+  // selected nutrition window (up to 52 weeks plus its comparison week).
+  const monthlyStart = addMonths(startOfMonth(todayUtcMidnight), -(MONTHS_BACK + 5));
+  const nutritionStart = addDays(currentWeekStart, -(nutritionWeeks * 7 + 7));
+  const historyStart = new Date(Math.min(monthlyStart.getTime(), nutritionStart.getTime()));
 
   const [logs, liftDates, lifts, user] = await Promise.all([
     prisma.dailyLog.findMany({

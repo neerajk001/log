@@ -71,6 +71,7 @@ export default function VerdictScreen() {
 
         {error ? <ErrorState message={error} onRetry={refetch} /> : null}
 
+        {error ? null : (
         <Card style={styles.card}>
           {insufficient ? (
             <Text style={[typography.small, styles.note]}>
@@ -135,6 +136,7 @@ export default function VerdictScreen() {
             <Text style={typography.small}>No verdict yet.</Text>
           )}
         </Card>
+        )}
 
         {verdict ? (
           <Card style={styles.card}>

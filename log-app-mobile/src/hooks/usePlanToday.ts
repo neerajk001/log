@@ -19,6 +19,13 @@ export function usePlanToday(scopeDate?: string) {
   const firstScope = useRef(scopeDate);
   const { begin, isCurrent } = useLatest();
 
+  useEffect(() => {
+    // Don't show yesterday's rotated day under a new date while loading.
+    setDay(null);
+    setLoading(true);
+    setError(null);
+  }, [scopeDate]);
+
   const fetch = useCallback(
     async (force = false) => {
       const token = begin();

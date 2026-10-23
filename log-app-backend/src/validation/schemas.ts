@@ -80,6 +80,13 @@ export const liftLogUpdateSchema = z
         message: "a set cannot have both weight_kg and plate_position",
       });
     }
+    if ((data.plate_increment !== undefined) !== (data.plate_unit !== undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["plate_increment"],
+        message: "plate_increment and plate_unit must be provided together",
+      });
+    }
     if ((data.plate_increment == null) !== (data.plate_unit == null)) {
       ctx.addIssue({
         code: "custom",
@@ -106,18 +113,46 @@ export const mealItemSchema = z.object({
   protein_g: z.number().min(0).max(500),
 });
 
-export const createMealSchema = z.object({
-  /** Optional client-generated id: retrying the same request replays it instead of logging the meal twice. */
-  id: z.string().uuid().optional(),
-  date: dateString,
+const mealBodySchema = z.object({
   title: z.string().min(1).max(120),
   items: z.array(mealItemSchema).min(1).max(30),
   calories: z.number().int().min(1).max(10000),
-  protein_g: z.number().min(0).max(1000),
+  protein_g: z.number().int().min(0).max(1000),
   source: z.enum(["ai", "photo", "manual"]),
 });
 
-export const updateMealSchema = createMealSchema.omit({ date: true, id: true });
+function mealTotalsMatch(
+  data: { items: { calories: number; protein_g: number }[]; calories: number; protein_g: number },
+  ctx: z.RefinementCtx,
+): void {
+  const calories = data.items.reduce((sum, item) => sum + item.calories, 0);
+  const protein = data.items.reduce((sum, item) => sum + item.protein_g, 0);
+  if (Math.abs(data.calories - calories) > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["calories"],
+      message: "calories must match the sum of the items",
+    });
+  }
+  if (Math.abs(data.protein_g - protein) > 1) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["protein_g"],
+      message: "protein_g must match the sum of the items",
+    });
+  }
+}
+
+export const createMealSchema = z
+  .object({
+    /** Optional client-generated id: retrying the same request replays it instead of logging the meal twice. */
+    id: z.string().uuid().optional(),
+    date: dateString,
+    ...mealBodySchema.shape,
+  })
+  .superRefine(mealTotalsMatch);
+
+export const updateMealSchema = mealBodySchema.superRefine(mealTotalsMatch);
 
 export const mealDateQuerySchema = z.object({
   date: dateString,
@@ -284,12 +319,52 @@ export const liftSummaryQuerySchema = z.object({
 });
 
 /** `/api/logs/lift/metrics` — the current and previous comparison windows. */
-export const liftMetricsQuerySchema = z.object({
-  from: dateString,
-  to: dateString,
-  prev_from: dateString,
-  prev_to: dateString,
-});
+const MAX_PROGRESS_WINDOW_DAYS = 731;
+
+function daySpan(from: string, to: string): number {
+  return (new Date(`${to}T00:00:00Z`).getTime() - new Date(`${from}T00:00:00Z`).getTime()) / 86400000;
+}
+
+export const liftMetricsQuerySchema = z
+  .object({
+    from: dateString,
+    to: dateString,
+    prev_from: dateString,
+    prev_to: dateString,
+  })
+  .superRefine((data, ctx) => {
+    if (data.to < data.from) {
+      ctx.addIssue({ code: "custom", path: ["to"], message: "to must be on or after from" });
+    }
+    if (data.prev_to < data.prev_from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["prev_to"],
+        message: "prev_to must be on or after prev_from",
+      });
+    }
+    if (data.prev_to >= data.from) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["prev_from"],
+        message: "the previous window must end before from",
+      });
+    }
+    if (daySpan(data.from, data.to) > MAX_PROGRESS_WINDOW_DAYS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["to"],
+        message: `window must be ${MAX_PROGRESS_WINDOW_DAYS} days or fewer`,
+      });
+    }
+    if (daySpan(data.prev_from, data.prev_to) > MAX_PROGRESS_WINDOW_DAYS) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["prev_to"],
+        message: `comparison window must be ${MAX_PROGRESS_WINDOW_DAYS} days or fewer`,
+      });
+    }
+  });
 
 /** `/api/logs/lift/progress` - per-exercise session history and its comparison window. */
 export const liftProgressQuerySchema = liftMetricsQuerySchema;

@@ -142,7 +142,15 @@ export default function InsightsScreen() {
   const trackWeight = profile?.track_weight !== false;
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
-  const { data: liftProgress, refetch: refetchLiftProgress } = useLiftProgress(rangeDays);
+  const {
+    data: liftProgress,
+    loading: liftProgressLoading,
+    error: liftProgressError,
+    refetch: refetchLiftProgress,
+  } = useLiftProgress(rangeDays);
+  // The server caps the nutrition window at 52 weeks. For 1Y there is no prior
+  // year in the payload; requesting 104 made the whole trends call 400.
+  const nutritionFetchWeeks = Math.min(nutritionWeeks * 2, 52);
   // The nutrition window is fetched twice over: the second half is the equally-long
   // window before it, which is what the "vs previous" readout compares against. The
   // headline still averages only the buckets the window actually covers.
@@ -151,12 +159,12 @@ export default function InsightsScreen() {
     loading: trendsLoading,
     error: trendsError,
     refetch: refetchTrends,
-  } = useTrends(range, nutritionWeeks * 2);
+  } = useTrends(range, nutritionFetchWeeks);
   // The bars always show the last seven days, whatever range/window is selected. The
   // weeks argument only shapes the nutrition buckets — which this call ignores — so
   // passing the same value keeps the cache key identical to the fetch above when the
   // range is 7d, and the two share one request.
-  const { data: weekTrends, refetch: refetchWeek } = useTrends("7d", nutritionWeeks * 2);
+  const { data: weekTrends, refetch: refetchWeek } = useTrends("7d", nutritionFetchWeeks);
   const { data: verdict } = useWeeklyVerdict();
 
   // The hook's own first-load idiom: nothing has arrived yet, so show "—" rather than
@@ -231,7 +239,11 @@ export default function InsightsScreen() {
         : "Last week"
       : `Last ${nutritionWindow.phrase}`;
   const nutritionCompareLabel =
-    nutritionWeeks === 1 ? "vs last week" : `vs previous ${nutritionWindow.phrase}`;
+    nutritionWeeks === 52
+      ? "no prior year loaded"
+      : nutritionWeeks === 1
+        ? "vs last week"
+        : `vs previous ${nutritionWindow.phrase}`;
 
   // …but the bars stay on the last 7 days of daily intake, so a wider window
   // fades them (they only cover a week) and only the average follows the filter.
@@ -247,9 +259,6 @@ export default function InsightsScreen() {
     [weekSeries, nutritionMetric],
   );
   const weekLoggedDays = weekSeries.reduce((sum, b) => sum + b.days, 0);
-
-  /** Days with data inside the top range — the adherence tile's denominator context. */
-  const rangeLoggedDays = series.reduce((sum, b) => sum + b.days, 0);
 
   /* ------------------------------------------------------------- weight rows */
   const recentWeightRows = useMemo(() => {
@@ -289,9 +298,9 @@ export default function InsightsScreen() {
 
   const adherence = trends?.adherence_pct ?? null;
 
-  const verdictUsable =
-    verdict != null && (!trackWeight || verdict.weight_trend_kg_per_week != null);
-  const verdictLabel = verdictUsable ? VERDICT_LABELS[verdict.verdict] : null;
+  // Always expose the verdict entry; the screen itself explains insufficient
+  // weigh-in data instead of hiding the only route to it.
+  const verdictLabel = verdict ? VERDICT_LABELS[verdict.verdict] : null;
 
   const show = {
     summary: category === "overview" || category === "all",
@@ -406,7 +415,7 @@ export default function InsightsScreen() {
               iconColor={colors.orange}
               value={firstLoad ? "—" : adherence != null ? `${adherence}%` : "—"}
               label="Adherence"
-              sub={rangeLoggedDays > 0 ? `${rangeLoggedDays}/${rangeDays}` : ""}
+              sub={adherence != null ? "This week" : ""}
             />
           </View>
         ) : null}
@@ -806,7 +815,7 @@ export default function InsightsScreen() {
                           onPress={() =>
                             router.navigate({
                               pathname: "/lift-progress/detail",
-                              params: { name: exercise.name },
+                              params: { name: exercise.name, days: String(rangeDays) },
                             } as never)
                           }
                           style={({ pressed }) => [styles.progressRow, pressed && styles.pressed]}
@@ -837,6 +846,12 @@ export default function InsightsScreen() {
                     );
                   })}
                 </View>
+              ) : liftProgressError ? (
+                <Text style={[typography.small, styles.note]}>
+                  Could not load lift progress. Pull to refresh.
+                </Text>
+              ) : liftProgressLoading ? (
+                <Text style={[typography.small, styles.note]}>Loading lift progress…</Text>
               ) : (
                 <Text style={[typography.small, styles.note]}>
                   Log the same exercise a few times to see its trend here.
@@ -854,10 +869,10 @@ export default function InsightsScreen() {
                 <IconBadge name="trophy" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
                 <View style={styles.cardHeaderText}>
                   <Text style={typography.bodyStrong}>Personal records</Text>
-                  <Text style={typography.caption}>Best set per exercise</Text>
+                  <Text style={typography.caption}>Best kg set per exercise</Text>
                 </View>
               </View>
-              <Text style={typography.caption}>All time</Text>
+              <Text style={typography.caption}>In range</Text>
             </View>
             {metrics.records.length > 0 ? (
               <View>

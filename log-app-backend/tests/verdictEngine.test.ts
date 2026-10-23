@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildPerExerciseDeltas,
   computeVerdict,
   computeStrengthTrend,
   linearRegressionSlopePerDay,
@@ -187,6 +188,38 @@ describe("linearRegressionSlopePerDay", () => {
   it("returns ~0 for a flat series", () => {
     const series = [70, 70, 70, 70, 70, 70, 70];
     expect(linearRegressionSlopePerDay(series)).toBeCloseTo(0, 6);
+  });
+});
+
+describe("buildPerExerciseDeltas", () => {
+  it("uses each exercise's own sets instead of one global top set", () => {
+    const deltas = buildPerExerciseDeltas(
+      [
+        { date: new Date("2026-09-30T00:00:00Z"), exerciseName: "Bench", weightKg: 60 },
+        { date: new Date("2026-10-06T00:00:00Z"), exerciseName: "Bench", weightKg: 65 },
+        { date: new Date("2026-09-30T00:00:00Z"), exerciseName: "Squat", weightKg: 100 },
+        { date: new Date("2026-10-06T00:00:00Z"), exerciseName: "Squat", weightKg: 90 },
+      ],
+      new Date("2026-10-05T00:00:00Z"),
+      new Date("2026-09-28T00:00:00Z"),
+    );
+
+    expect(deltas).toEqual([
+      { name: "Bench", thisWeekKg: 65, lastWeekKg: 60 },
+      { name: "Squat", thisWeekKg: 90, lastWeekKg: 100 },
+    ]);
+    expect(computeStrengthTrend(deltas)).toBe("flat");
+  });
+
+  it("ignores bodyweight and plate sets for the kg trend", () => {
+    const deltas = buildPerExerciseDeltas(
+      [
+        { date: new Date("2026-10-06T00:00:00Z"), exerciseName: "Leg Press", weightKg: null },
+      ],
+      new Date("2026-10-05T00:00:00Z"),
+      new Date("2026-09-28T00:00:00Z"),
+    );
+    expect(deltas).toEqual([{ name: "Leg Press", thisWeekKg: null, lastWeekKg: null }]);
   });
 });
 

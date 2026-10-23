@@ -20,10 +20,15 @@ export function initSentry(): void {
     environment: config.sentry.environment,
     release: config.sentry.release,
     // Error monitoring only — no performance tracing (quota discipline).
-    // (No PII is sent by default; beforeSend below is belt-and-braces.)
     tracesSampleRate: 0,
     beforeSend(event) {
-      // Never ship auth material, even if capture settings change later.
+      // Never ship auth material or request bodies (weight, meals, plan text,
+      // coach notes) even if capture settings change later.
+      if (event.request) {
+        delete event.request.data;
+        delete event.request.query_string;
+        delete event.request.cookies;
+      }
       const headers = event.request?.headers as Record<string, unknown> | undefined;
       if (headers) {
         delete headers.authorization;

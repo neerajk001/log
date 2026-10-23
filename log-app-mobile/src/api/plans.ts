@@ -11,9 +11,15 @@ export function usePlansApi() {
       // it as a connection error (same class as coach plan generation — give it
       // the AI allowance, matching the PDF path's 120s via postFormData).
       parsePlanText: (text: string) =>
-        client.post<ParsedPlanPreview>("/api/plans/parse", { text }, { timeoutMs: 120_000 }),
+        client.post<ParsedPlanPreview>(
+          "/api/plans/parse",
+          { text },
+          { timeoutMs: 120_000, invalidate: false },
+        ),
       parsePlanPdfForm: (formData: FormData) =>
-        client.postFormData<ParsedPlanPreview>("/api/plans/parse", formData),
+        client.postFormData<ParsedPlanPreview>("/api/plans/parse", formData, {
+          invalidate: false,
+        }),
       createPlan: (data: CreatePlanInput) => client.post<WorkoutPlan>("/api/plans", data),
       updatePlan: (id: string, data: CreatePlanInput) =>
         client.put<WorkoutPlan>(`/api/plans/${id}`, data),

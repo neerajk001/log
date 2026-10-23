@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import { useSignIn, useSSO } from "@clerk/clerk-expo";
+import { useSignIn, useSignUp, useSSO } from "@clerk/clerk-expo";
 import { usePostHog } from "posthog-react-native";
 import { useLocalSearchParams } from "expo-router";
 import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
@@ -23,14 +23,18 @@ type Step = "options" | "email" | "code";
 
 export default function SignInScreen() {
   const { signIn, isLoaded: signInLoaded, setActive } = useSignIn();
+  const { signUp, isLoaded: signUpLoaded, setActive: setSignUpActive } = useSignUp();
   const { startSSOFlow } = useSSO();
   const posthog = usePostHog();
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
   // Arriving from the onboarding carousel (`?method=google|email`): start there.
-  const { method } = useLocalSearchParams<{ method?: string }>();
+  const { method, mode } = useLocalSearchParams<{ method?: string; mode?: string }>();
   const [step, setStep] = useState<Step>(method === "email" ? "email" : "options");
+  const [authMode, setAuthMode] = useState<"signin" | "signup">(
+    mode === "signup" ? "signup" : "signin",
+  );
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -97,10 +101,19 @@ export default function SignInScreen() {
   }, [method, signInLoaded, handleGoogleSignIn]);
 
   const handleSendCode = useCallback(async () => {
-    if (!signIn || loading || resendCooldown > 0) return;
+    if (loading || resendCooldown > 0) return;
     setLoading(true);
     setError("");
     try {
+      if (authMode === "signup") {
+        if (!signUp) return;
+        await signUp.create({ emailAddress: email.trim() });
+        await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+        setResendCooldown(30);
+        setStep("code");
+        return;
+      }
+      if (!signIn) return;
       const created = await signIn.create({ identifier: email.trim() });
       const emailFactor = created.supportedFirstFactors?.find(
         (f) => f.strategy === "email_code",
@@ -122,14 +135,28 @@ export default function SignInScreen() {
     } finally {
       setLoading(false);
     }
-  }, [email, signIn, loading, resendCooldown]);
+  }, [authMode, email, signIn, signUp, loading, resendCooldown]);
 
   const handleVerifyCode = useCallback(async () => {
-    if (!signIn || !setActive) return;
     setLoading(true);
     setError("");
     const t0 = now();
     try {
+      if (authMode === "signup") {
+        if (!signUp) return;
+        const result = await signUp.attemptEmailAddressVerification({ code: code.trim() });
+        if (result.status === "complete" && setSignUpActive) {
+          await setSignUpActive({ session: result.createdSessionId });
+          captureTiming(posthog, "login_completed", {
+            duration_ms: Date.now() - t0,
+            method: "email_signup",
+          });
+        } else {
+          setError("Verification incomplete. Try again.");
+        }
+        return;
+      }
+      if (!signIn || !setActive) return;
       const result = await signIn.attemptFirstFactor({ strategy: "email_code", code: code.trim() });
       if (result.status === "complete") {
         await setActive({ session: result.createdSessionId });
@@ -143,7 +170,7 @@ export default function SignInScreen() {
     } finally {
       setLoading(false);
     }
-  }, [code, signIn, setActive, posthog]);
+  }, [authMode, code, signIn, signUp, setActive, setSignUpActive, posthog]);
 
   const handleBack = useCallback(() => {
     setStep("options");
@@ -152,7 +179,7 @@ export default function SignInScreen() {
     setError("");
   }, []);
 
-  if (!signInLoaded) {
+  if (!signInLoaded || !signUpLoaded) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -171,7 +198,9 @@ export default function SignInScreen() {
           {step === "options"
             ? "Track. Train. Improve."
             : step === "email"
-              ? "Enter your email"
+              ? authMode === "signup"
+                ? "Create your account"
+                : "Enter your email"
               : "Enter verification code"}
         </Text>
 
@@ -196,8 +225,24 @@ export default function SignInScreen() {
                 <View style={styles.dividerLine} />
               </View>
 
-              <Pressable style={styles.buttonOutline} onPress={() => setStep("email")}>
+              <Pressable
+                style={styles.buttonOutline}
+                onPress={() => {
+                  setAuthMode("signin");
+                  setStep("email");
+                }}
+              >
                 <Text style={styles.buttonOutlineText}>Sign in with Email</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.textButton}
+                onPress={() => {
+                  setAuthMode("signup");
+                  setStep("email");
+                }}
+              >
+                <Text style={typography.small}>New here? Create an account</Text>
               </Pressable>
             </>
           )}
@@ -225,8 +270,24 @@ export default function SignInScreen() {
                 {loading ? (
                   <ActivityIndicator size="small" color={colors.onPrimary} />
                 ) : (
-                  <Text style={styles.buttonText}>Send Code</Text>
+                  <Text style={styles.buttonText}>
+                    {authMode === "signup" ? "Create account & send code" : "Send Code"}
+                  </Text>
                 )}
+              </Pressable>
+
+              <Pressable
+                style={styles.textButton}
+                onPress={() => {
+                  setAuthMode((current) => (current === "signup" ? "signin" : "signup"));
+                  setError("");
+                }}
+              >
+                <Text style={typography.small}>
+                  {authMode === "signup"
+                    ? "Already have an account? Sign in"
+                    : "New here? Create an account"}
+                </Text>
               </Pressable>
 
               <Pressable style={styles.textButton} onPress={handleBack}>

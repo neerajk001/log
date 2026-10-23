@@ -4,9 +4,13 @@ import { makeUseStyles, useTheme } from "../theme/ThemeContext";
 import { radii, spacing } from "../theme/spacing";
 import { muscleGroupsForDay } from "../utils/derive";
 import { muscleTagStyle } from "../utils/tags";
-import { MAX_EDITOR_SET_FIELDS, editorSetCount } from "../utils/planTargets";
+import {
+  MAX_EDITOR_SET_FIELDS,
+  editorSetCount,
+  editorWeightsFromExercise,
+} from "../utils/planTargets";
 import { plateConfigError } from "../utils/plate";
-import type { PlateUnit } from "../api/types";
+import type { PlanSetTarget, PlateUnit } from "../api/types";
 import { Chip } from "./ui/controls";
 import { Tag } from "./ui/primitives";
 
@@ -70,6 +74,30 @@ export function plateFieldsFromExercise(exercise: {
     plateIncrement: config ? String(config.increment) : "",
     plateMin: config ? String(config.min_position) : "",
     plateMax: config ? String(config.max_position) : "",
+  };
+}
+
+/** Full editor state for a stored plan exercise (used by coach proposals). */
+export function editableExerciseFromPlan(exercise: {
+  name: string;
+  sets: number | string;
+  reps: string;
+  weight_kg?: number | null;
+  set_targets?: PlanSetTarget[] | null;
+  load_mode?: "weight" | "plate" | null;
+  plate_config?: {
+    unit: PlateUnit;
+    increment: number;
+    min_position: number;
+    max_position: number;
+  } | null;
+}): EditableExercise {
+  return {
+    name: exercise.name,
+    sets: String(exercise.sets),
+    reps: exercise.reps,
+    setWeights: editorWeightsFromExercise(exercise),
+    ...plateFieldsFromExercise(exercise),
   };
 }
 
@@ -178,7 +206,11 @@ export function PlanDaysEditor({
                     placeholderTextColor={colors.textMuted}
                   />
                   <Pressable
-                    onPress={() =>
+                    onPress={() => {
+                      if (day.exercises.length <= 1) {
+                        Alert.alert("Keep one exercise", "A day needs at least one exercise.");
+                        return;
+                      }
                       Alert.alert("Remove exercise?", "This removes the exercise from the plan.", [
                         { text: "Cancel", style: "cancel" },
                         {
@@ -186,8 +218,8 @@ export function PlanDaysEditor({
                           style: "destructive",
                           onPress: () => updateDay(di, { exercises: day.exercises.filter((_, j) => j !== ei) }),
                         },
-                      ])
-                    }
+                      ]);
+                    }}
                     hitSlop={8}
                     accessibilityLabel="Remove exercise"
                   >

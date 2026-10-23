@@ -75,6 +75,55 @@ export function verdictIsUnchanged(stored: StoredVerdict, computed: VerdictOutpu
   );
 }
 
+export interface StrengthLiftRow {
+  date: Date;
+  exerciseName: string;
+  weightKg: unknown;
+}
+
+/** Highest kg set for one exercise inside a week (bodyweight/plate ignored). */
+function topSetByWeek(
+  rows: StrengthLiftRow[],
+  weekStart: Date,
+  weekEnd: Date,
+): number | null {
+  let max: number | null = null;
+  for (const row of rows) {
+    if (row.date < weekStart || row.date >= weekEnd) continue;
+    if (row.weightKg == null) continue;
+    const kg = Number(row.weightKg);
+    if (max == null || kg > max) max = kg;
+  }
+  return max;
+}
+
+/**
+ * One delta per exercise, using only that exercise's sets. Computing a single
+ * global top set and copying it onto every exercise makes all movements look
+ * identical, which corrupts the strength trend and the weekly verdict.
+ */
+export function buildPerExerciseDeltas(
+  lifts: StrengthLiftRow[],
+  currentWeekStart: Date,
+  previousWeekStart: Date,
+): PerExerciseDelta[] {
+  const nextWeekStart = new Date(currentWeekStart);
+  nextWeekStart.setUTCDate(nextWeekStart.getUTCDate() + 7);
+  const byExercise = new Map<string, StrengthLiftRow[]>();
+  for (const row of lifts) {
+    const rows = byExercise.get(row.exerciseName) ?? [];
+    rows.push(row);
+    byExercise.set(row.exerciseName, rows);
+  }
+  return Array.from(byExercise.entries())
+    .slice(0, 200)
+    .map(([name, rows]) => ({
+      name,
+      thisWeekKg: topSetByWeek(rows, currentWeekStart, nextWeekStart),
+      lastWeekKg: topSetByWeek(rows, previousWeekStart, currentWeekStart),
+    }));
+}
+
 const STRENGTH_DELTA_THRESHOLD = 0.025;
 /**
  * Sparse weighers are normal — plenty of people weigh once a week. Two weigh-ins
@@ -162,7 +211,12 @@ export function computeVerdict(input: VerdictInput): VerdictOutput {
       typeof p === "number" ? { x: i, y: p } : { x: p.day, y: p.kg },
     ),
   );
-  const weightTrendKgPerWeek = slopePerDay == null ? null : slopePerDay * 7;
+  // Decimal(4,2) stores at most ±99.99; clamp the computed slope so an extreme
+  // (but schema-valid) weight series cannot overflow the verdict upsert.
+  const weightTrendKgPerWeek =
+    slopePerDay == null
+      ? null
+      : Math.max(-99.99, Math.min(99.99, slopePerDay * 7));
   const strengthTrend = computeStrengthTrend(input.perExercise);
 
   const prev = input.previousVerdict;

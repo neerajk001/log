@@ -1,0 +1,75 @@
+name: ci
+
+# Pull-request gate only. Deployment stays in backend-deploy.yml / mobile-update.yml.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: log-app-backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: log_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/log_test?sslmode=disable
+      VITEST_REQUIRE_DB: "1"
+      NODE_ENV: test
+      CLERK_SECRET_KEY: sk_test_dummy_for_ci
+      OPENAI_API_KEY: dummy_for_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: log-app-backend/package-lock.json
+      - run: npm ci
+      - name: Prisma schema check
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/log_test?sslmode=disable
+      - name: Prepare test database
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/log_test?sslmode=disable
+      - run: npm run build
+      - run: npm test
+
+  mobile:
+    name: mobile CI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: log-app-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: log-app-mobile/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint

@@ -70,9 +70,11 @@ export function useInsights(rangeDays: number, restDays: number[] = []) {
       weekInfo: currentWeekInfoFromDates(dates, restDays, today),
       // Long ranges aggregate weekly so the chart stays readable.
       setsSeries:
-        rangeDays >= 90
-          ? weeklySetSeries(counts, 13, today)
-          : dailySetSeries(counts, rangeDays, today),
+        rangeDays >= 365
+          ? weeklySetSeries(counts, 52, today)
+          : rangeDays >= 90
+            ? weeklySetSeries(counts, 13, today)
+            : dailySetSeries(counts, rangeDays, today),
     };
   }, [data, rangeDays, restDays, today]);
 

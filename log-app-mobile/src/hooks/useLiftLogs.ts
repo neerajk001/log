@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import * as Crypto from "expo-crypto";
 import { useLiftLogsApi } from "../api/liftLogs";
@@ -16,6 +16,19 @@ export function useLiftLogs(date: string) {
   const pendingIdsRef = useRef<Set<string>>(new Set());
   const inFlightRef = useRef<Map<string, Promise<LiftLog>>>(new Map());
   const loadSequenceRef = useRef(0);
+  const dateRef = useRef(date);
+
+  useEffect(() => {
+    // Date switch: don't show or merge another day's sets.
+    dateRef.current = date;
+    entriesRef.current = [];
+    pendingIdsRef.current = new Set();
+    setEntries([]);
+    setPendingIds(new Set());
+    setLoading(true);
+    setLoadError(null);
+    setMutationError(null);
+  }, [date]);
 
   const applyEntries = useCallback((next: LiftLog[] | ((current: LiftLog[]) => LiftLog[])) => {
     const value = typeof next === "function" ? next(entriesRef.current) : next;
@@ -70,6 +83,7 @@ export function useLiftLogs(date: string) {
       if (existingRequest) return existingRequest;
 
       const requestData: LiftLogCreate = { ...data, id };
+      const requestDate = requestData.date;
       const alreadyPresent = entriesRef.current.some((entry) => entry.id === id);
       setMutationError(null);
       setPending(id, true);
@@ -98,22 +112,26 @@ export function useLiftLogs(date: string) {
         .createLiftLog(requestData)
         .then((saved) => {
           if (__DEV__) console.log("[lift] <- saved", saved);
-          applyEntries((current) => {
-            const exists = current.some((entry) => entry.id === id);
-            return exists
-              ? current.map((entry) => (entry.id === id ? saved : entry))
-              : [saved, ...current];
-          });
+          if (dateRef.current === requestDate) {
+            applyEntries((current) => {
+              const exists = current.some((entry) => entry.id === id);
+              return exists
+                ? current.map((entry) => (entry.id === id ? saved : entry))
+                : [saved, ...current];
+            });
+          }
           return saved;
         })
         .catch((err) => {
           if (__DEV__) {
             console.warn("[lift] x save failed", id, err instanceof Error ? err.message : err);
           }
-          if (!alreadyPresent) {
-            applyEntries((current) => current.filter((entry) => entry.id !== id));
+          if (dateRef.current === requestDate) {
+            if (!alreadyPresent) {
+              applyEntries((current) => current.filter((entry) => entry.id !== id));
+            }
+            setMutationError(err instanceof Error ? err.message : "Failed to save lift");
           }
-          setMutationError(err instanceof Error ? err.message : "Failed to save lift");
           throw err;
         })
         .finally(() => {

@@ -9,29 +9,22 @@ describe("collectMissingRuntimeConfig", () => {
   const complete = {
     database: { url: "postgresql://user:pass@host/db" },
     clerk: { secretKey: "sk_test_x" },
-    ai: { apiKey: "provider-key" },
   };
 
   it("returns nothing when the required keys are present", () => {
     expect(collectMissingRuntimeConfig(complete)).toEqual([]);
   });
 
-  it("names every missing variable", () => {
+  it("names every missing required variable", () => {
     expect(
       collectMissingRuntimeConfig({
         database: { url: "" },
         clerk: { secretKey: "" },
-        ai: { apiKey: "" },
       }),
-    ).toEqual([
-      "DATABASE_URL",
-      "CLERK_SECRET_KEY",
-      "AI_API_KEY (or COMMANDCODE_API_KEY / OPENAI_API_KEY)",
-    ]);
+    ).toEqual(["DATABASE_URL", "CLERK_SECRET_KEY"]);
   });
 
-  it("does not demand OPENAI_API_KEY separately — any AI provider key boots", () => {
-    // A Command-Code-only deployment: ai.apiKey is set from AI_API_KEY.
+  it("does not require an AI key: core logging boots without AI", () => {
     expect(collectMissingRuntimeConfig(complete)).toEqual([]);
   });
 });

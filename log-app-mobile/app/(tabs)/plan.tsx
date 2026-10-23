@@ -66,7 +66,7 @@ export default function PlanScreen() {
 
         {error ? <ErrorState message={error} onRetry={refetch} /> : null}
 
-        {loading && !activePlan ? (
+        {error ? null : loading && !activePlan ? (
           <LoadingState label="Loading your plan…" />
         ) : !activePlan ? (
           <EmptyState

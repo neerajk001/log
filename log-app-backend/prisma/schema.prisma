@@ -73,6 +73,8 @@ model LiftLog {
   @@index([userId, exerciseName, date])
   // Date-only reads (history, insights, coach context) can't use the index above.
   @@index([userId, date])
+  // FK SET NULL on plan-day deletion otherwise scans the whole lift history.
+  @@index([planDayId])
   @@map("lift_logs")
 }
 

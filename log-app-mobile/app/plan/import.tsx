@@ -26,6 +26,7 @@ const MAX_PLAN_FILE_BYTES = MAX_PLAN_FILE_MB * 1024 * 1024;
 function toEditableDays(
   days: {
     day_name: string;
+    rationale?: string | null;
     exercises: {
       name: string;
       sets: number;
@@ -44,6 +45,7 @@ function toEditableDays(
 ): EditableDay[] {
   return days.map((d) => ({
     day_name: d.day_name,
+    rationale: d.rationale ?? undefined,
     exercises: d.exercises.map((e) => ({
       name: e.name,
       sets: String(e.sets),
@@ -67,10 +69,13 @@ export default function ImportPlanScreen() {
   const [error, setError] = useState<string | null>(null);
   const startedManual = useRef(false);
 
-  const goPreview = useCallback((days: EditableDay[], source: "manual" | "ai_parsed") => {
-    setPendingPlan({ name: "My Workout Plan", source, days });
-    router.navigate("/plan/preview" as never);
-  }, []);
+  const goPreview = useCallback(
+    (days: EditableDay[], source: "manual" | "ai_parsed", rationale?: string) => {
+      setPendingPlan({ name: "My Workout Plan", source, rationale, days });
+      router.navigate("/plan/preview" as never);
+    },
+    [],
+  );
 
   const startManual = useCallback(() => goPreview([emptyDay()], "manual"), [goPreview]);
 
@@ -92,7 +97,7 @@ export default function ImportPlanScreen() {
     setError(null);
     try {
       const result = await api.parsePlanText(trimmed);
-      goPreview(toEditableDays(result.days), "ai_parsed");
+      goPreview(toEditableDays(result.days), "ai_parsed", result.rationale ?? undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't parse that — try pasting plain text.");
     } finally {
@@ -133,7 +138,7 @@ export default function ImportPlanScreen() {
         filePart(file.uri, file.name ?? "plan", looksPdf ? "application/pdf" : "text/plain"),
       );
       const parsed = await api.parsePlanPdfForm(formData);
-      goPreview(toEditableDays(parsed.days), "ai_parsed");
+      goPreview(toEditableDays(parsed.days), "ai_parsed", parsed.rationale ?? undefined);
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 0) {

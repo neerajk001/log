@@ -26,9 +26,24 @@ import {
 const PLAN_FILE_MAX_BYTES = 1024 * 1024;
 
 const router = Router();
+
+/**
+ * Serialize plan writes per athlete. The active-plan switch and day rebuild are
+ * multi-statement transactions; without a lock two concurrent creates/edits can
+ * leave two active plans or duplicate day orders.
+ */
+async function lockPlanWrites(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
+}
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: PLAN_FILE_MAX_BYTES },
+  limits: {
+    fileSize: PLAN_FILE_MAX_BYTES,
+    files: 1,
+    fields: 4,
+    parts: 6,
+    fieldSize: 64 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf" || file.mimetype === "text/plain") {
       cb(null, true);
@@ -178,6 +193,7 @@ router.post(
       const activate = is_active ?? true;
 
       const plan = await prisma.$transaction(async (tx) => {
+        await lockPlanWrites(tx, req.userId);
         if (activate) {
           await tx.workoutPlan.updateMany({
             where: { userId: req.userId, isActive: true },
@@ -224,6 +240,7 @@ router.get(
       const plans = await prisma.workoutPlan.findMany({
         where: { userId: req.userId, ...(active === "1" ? { isActive: true } : {}) },
         orderBy: { createdAt: "desc" },
+        take: 100,
         include: { planDays: { orderBy: { dayOrder: "asc" } } },
       });
 
@@ -351,6 +368,7 @@ router.put(
       }
 
       const plan = await prisma.$transaction(async (tx) => {
+        await lockPlanWrites(tx, req.userId);
         const existingDays = await tx.planDay.findMany({
           where: { planId, plan: { userId: req.userId } },
           orderBy: { dayOrder: "asc" },
@@ -420,6 +438,7 @@ router.post(
       }
 
       const plan = await prisma.$transaction(async (tx) => {
+        await lockPlanWrites(tx, req.userId);
         await tx.workoutPlan.updateMany({
           where: { userId: req.userId, isActive: true },
           data: { isActive: false },

@@ -33,6 +33,13 @@ export function useTodayLog(activeDate: string) {
   // React Compiler can optimize this hook.
   useEffect(() => {
     dateRef.current = activeDate;
+    // Clear the previous day's values immediately on a date switch.
+    setData(null);
+    setPlaceholder(null);
+    setFieldErrors({});
+    setRetries({});
+    setLoading(true);
+    setError(null);
   }, [activeDate]);
 
   const load = useCallback(async () => {

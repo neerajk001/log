@@ -347,7 +347,7 @@ export async function getLiftSummary(
   // rule the client applied in JS, and strictly before the athlete's today.
   // Bodyweight sets (null) sort after weighted ones, so a loaded set stays the cue.
   const lastByExercise = await client.liftLog.findMany({
-    where: { userId, exerciseName: { in: names }, date: { lt: before } },
+    where: { userId, exerciseName: { in: names }, date: { gte: from, lt: before } },
     orderBy: [
       { date: "desc" },
       { weightKg: { sort: "desc", nulls: "last" } },

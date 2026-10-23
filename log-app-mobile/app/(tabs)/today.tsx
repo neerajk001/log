@@ -155,19 +155,28 @@ export default function TodayScreen() {
   );
 
   const goLift = useCallback(() => {
-    router.navigate("/(tabs)/lift" as never);
-  }, []);
-  // Carry the day the card is showing so the Lift screen opens on it (and keeps it
-  // for the next set), rather than snapping back to today's rotation.
-  const goLiftDay = useCallback((dayId: string) => {
-    router.navigate({ pathname: "/(tabs)/lift", params: { dayId } } as never);
-  }, []);
+    router.navigate({ pathname: "/(tabs)/lift", params: { date: activeDate } } as never);
+  }, [activeDate]);
+  // Carry the day and date the card is showing so the Lift screen opens on them
+  // (and keeps them for the next set), rather than snapping back to today.
+  const goLiftDay = useCallback(
+    (dayId: string) => {
+      router.navigate({
+        pathname: "/(tabs)/lift",
+        params: { dayId, date: activeDate },
+      } as never);
+    },
+    [activeDate],
+  );
   const goHistory = useCallback(() => {
     router.navigate("/(tabs)/history" as never);
   }, []);
   const goLogMeal = useCallback(() => {
-    router.navigate({ pathname: "/coach/new", params: { agent: "meal" } } as never);
-  }, []);
+    router.navigate({
+      pathname: "/coach/new",
+      params: { agent: "meal", date: activeDate },
+    } as never);
+  }, [activeDate]);
 
   // Pull-to-refresh owns its own spinner: coupling it to the slowest section's
   // load state (refreshing = OR of all loadings) pinned the indicator on screen

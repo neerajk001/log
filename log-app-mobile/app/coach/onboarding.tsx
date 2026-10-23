@@ -5,7 +5,7 @@ import { router } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { Banner, Button, Card, LoadingState } from "../../src/components/ui/primitives";
+import { Banner, Button, Card, ErrorState, LoadingState } from "../../src/components/ui/primitives";
 import type { IoniconName } from "../../src/components/ui/primitives";
 import { Chip, ChipRow, TextField } from "../../src/components/ui/controls";
 import { OptionCard } from "../../src/components/OptionCard";
@@ -106,7 +106,7 @@ function toEditableDays(
 
 /** Optional plan-builder quiz — the AI coach uses these answers to write your plan. */
 export default function CoachOnboardingScreen() {
-  const { profile, loading, loaded, save } = useCoachProfile();
+  const { profile, loading, loaded, error, save, refetch } = useCoachProfile();
   const styles = useStyles();
 
   // Only the first load is worth a full-screen spinner. "Generate my plan" saves
@@ -120,6 +120,19 @@ export default function CoachOnboardingScreen() {
         <View style={styles.padded}>
           <ScreenHeader variant="detail" title="Your goals" onBack={() => router.back()} />
           <LoadingState label="Loading your answers…" />
+        </View>
+      </View>
+    );
+  }
+
+  // Never mount a blank wizard over a failed load: saving it would wipe the
+  // profile that failed to arrive.
+  if (error && profile == null) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.padded}>
+          <ScreenHeader variant="detail" title="Your goals" onBack={() => router.back()} />
+          <ErrorState message={error} onRetry={refetch} />
         </View>
       </View>
     );

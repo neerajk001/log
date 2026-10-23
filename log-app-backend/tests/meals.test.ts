@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 
+
 const mocks = vi.hoisted(() => {
   const tx = {
     mealLog: {
@@ -354,5 +355,29 @@ describe("serializeMeal", () => {
       protein_g: 6,
       source: "ai",
     });
+  });
+});
+
+describe("meal totals validation", () => {
+  const base = {
+    date: "2026-10-10",
+    title: "Breakfast",
+    items: [{ name: "Roti", calories: 240, protein_g: 6 }],
+    calories: 240,
+    protein_g: 6,
+    source: "ai" as const,
+  };
+
+  it("accepts totals that match the item sums", () => {
+    expect(createMealSchema.safeParse(base).success).toBe(true);
+  });
+
+  it("rejects totals that disagree with the items", () => {
+    expect(createMealSchema.safeParse({ ...base, calories: 9999 }).success).toBe(false);
+    expect(createMealSchema.safeParse({ ...base, protein_g: 99 }).success).toBe(false);
+  });
+
+  it("rejects decimal protein totals because the DB column is Int", () => {
+    expect(createMealSchema.safeParse({ ...base, protein_g: 6.5 }).success).toBe(false);
   });
 });

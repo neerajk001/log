@@ -1360,7 +1360,13 @@ describe("coach turn latency (perf)", () => {
     expect(mocks.groupByLift).toHaveBeenCalledWith(
       expect.objectContaining({
         by: ["exerciseName"],
-        where: { userId: "user-1", date: { gte: new Date("2025-10-10T00:00:00Z") } },
+        where: {
+          userId: "user-1",
+          date: {
+            gte: new Date("2025-10-10T00:00:00Z"),
+            lte: new Date("2026-10-09T00:00:00Z"),
+          },
+        },
       }),
     );
   });

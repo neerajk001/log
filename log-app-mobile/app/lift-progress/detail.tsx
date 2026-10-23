@@ -46,10 +46,12 @@ type ProgressRange = (typeof RANGES)[number]["value"];
 
 /** One exercise's session-by-session progress. */
 export default function ExerciseProgressScreen() {
-  const params = useLocalSearchParams<{ name?: string | string[] }>();
+  const params = useLocalSearchParams<{ name?: string | string[]; days?: string }>();
   const raw = Array.isArray(params.name) ? params.name[0] : params.name;
   const exerciseName = raw ?? "";
-  const [range, setRange] = useState<ProgressRange>("90d");
+  const initialRange: ProgressRange =
+    params.days === "365" ? "1y" : params.days === "30" ? "30d" : "90d";
+  const [range, setRange] = useState<ProgressRange>(initialRange);
   const days = RANGES.find((r) => r.value === range)?.days ?? 90;
   const { data, loading, error, refetch } = useLiftProgress(days);
   const { colors, typography } = useTheme();
@@ -94,9 +96,9 @@ export default function ExerciseProgressScreen() {
           options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
         />
 
-        {error ? <ErrorState message={error} onRetry={refetch} /> : null}
-
-        {loading && exercise == null ? (
+        {error ? (
+          <ErrorState message={error} onRetry={refetch} />
+        ) : loading && exercise == null ? (
           <LoadingState label="Loading exercise history…" />
         ) : exercise == null ? (
           <EmptyState

@@ -54,6 +54,10 @@ export default function PlanPreviewScreen() {
         setError("Every day needs a name (max 200 chars).");
         return;
       }
+      if (d.exercises.length === 0) {
+        setError("Every day needs at least one exercise.");
+        return;
+      }
       for (const e of d.exercises) {
         const sets = parsePositiveInt(e.sets, 99);
         if (!e.name.trim() || e.name.trim().length > 120 || sets == null || !e.reps.trim() || e.reps.trim().length > 20) {

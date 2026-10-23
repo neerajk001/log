@@ -14,6 +14,7 @@ import { usePlans } from "../../../src/hooks/usePlans";
 import { usePlansApi } from "../../../src/api/plans";
 import { editorWeightsFromExercise, exerciseTargetsPayload, firstInvalidSetWeight } from "../../../src/utils/planTargets";
 import { plateConfigError, platePlanFields } from "../../../src/utils/plate";
+import { parsePositiveInt } from "../../../src/utils/parse";
 import type { CreatePlanInput } from "../../../src/api/types";
 
 function toEditable(
@@ -87,9 +88,13 @@ export default function EditDayScreen() {
       setError("Give the day a name.");
       return;
     }
+    if (current.exercises.length === 0) {
+      setError("A day needs at least one exercise.");
+      return;
+    }
     for (const e of current.exercises) {
-      if (!e.name.trim() || !e.sets.trim() || Number.isNaN(parseInt(e.sets, 10)) || !e.reps.trim()) {
-        setError("Every exercise needs a name, sets and reps.");
+      if (!e.name.trim() || parsePositiveInt(e.sets, 99) == null || !e.reps.trim()) {
+        setError("Every exercise needs a name, sets 1–99 and reps.");
         return;
       }
       if (e.loadMode === "plate") {
@@ -126,13 +131,10 @@ export default function EditDayScreen() {
             }
           : {
               day_name: d.day_name,
-              exercises: d.exercises.map((e) => ({
-                name: e.name,
-                sets: e.sets,
-                reps: e.reps,
-                weight_kg: e.weight_kg ?? undefined,
-                set_targets: e.set_targets ?? undefined,
-              })),
+              rationale: d.rationale ?? undefined,
+              // Send untouched exercises as-is: rebuilding them drops plate mode,
+              // calibration, and per-set targets.
+              exercises: d.exercises,
             },
       ),
     };

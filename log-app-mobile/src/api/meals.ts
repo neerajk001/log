@@ -19,7 +19,9 @@ export function useMealsApi() {
         client.put<MealLog>(`/api/meals/${id}`, data),
       deleteMeal: (id: string) => client.del<{ ok: true }>(`/api/meals/${id}`),
       analyzeMeal: (formData: FormData) =>
-        client.postFormData<MealAnalysis>("/api/meals/analyze", formData),
+        client.postFormData<MealAnalysis>("/api/meals/analyze", formData, {
+          invalidate: false,
+        }),
     }),
     [client],
   );

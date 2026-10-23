@@ -16,22 +16,24 @@ import type { AgentId } from "../../src/api/types";
  * another on purpose. General and Training still start a new chat each time.
  */
 export default function NewCoachChatScreen() {
-  const { agent, q, fresh } = useLocalSearchParams<{
+  const { agent, q, fresh, date } = useLocalSearchParams<{
     agent?: string;
     q?: string;
     fresh?: string;
+    date?: string;
   }>();
   const initialAgent: AgentId = agent === "meal" || agent === "training" ? agent : "general";
   const today = useCurrentDate();
+  const chatDate = typeof date === "string" && date <= today ? date : today;
   const { sessions, loading } = useCoachSessions();
 
   const isDaily = initialAgent === "meal" && !fresh;
   const dailySession = useMemo(
     () =>
       isDaily
-        ? sessions.find((s) => s.agent === "meal" && localDateOf(s.updated_at) === today)
+        ? sessions.find((s) => s.agent === "meal" && localDateOf(s.updated_at) === chatDate)
         : undefined,
-    [isDaily, sessions, today],
+    [isDaily, sessions, chatDate],
   );
 
   /**
@@ -45,13 +47,13 @@ export default function NewCoachChatScreen() {
    */
   const [resolvedSessionId, setResolvedSessionId] = useState<string | undefined>(undefined);
   const [lookupSettled, setLookupSettled] = useState(false);
-  const resolvedRef = useRef(false);
+  const resolvedDateRef = useRef<string | null>(null);
   useEffect(() => {
-    if (resolvedRef.current || (isDaily && loading)) return;
-    resolvedRef.current = true;
+    if (resolvedDateRef.current === chatDate || (isDaily && loading)) return;
+    resolvedDateRef.current = chatDate;
     setResolvedSessionId(dailySession?.id);
     setLookupSettled(true);
-  }, [isDaily, loading, dailySession?.id]);
+  }, [chatDate, isDaily, loading, dailySession?.id]);
 
   // Placeholder only until the FIRST lookup settles. Every later refetch reports loading
   // again, and gating on that would swap the chat out from under an estimate waiting to be
@@ -60,10 +62,11 @@ export default function NewCoachChatScreen() {
 
   return (
     <CoachChat
-      key={isDaily ? `meal-${today}` : "new"}
+      key={isDaily ? `meal-${chatDate}` : "new"}
       sessionId={resolvedSessionId}
       initialAgent={initialAgent}
       initialMessage={q}
+      localDate={chatDate}
     />
   );
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { config } from "../config";
 import { prisma } from "../db/client";
@@ -217,12 +217,12 @@ export async function buildAthleteContext(
   const [profile, daily, lifts, verdicts, plan, activities, memory, targets, prs, yearDaily, decisions, physique] = await Promise.all([
     prisma.coachProfile.findUnique({ where: { userId } }),
     prisma.dailyLog.findMany({
-      where: { userId, date: { gte: since } },
+      where: { userId, date: { gte: since, lte: now } },
       orderBy: { date: "asc" },
       select: { date: true, weightKg: true, calories: true, proteinG: true, sleepHours: true },
     }),
     prisma.liftLog.findMany({
-      where: { userId, date: { gte: since } },
+      where: { userId, date: { gte: since, lte: now } },
       select: {
         date: true,
         exerciseName: true,
@@ -244,7 +244,7 @@ export async function buildAthleteContext(
       include: { planDays: { orderBy: { dayOrder: "asc" } } },
     }),
     prisma.activityLog.findMany({
-      where: { userId, date: { gte: since } },
+      where: { userId, date: { gte: since, lte: now } },
       select: { durationMin: true, activityType: true },
     }),
     prisma.coachMemory.findUnique({ where: { userId } }),
@@ -258,11 +258,11 @@ export async function buildAthleteContext(
     // makes every turn pay for the account's lifetime, growing forever.
     prisma.liftLog.groupBy({
       by: ["exerciseName"],
-      where: { userId, date: { gte: yearAgo } },
+      where: { userId, date: { gte: yearAgo, lte: now } },
       _max: { weightKg: true },
     }),
     prisma.dailyLog.findMany({
-      where: { userId, date: { gte: yearAgo } },
+      where: { userId, date: { gte: yearAgo, lte: now } },
       select: { date: true, weightKg: true },
       orderBy: { date: "asc" },
     }),
@@ -1376,6 +1376,8 @@ async function resolvePlan(
 ): Promise<PlanWithDays | { error: string }> {
   const plans = await prisma.workoutPlan.findMany({
     where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 100,
     include: { planDays: { orderBy: { dayOrder: "asc" } } },
   });
   if (plans.length === 0) return { error: "You don't have any saved plans yet." };
@@ -1823,6 +1825,7 @@ export async function executeCoachTool(
         const plans = await prisma.workoutPlan.findMany({
           where: { userId },
           orderBy: { createdAt: "desc" },
+          take: 50,
           include: { planDays: { orderBy: { dayOrder: "asc" } } },
         });
         return plans.map((p) => serializePlanSummary(p as PlanWithDays));
@@ -1833,32 +1836,74 @@ export async function executeCoachTool(
         const plan = await resolvePlan(userId, ref);
         if ("error" in plan) return plan;
 
-        const existingDays: {
+        type PlanExerciseFull = {
+          name: string;
+          sets: number;
+          reps: string;
+          weight_kg?: number | null;
+          set_targets?: { weight_kg?: number | null; reps?: string | null }[] | null;
+          load_mode?: "weight" | "plate";
+          plate_config?: {
+            unit: "kg" | "lb";
+            increment: number;
+            min_position: number;
+            max_position: number;
+          } | null;
+        };
+        type PlanDayFull = {
           day_name: string;
           rationale?: string;
-          exercises: { name: string; sets: number; reps: string }[];
-        }[] = plan.planDays.map((d) => ({
+          exercises: PlanExerciseFull[];
+        };
+        const existingDays: PlanDayFull[] = plan.planDays.map((d) => ({
           day_name: d.dayName,
           rationale: d.rationale ?? undefined,
-          exercises: d.exercises as unknown as { name: string; sets: number; reps: string }[],
+          exercises: d.exercises as unknown as PlanExerciseFull[],
         }));
+        const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+        const mergeExercise = (previous: PlanExerciseFull | undefined, next: PlanExerciseFull) =>
+          previous ? { ...previous, ...next } : next;
+        const mergeExercises = (
+          previous: PlanExerciseFull[],
+          next: PlanExerciseFull[],
+        ): PlanExerciseFull[] =>
+          next.map((exercise) =>
+            mergeExercise(
+              previous.find((candidate) => sameName(candidate.name, exercise.name)),
+              exercise,
+            ),
+          );
 
-        let nextDays: typeof existingDays;
+        let nextDays: PlanDayFull[];
         if (Array.isArray(args.days)) {
-          nextDays = args.days as typeof nextDays;
+          const providedDays = args.days as PlanDayFull[];
+          nextDays = providedDays.map((day) => {
+            const previous = existingDays.find((candidate) =>
+              sameName(candidate.day_name, day.day_name),
+            );
+            return {
+              ...day,
+              ...(day.rationale === undefined && previous?.rationale
+                ? { rationale: previous.rationale }
+                : {}),
+              exercises: mergeExercises(previous?.exercises ?? [], day.exercises),
+            };
+          });
         } else if (
           typeof args.day_name === "string" &&
           args.day_name.trim() &&
           Array.isArray(args.exercises)
         ) {
           const target = args.day_name.trim();
-          const exercises = args.exercises as { name: string; sets: number; reps: string }[];
+          const providedExercises = args.exercises as PlanExerciseFull[];
           const patchedRationale =
             typeof args.day_rationale === "string" && args.day_rationale.trim()
               ? args.day_rationale.trim().slice(0, 500)
               : undefined;
-          const idx = existingDays.findIndex(
-            (d) => d.day_name.toLowerCase() === target.toLowerCase(),
+          const idx = existingDays.findIndex((d) => sameName(d.day_name, target));
+          const exercises = mergeExercises(
+            idx >= 0 ? existingDays[idx].exercises : [],
+            providedExercises,
           );
           nextDays =
             idx >= 0

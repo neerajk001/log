@@ -76,7 +76,7 @@ export function MetricCard({
       return;
     }
     const num = parsePositiveNumber(trimmed, MAX_DAILY[field]);
-    if (num != null) {
+    if (num != null && num !== value) {
       onSave(num);
       successTick();
     }

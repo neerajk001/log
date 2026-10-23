@@ -70,30 +70,25 @@ router.get("/lift", requireAuth, validate(liftLogsQuerySchema, "query"), async (
   };
 
   const where: Record<string, unknown> = { userId: req.userId };
+  const today = new Date().toISOString().slice(0, 10);
 
-  if (exercise) {
-    where.exerciseName = exercise;
-    const fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - (weeks ?? 4) * 7);
-    where.date = { gte: fromDate };
-  } else if (date) {
+  if (date) {
+    if (exercise) where.exerciseName = exercise;
     where.date = new Date(date);
-  } else {
-    let fromDate = from;
-    if (!fromDate && days) {
-      const d = new Date();
-      d.setDate(d.getDate() - days);
-      fromDate = d.toISOString().slice(0, 10);
+  } else if (exercise || from || to || days) {
+    if (exercise) where.exerciseName = exercise;
+    // `exercise` still honours an explicit from/to/days range; only the default
+    // (no range) uses `weeks`. Both bounds are always applied.
+    const end = to ?? today;
+    let start = from;
+    if (!start) {
+      const lookback = days ?? (exercise ? (weeks ?? 4) * 7 : 0);
+      const d = new Date(`${end}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() - lookback);
+      start = d.toISOString().slice(0, 10);
     }
-    if (fromDate || to) {
-      const end = to ?? new Date().toISOString().slice(0, 10);
-      const start = fromDate ?? end;
-      assertRangeSize(start, end);
-      where.date = {
-        ...(fromDate ? { gte: new Date(fromDate) } : {}),
-        ...(to ? { lte: new Date(to) } : {}),
-      };
-    }
+    assertRangeSize(start, end);
+    where.date = { gte: new Date(start), lte: new Date(end) };
   }
 
   const logs = await prisma.liftLog.findMany({

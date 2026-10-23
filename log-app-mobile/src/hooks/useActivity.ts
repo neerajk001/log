@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useActivityApi } from "../api/activity";
 import { useDataSyncOnFocus } from "./useDataSync";
 import { useLatest } from "./useLatest";
@@ -11,6 +11,13 @@ export function useActivity(date: string) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { begin, isCurrent } = useLatest();
+  const pendingDeletesRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setEntries([]);
+    setLoading(true);
+    setError(null);
+  }, [date]);
 
   const load = useCallback(async () => {
     const token = begin();
@@ -48,9 +55,16 @@ export function useActivity(date: string) {
       setEntries((prev) => [optimistic, ...prev]);
       try {
         const saved = await api.createActivity(data);
+        if (pendingDeletesRef.current.delete(tempId)) {
+          // The athlete deleted the optimistic row while the POST was in flight.
+          await api.deleteActivity(saved.id);
+          setEntries((prev) => prev.filter((e) => e.id !== tempId));
+          return saved;
+        }
         setEntries((prev) => prev.map((e) => (e.id === tempId ? saved : e)));
         return saved;
       } catch (err) {
+        pendingDeletesRef.current.delete(tempId);
         setEntries((prev) => prev.filter((e) => e.id !== tempId));
         const message = err instanceof Error ? err.message : "Failed to save activity";
         setError(message);
@@ -63,6 +77,7 @@ export function useActivity(date: string) {
   const deleteEntry = useCallback(
     async (id: string) => {
       if (id.startsWith("pending-")) {
+        pendingDeletesRef.current.add(id);
         setEntries((prev) => prev.filter((e) => e.id !== id));
         return;
       }

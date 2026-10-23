@@ -115,15 +115,10 @@ export function reasoningBudgetError(thinking: string, replyTokens: number): str
 export function collectMissingRuntimeConfig(cfg: {
   database: { url: string };
   clerk: { secretKey: string };
-  ai: { apiKey: string };
 }): string[] {
   const missing: string[] = [];
   if (!cfg.database.url) missing.push("DATABASE_URL");
   if (!cfg.clerk.secretKey) missing.push("CLERK_SECRET_KEY");
-  // The coach/meal/plan-generation provider is happy with AI_API_KEY alone.
-  // OPENAI_API_KEY is only needed by plan *import* (services/planParser.ts),
-  // which fails with friendly copy rather than at boot.
-  if (!cfg.ai.apiKey) missing.push("AI_API_KEY (or COMMANDCODE_API_KEY / OPENAI_API_KEY)");
   return missing;
 }
 
@@ -138,6 +133,13 @@ export function validateRuntimeConfig(): void {
     throw new Error(budgetProblem);
   }
 
+  // AI is additive: a missing/rotated provider key must never stop core logging
+  // from booting. AI routes return COACH_UNAVAILABLE until a key is present.
+  if (!config.ai.apiKey) {
+    console.warn(
+      "[config] No AI provider key set — coach, meal analysis, and coach plan generation are unavailable; core logging is unaffected.",
+    );
+  }
   if (!config.openai.apiKey) {
     console.warn(
       "[config] OPENAI_API_KEY is not set — AI plan import (POST /api/plans/parse) is unavailable.",

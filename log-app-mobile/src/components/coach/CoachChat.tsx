@@ -54,11 +54,14 @@ export function CoachChat({
   title,
   initialAgent,
   initialMessage,
+  localDate = todayLocal(),
 }: {
   sessionId?: string;
   title?: string;
   initialAgent?: AgentId;
   initialMessage?: string;
+  /** The day this chat is logging for (defaults to today). */
+  localDate?: string;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -77,7 +80,7 @@ export function CoachChat({
     injectUser,
     agent,
     setAgent,
-  } = useCoachChat(sessionId, initialAgent);
+  } = useCoachChat(sessionId, initialAgent, localDate);
   const mealsApi = useMealsApi();
   const posthog = usePostHog();
   const insets = useSafeAreaInsets();
@@ -93,7 +96,7 @@ export function CoachChat({
   const submit = (text: string) => {
     const caption = text.trim();
     const photo = pendingPhoto;
-    if (streaming || photoBusy || photoBusyRef.current) return;
+    if (loading || streaming || photoBusy || photoBusyRef.current) return;
     if (!caption && !photo) return;
     setInput("");
     setPendingPhoto(null);
@@ -141,13 +144,13 @@ export function CoachChat({
         form.append("file", filePart(photo.uri, photo.name, photo.type));
         // What the athlete says about the photo beats what can be eyeballed from it.
         if (caption) form.append("description", caption);
-        // The athlete's local date, so the estimate knows what's logged today.
-        form.append("date", todayLocal());
+        // The day being logged, so the estimate sees that day's meals.
+        form.append("date", localDate);
         const analysis = await mealsApi.analyzeMeal(form);
         confidence = analysis.confidence;
         const proposal: CoachProposal = {
           kind: "meal_log",
-          date: todayLocal(),
+          date: localDate,
           title: analysis.title,
           items: analysis.items,
           calories: analysis.calories,
@@ -197,7 +200,7 @@ export function CoachChat({
         });
       }
     },
-    [mealsApi, injectAssistant, posthog],
+    [mealsApi, injectAssistant, posthog, localDate],
   );
 
   /** Snap it or pick one — the camera is the point, so it's offered first. */
@@ -248,7 +251,6 @@ export function CoachChat({
         data={messages}
         keyExtractor={(m) => m.id}
         accessibilityLabel="ph-no-capture"
-        importantForAccessibility="no"
         collapsable={false}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"

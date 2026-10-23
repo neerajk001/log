@@ -31,8 +31,6 @@ import { successTick } from "../hooks/useHaptics";
 import { SegmentedControl, StepField } from "./ui/controls";
 import { IconBadge, Tag } from "./ui/primitives";
 
-const AUTOSAVE_DELAY_MS = 1200;
-
 type RowStatus = "idle" | "editing" | "saving" | "error" | "saved";
 
 interface Draft {
@@ -46,6 +44,8 @@ interface Draft {
   /** Machine stack position; empty for kg/bodyweight rows. */
   position: string;
   status: RowStatus;
+  /** Prefilled rows are placeholders until the athlete actually edits them. */
+  touched: boolean;
   /** What the server actually stored, so a saved row keeps its load across mode switches. */
   savedWeight?: number | null;
   savedPosition?: number | null;
@@ -61,6 +61,7 @@ function makeDraft(ordinal: number, weight = "", reps = "", position = ""): Draf
     reps,
     position,
     status: "idle",
+    touched: false,
   };
 }
 
@@ -109,6 +110,7 @@ function lastSessionSummary(sets: LiftSetLoad[]): string | null {
 export function ExerciseRow({
   index,
   name,
+  instanceKey,
   sets,
   reps,
   plannedWeight,
@@ -130,6 +132,8 @@ export function ExerciseRow({
 }: {
   index: number;
   name: string;
+  /** Disambiguates duplicate exercise names in the same plan day. */
+  instanceKey?: string;
   sets: number;
   reps: string;
   /** Target weight from the plan; used to pre-fill the inputs. */
@@ -167,14 +171,13 @@ export function ExerciseRow({
   );
   const doneCount = logged.length;
 
-  const scopeKey = `${date ?? ""}:${planDayId ?? ""}:${name}`;
+  const scopeKey = `${date ?? ""}:${planDayId ?? ""}:${name}:${instanceKey ?? ""}`;
   const initializedScopeRef = useRef("");
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [loadMode, setLoadMode] = useState<LoadMode>("kg");
   const loadModeRef = useRef<LoadMode>("kg");
   const [historyOpen, setHistoryOpen] = useState(false);
   const draftsRef = useRef<Draft[]>([]);
-  const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const inFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const focusedRowRef = useRef<string | null>(null);
   const lastSets = lastSession?.sets ?? null;
@@ -187,18 +190,6 @@ export function ExerciseRow({
     setDrafts(next);
   }, []);
 
-  const clearTimer = useCallback((key: string) => {
-    const timer = timers.current[key];
-    if (timer) {
-      clearTimeout(timer);
-      delete timers.current[key];
-    }
-  }, []);
-
-  const clearAllTimers = useCallback(() => {
-    for (const timer of Object.values(timers.current)) clearTimeout(timer);
-    timers.current = {};
-  }, []);
 
   /** Weighted vs bodyweight for this exercise — one tap, applies to every row. */
   const changeLoadMode = useCallback((mode: LoadMode) => {
@@ -259,16 +250,17 @@ export function ExerciseRow({
     sets,
   ]);
 
-  useEffect(() => clearAllTimers, [clearAllTimers]);
-
   const commitSet = useCallback(
-    (key: string): Promise<void> => {
+    (key: string, force = true): Promise<void> => {
       const existing = inFlightRef.current.get(key);
       if (existing) return existing;
       if (!onAddSet || !date) return Promise.resolve();
 
       const draft = draftsRef.current.find((entry) => entry.key === key);
       if (!draft) return Promise.resolve();
+      // Blur only saves rows the athlete actually touched; prefilled values are
+      // placeholders until then.
+      if (!force && !draft.touched) return Promise.resolve();
       const bodyweight = loadModeRef.current === "bw";
       const parsedWeight = parsePositiveNumber(draft.weight.trim(), 9999);
       const parsedPosition = parsePositiveInt(draft.position.trim(), 999);
@@ -356,16 +348,13 @@ export function ExerciseRow({
           // Keep requestId stable across retries so a timeout-retry replays the
           // same idempotent request instead of logging the set twice (matches
           // quick-log in app/(tabs)/lift.tsx and useLiftLogs dedup by id).
-          return { ...entry, ...patch, status: "editing" };
+          return { ...entry, ...patch, touched: true, status: "editing" };
         }),
       );
-      clearTimer(key);
-      timers.current[key] = setTimeout(() => {
-        delete timers.current[key];
-        commitSet(key);
-      }, AUTOSAVE_DELAY_MS);
+      // Commit on row blur / checkmark, never on a typing pause: a 1.2s timer
+      // used to save "6" while the athlete was still typing "60".
     },
-    [applyDrafts, clearTimer, commitSet],
+    [applyDrafts],
   );
 
   const handleFocus = useCallback((key: string) => {
@@ -377,11 +366,10 @@ export function ExerciseRow({
       if (focusedRowRef.current === key) focusedRowRef.current = null;
       setTimeout(() => {
         if (focusedRowRef.current === key) return;
-        clearTimer(key);
-        commitSet(key);
+        commitSet(key, false);
       }, 0);
     },
-    [clearTimer, commitSet],
+    [commitSet],
   );
 
   const addDraft = useCallback(() => {
@@ -686,7 +674,6 @@ export function ExerciseRow({
                       accessibilityRole="button"
                       accessibilityLabel={`Log set ${draft.ordinal}`}
                       onPress={() => {
-                        clearTimer(draft.key);
                         void commitSet(draft.key);
                       }}
                       disabled={!canLogDraft(draft, bodyweight, plateMode)}

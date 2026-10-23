@@ -43,7 +43,7 @@ export default function LiftProgressScreen() {
   const openExercise = (exercise: LiftProgressExercise) =>
     router.navigate({
       pathname: "/lift-progress/detail",
-      params: { name: exercise.name },
+      params: { name: exercise.name, days: String(days) },
     } as never);
 
   return (
@@ -65,9 +65,9 @@ export default function LiftProgressScreen() {
           options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
         />
 
-        {error ? <ErrorState message={error} onRetry={refetch} /> : null}
-
-        {loading && exercises.length === 0 ? (
+        {error ? (
+          <ErrorState message={error} onRetry={refetch} />
+        ) : loading && exercises.length === 0 ? (
           <LoadingState label="Reading your training…" />
         ) : exercises.length === 0 ? (
           <EmptyState

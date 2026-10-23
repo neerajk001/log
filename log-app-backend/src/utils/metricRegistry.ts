@@ -75,6 +75,8 @@ type HistogramName = keyof typeof HISTOGRAMS;
 
 const counters = new Map<string, Map<string, number>>();
 const histograms = new Map<string, Map<string, { counts: number[]; sum: number; count: number }>>();
+/** Hard bound on label cardinality per metric (protects memory under hostile paths). */
+const MAX_SERIES_PER_METRIC = 2_000;
 
 function escapeLabelValue(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n");
@@ -97,6 +99,7 @@ export function incrementCounter(name: CounterName, labels: Labels = {}, value =
   if (!def) throw new Error(`Unknown counter: ${name}`);
   const key = seriesKey(def.labelNames, labels);
   const series = counters.get(name) ?? new Map<string, number>();
+  if (!series.has(key) && series.size >= MAX_SERIES_PER_METRIC) return;
   series.set(key, (series.get(key) ?? 0) + value);
   counters.set(name, series);
 }
@@ -109,6 +112,7 @@ export function observeHistogram(name: HistogramName, labels: Labels, valueMs: n
   const series =
     histograms.get(name) ??
     new Map<string, { counts: number[]; sum: number; count: number }>();
+  if (!series.has(key) && series.size >= MAX_SERIES_PER_METRIC) return;
   const entry =
     series.get(key) ?? { counts: def.buckets.map(() => 0), sum: 0, count: 0 };
   for (let i = 0; i < def.buckets.length; i++) {

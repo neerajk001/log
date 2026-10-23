@@ -4,7 +4,7 @@ import { z } from "zod";
 import { prisma } from "../db/client";
 import { clearDecisions, listDecisions, recordDecision } from "../services/coachDecisions";
 import { requireAuth } from "../middleware/auth";
-import { AppError } from "../middleware/errorHandler";
+import { AppError, logUnhandledError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
 import { validate } from "../middleware/validate";
 import { analyzePhysique, generateCoachPlan, runCoachChatStream } from "../services/coach";
@@ -20,7 +20,13 @@ const analyzeRateLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, keyGener
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: {
+    fileSize: 5 * 1024 * 1024,
+    files: 1,
+    fields: 8,
+    parts: 10,
+    fieldSize: 64 * 1024,
+  },
   fileFilter: (_req, file, cb) => {
     if (["image/jpeg", "image/png", "image/webp"].includes(file.mimetype)) {
       cb(null, true);
@@ -96,19 +102,21 @@ router.put(
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const d = req.body as z.infer<typeof coachProfileSchema>;
+      // Omitted means "leave it alone"; explicit null clears. A goal-only save
+      // must never wipe sex/age/height/experience that onboarding wrote.
       const data = {
-        goal: d.goal ?? null,
-        weightKg: d.weight_kg ?? null,
-        targetWeightKg: d.target_weight_kg ?? null,
-        heightCm: d.height_cm ?? null,
-        sex: d.sex ?? null,
-        age: d.age ?? null,
-        experience: d.experience ?? null,
-        daysPerWeek: d.days_per_week ?? null,
-        equipment: d.equipment ?? null,
-        dietNotes: d.diet_notes ?? null,
-        injuries: d.injuries ?? null,
-        notes: d.notes ?? null,
+        ...(d.goal !== undefined ? { goal: d.goal } : {}),
+        ...(d.weight_kg !== undefined ? { weightKg: d.weight_kg } : {}),
+        ...(d.target_weight_kg !== undefined ? { targetWeightKg: d.target_weight_kg } : {}),
+        ...(d.height_cm !== undefined ? { heightCm: d.height_cm } : {}),
+        ...(d.sex !== undefined ? { sex: d.sex } : {}),
+        ...(d.age !== undefined ? { age: d.age } : {}),
+        ...(d.experience !== undefined ? { experience: d.experience } : {}),
+        ...(d.days_per_week !== undefined ? { daysPerWeek: d.days_per_week } : {}),
+        ...(d.equipment !== undefined ? { equipment: d.equipment } : {}),
+        ...(d.diet_notes !== undefined ? { dietNotes: d.diet_notes } : {}),
+        ...(d.injuries !== undefined ? { injuries: d.injuries } : {}),
+        ...(d.notes !== undefined ? { notes: d.notes } : {}),
       };
       const profile = await prisma.coachProfile.upsert({
         where: { userId: req.userId },
@@ -164,12 +172,14 @@ router.get(
         next(new AppError(404, "NOT_FOUND", "Chat not found"));
         return;
       }
-      const messages = await prisma.coachMessage.findMany({
-        where: { sessionId: session.id, userId: req.userId },
-        orderBy: { createdAt: "asc" },
-        take: 200,
-        select: { id: true, role: true, content: true, proposals: true, createdAt: true },
-      });
+      const messages = (
+        await prisma.coachMessage.findMany({
+          where: { sessionId: session.id, userId: req.userId },
+          orderBy: { createdAt: "desc" },
+          take: 200,
+          select: { id: true, role: true, content: true, proposals: true, createdAt: true },
+        })
+      ).reverse();
       res.json({
         agent: session.agent,
         messages: messages.map((m) => ({
@@ -313,7 +323,7 @@ router.post(
         // Unexpected failures (a transient DB error, a bug) get the full detail
         // in the server log — the client must never see raw internals like
         // "Invalid `prisma.…` invocation: …".
-        console.error("[coach] turn failed", err);
+        logUnhandledError(err);
       }
       send({
         error:

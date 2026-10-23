@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMealsApi } from "../api/meals";
 import { useDataSyncOnFocus } from "./useDataSync";
+import { useLatest } from "./useLatest";
 import type { MealLog } from "../api/types";
 
 /** The meals logged on a given day, with delete. */
@@ -9,19 +10,30 @@ export function useMeals(date: string) {
   const [meals, setMeals] = useState<MealLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { begin, isCurrent } = useLatest();
+
+  useEffect(() => {
+    // Never render the previous day's meals under a new date while loading.
+    setMeals([]);
+    setLoading(true);
+    setError(null);
+  }, [date]);
 
   const load = useCallback(async () => {
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
       const res = await api.getMeals(date);
+      if (!isCurrent(token)) return;
       setMeals(res.meals);
     } catch (err) {
+      if (!isCurrent(token)) return;
       setError(err instanceof Error ? err.message : "Failed to load meals");
     } finally {
-      setLoading(false);
+      if (isCurrent(token)) setLoading(false);
     }
-  }, [api, date]);
+  }, [api, date, begin, isCurrent]);
 
   useDataSyncOnFocus(["meals"], load);
 
