@@ -300,6 +300,7 @@ export default function InsightsScreen() {
     nutrition: category === "overview" || category === "nutrition" || category === "all",
     nutritionHeading: category !== "training",
     training: category === "training" || category === "all",
+    progress: category === "overview" || category === "training" || category === "all",
     records: category === "training" || category === "all",
     consistency: category === "training" || category === "all",
   };
@@ -761,7 +762,12 @@ export default function InsightsScreen() {
                 <Text style={[typography.small, styles.note]}>No exercises logged in this range yet.</Text>
               )}
             </Card>
+          </>
+        ) : null}
 
+        {show.progress ? (
+          <>
+            {category === "overview" ? <SectionHeader title="Lift Progress" /> : null}
             <Card style={styles.section}>
               <View style={styles.cardHeader}>
                 <View style={styles.cardHeaderLeft}>
