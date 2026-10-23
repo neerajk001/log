@@ -117,6 +117,55 @@ was bodyweight (no plate fields) or a machine stack (`plate_position` set). Lift
 rows pre-fill a plate exercise's previous position (falling back to the plan's
 minimum) and never pre-fill a kg load for it.
 
+## `GET /api/logs/lift/progress?from&to&prev_from&prev_to`
+
+Per-exercise progress for the Insights card and the exercise detail screen.
+`from`/`to` are inclusive; `prev_from`/`prev_to` are the equally-long window
+immediately before them. Sessions are aggregated on the server — raw sets are
+not returned.
+
+```json
+{
+  "from": "2026-07-01",
+  "to": "2026-09-28",
+  "prev_from": "2026-04-03",
+  "prev_to": "2026-06-30",
+  "exercises": [
+    {
+      "name": "Bench Press",
+      "mode": "kg",
+      "sessions": 12,
+      "sets": 36,
+      "volume": 18450,
+      "best_value": 82.5,
+      "previous_best_value": 80,
+      "change_pct": 3.1,
+      "change_value": 2.5,
+      "best_set": {
+        "weight_kg": 82.5, "reps": 4,
+        "plate_position": null, "plate_increment": null, "plate_unit": null
+      },
+      "points": [
+        {
+          "date": "2026-07-02", "sets": 3, "reps": 24, "volume": 1500,
+          "top_value": 65,
+          "best_set": {
+            "weight_kg": 65, "reps": 8,
+            "plate_position": null, "plate_increment": null, "plate_unit": null
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+`mode` is `kg`, `plate`, or `bw` (bodyweight). For kg exercises
+`best_value`/`change_pct` track weight; for plate exercises they track the
+highest stack position; for bodyweight they track reps. `change_pct` is null
+outside kg mode. `volume` is kg-only, so plate and bodyweight sets contribute
+zero. Plate points keep their calibration snapshot in `best_set`.
+
 ## `GET /api/logs/lift/metrics?from&to&prev_from&prev_to`
 
 The Insights rollup: `{ days: [{ date, sets }], exercises: ExerciseMetrics[] }` where

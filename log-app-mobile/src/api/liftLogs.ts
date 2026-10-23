@@ -5,6 +5,7 @@ import type {
   LiftLogCreate,
   LiftLogUpdate,
   LiftMetrics,
+  LiftProgress,
   LiftSummary,
 } from "./types";
 
@@ -24,6 +25,11 @@ export function useLiftLogsApi() {
       getLiftMetrics: (from: string, to: string, prevFrom: string, prevTo: string) =>
         client.get<LiftMetrics>(
           `/api/logs/lift/metrics?from=${from}&to=${to}&prev_from=${prevFrom}&prev_to=${prevTo}`,
+        ),
+      /** Per-exercise session history plus its comparison window. */
+      getLiftProgress: (from: string, to: string, prevFrom: string, prevTo: string) =>
+        client.get<LiftProgress>(
+          `/api/logs/lift/progress?from=${from}&to=${to}&prev_from=${prevFrom}&prev_to=${prevTo}`,
         ),
       deleteLiftLog: (id: string) => client.del<{ ok: true }>(`/api/logs/lift/${id}`),
       updateLiftLog: (id: string, data: LiftLogUpdate) =>

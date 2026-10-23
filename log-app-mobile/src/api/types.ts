@@ -513,3 +513,49 @@ export interface LiftMetrics {
   days: { date: string; sets: number }[];
   exercises: ExerciseMetrics[];
 }
+
+export type LiftProgressMode = "kg" | "plate" | "bw";
+
+/** Best set of one session, shaped like a logged set for the shared formatters. */
+export interface LiftProgressBestSet {
+  weight_kg: number | null;
+  reps: number;
+  plate_position: number | null;
+  plate_increment: number | null;
+  plate_unit: PlateUnit | null;
+}
+
+export interface LiftProgressPoint {
+  date: string;
+  sets: number;
+  reps: number;
+  /** Kg volume only; plate and bodyweight sets contribute zero. */
+  volume: number;
+  /** Weight, stack position, or reps depending on the exercise's mode. */
+  top_value: number | null;
+  best_set: LiftProgressBestSet;
+}
+
+export interface LiftProgressExercise {
+  name: string;
+  mode: LiftProgressMode;
+  sessions: number;
+  sets: number;
+  volume: number;
+  best_value: number | null;
+  previous_best_value: number | null;
+  /** Kg only; plate/bodyweight changes are reported as a raw delta. */
+  change_pct: number | null;
+  /** Kg, positions, or reps depending on the mode. */
+  change_value: number | null;
+  best_set: LiftProgressBestSet;
+  points: LiftProgressPoint[];
+}
+
+export interface LiftProgress {
+  from: string;
+  to: string;
+  prev_from: string;
+  prev_to: string;
+  exercises: LiftProgressExercise[];
+}

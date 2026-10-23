@@ -291,6 +291,9 @@ export const liftMetricsQuerySchema = z.object({
   prev_to: dateString,
 });
 
+/** `/api/logs/lift/progress` - per-exercise session history and its comparison window. */
+export const liftProgressQuerySchema = liftMetricsQuerySchema;
+
 export const trendsQuerySchema = z.object({
   /** Bucket width follows the range: day (7d), week (30d/90d), month (1y). */
   range: z.enum(["7d", "30d", "90d", "1y"]).optional(),

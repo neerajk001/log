@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/node";
 import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema, liftMetricsQuerySchema, liftSummaryQuerySchema } from "../validation/schemas";
+import { idParamSchema, liftLogSchema, liftLogUpdateSchema, liftLogsQuerySchema, liftMetricsQuerySchema, liftProgressQuerySchema, liftSummaryQuerySchema } from "../validation/schemas";
 import { prisma } from "../db/client";
 import {
   createLiftLogIdempotent,
@@ -13,6 +13,7 @@ import {
   updateLiftLog,
   type LiftLogUpdateInput,
 } from "../services/liftLogs";
+import { getLiftProgress } from "../services/liftProgress";
 import { assertRangeSize } from "../utils/range";
 
 const router = Router();
@@ -148,6 +149,27 @@ router.get(
         previous_top_kg: e.previousTopKg,
       })),
     });
+  },
+);
+
+router.get(
+  "/lift/progress",
+  requireAuth,
+  validate(liftProgressQuerySchema, "query"),
+  async (req, res: Response) => {
+    const { from, to, prev_from, prev_to } = req.query as unknown as {
+      from: string;
+      to: string;
+      prev_from: string;
+      prev_to: string;
+    };
+    const progress = await getLiftProgress(req.userId, {
+      from,
+      to,
+      prevFrom: prev_from,
+      prevTo: prev_to,
+    });
+    res.json(progress);
   },
 );
 

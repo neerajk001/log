@@ -28,12 +28,18 @@ import {
 } from "../../src/components/ui/primitives";
 import { SegmentedControl, Chip, ChipRow } from "../../src/components/ui/controls";
 import { useInsights } from "../../src/hooks/useInsights";
+import { useLiftProgress } from "../../src/hooks/useLiftProgress";
 import { useTrends } from "../../src/hooks/useTrends";
 import { useMe } from "../../src/hooks/useMe";
 import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
 import { VERDICT_LABELS } from "../../src/components/VerdictStamp";
 import { formatNumber } from "../../src/utils/derive";
+import {
+  formatProgressBest,
+  progressChange,
+  progressSparkValues,
+} from "../../src/utils/liftProgress";
 import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
 import type { TrendBucket, TrendRange } from "../../src/api/types";
 
@@ -136,6 +142,7 @@ export default function InsightsScreen() {
   const trackWeight = profile?.track_weight !== false;
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
+  const { data: liftProgress, refetch: refetchLiftProgress } = useLiftProgress(rangeDays);
   // The nutrition window is fetched twice over: the second half is the equally-long
   // window before it, which is what the "vs previous" readout compares against. The
   // headline still averages only the buckets the window actually covers.
@@ -266,6 +273,7 @@ export default function InsightsScreen() {
   // useInsights) — the title must follow the series, not the trends bucket.
   const setsWeekly = rangeDays >= 90;
   const setsTitle = setsWeekly ? "Sets per week" : "Sets by day";
+  const progressExercises = liftProgress?.exercises.slice(0, 5) ?? [];
   const muscleColors = [
     colors.orange,
     colors.blue,
@@ -300,6 +308,7 @@ export default function InsightsScreen() {
 
   const refresh = () => {
     refetch();
+    refetchLiftProgress();
     refetchTrends();
     refetchWeek();
   };
@@ -752,6 +761,82 @@ export default function InsightsScreen() {
                 <Text style={[typography.small, styles.note]}>No exercises logged in this range yet.</Text>
               )}
             </Card>
+
+            <Card style={styles.section}>
+              <View style={styles.cardHeader}>
+                <View style={styles.cardHeaderLeft}>
+                  <IconBadge name="trending-up-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
+                  <View style={styles.cardHeaderText}>
+                    <Text style={typography.bodyStrong}>Lift progress</Text>
+                    <Text style={typography.caption}>Top set by exercise · {RANGE_NOUN[range]}</Text>
+                  </View>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="View all lift progress"
+                  onPress={() => router.navigate("/lift-progress" as never)}
+                  hitSlop={8}
+                >
+                  <Text style={[typography.caption, styles.progressLink]}>View all</Text>
+                </Pressable>
+              </View>
+              {progressExercises.length > 0 ? (
+                <View style={styles.progressList}>
+                  {progressExercises.map((exercise, i) => {
+                    const change = progressChange(exercise);
+                    const spark = progressSparkValues(exercise);
+                    const tone =
+                      change?.tone === "positive"
+                        ? colors.success
+                        : change?.tone === "negative"
+                          ? colors.danger
+                          : colors.textDim;
+                    return (
+                      <View key={exercise.name}>
+                        {i > 0 ? <Divider /> : null}
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel={`View ${exercise.name} progress`}
+                          onPress={() =>
+                            router.navigate({
+                              pathname: "/lift-progress/detail",
+                              params: { name: exercise.name },
+                            } as never)
+                          }
+                          style={({ pressed }) => [styles.progressRow, pressed && styles.pressed]}
+                        >
+                          <View style={styles.progressText}>
+                            <Text style={[typography.small, styles.progressName]} numberOfLines={1}>
+                              {exercise.name}
+                            </Text>
+                            <Text style={typography.caption} numberOfLines={1}>
+                              {formatProgressBest(exercise) ?? "No sets"} · {exercise.sessions}{" "}
+                              {exercise.sessions === 1 ? "session" : "sessions"}
+                            </Text>
+                          </View>
+                          {spark.length > 1 ? (
+                            <Sparkline
+                              values={spark}
+                              width={64}
+                              height={28}
+                              dots={false}
+                              color={change?.tone === "negative" ? colors.danger : colors.primary}
+                            />
+                          ) : null}
+                          <Text style={[styles.progressChange, { color: tone }]}>
+                            {change?.text ?? "—"}
+                          </Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Text style={[typography.small, styles.note]}>
+                  Log the same exercise a few times to see its trend here.
+                </Text>
+              )}
+            </Card>
           </>
         ) : null}
 
@@ -994,6 +1079,19 @@ const useStyles = makeUseStyles((t) =>
     rankRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     rank: { width: 16, fontSize: 12, fontWeight: "700", color: t.colors.textDim },
     rankName: { flex: 1, color: t.colors.text },
+
+    pressed: { opacity: 0.8 },
+    progressList: { gap: 0 },
+    progressRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      paddingVertical: spacing.sm,
+    },
+    progressText: { flex: 1, gap: 1, minWidth: 0 },
+    progressName: { color: t.colors.text, fontWeight: "600" },
+    progressChange: { fontSize: 12, fontWeight: "700", width: 52, textAlign: "right" },
+    progressLink: { color: t.colors.primary, fontWeight: "700" },
 
     recordRow: {
       flexDirection: "row",
