@@ -90,6 +90,23 @@
 - Chat history (`coach_messages`) is only ever read/written for the authenticated
   user.
 
+## Store billing (RevenueCat)
+
+- `POST /api/billing/revenuecat/webhook` has no Clerk token. It authenticates the
+  shared `Authorization` header value configured in the RevenueCat dashboard
+  (`REVENUECAT_WEBHOOK_SECRET`, exact or `Bearer <value>`) in constant time. If
+  the secret is unset the endpoint fails closed with `503`; a bad value is
+  `401`.
+- Every event id is unique in `billing_events`, so replayed deliveries are
+  no-ops. The audit row, entitlement update and `processed_at` marker share one
+  transaction; a failed attempt rolls back for RevenueCat's retry.
+- The local user is resolved from the verified RevenueCat `app_user_id` /
+  aliases (we set the app user id to the Clerk id) — never from a client-supplied
+  user id. Raw events are stored for reconciliation; card numbers, UPI IDs and
+  mandate data never reach this backend — Google Play/Apple handle them.
+- Sandbox events are processed and stored with `environment = SANDBOX` so test
+  purchases can be exercised without touching real revenue reporting.
+
 ## Analytics masking (session replay)
 
 Session replay records what is on screen, and this app displays health data.

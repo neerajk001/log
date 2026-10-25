@@ -55,6 +55,41 @@ and supplied at run time through compose `env_file`.
 See `docs/backend.md` for the full list. Set them in `.env` on the VPS,
 never in source control.
 
+### Store billing (RevenueCat + Google Play, Android first)
+
+The backend scaffold is live; purchases stay disabled until the store side is
+configured. UPI and UPI AutoPay are handled by Google Play in India, and the
+same Play Billing flow covers local payment methods globally — do not add a
+direct UPI/Razorpay checkout inside the app for digital subscriptions.
+
+1. **Play Console:** create the app for `com.neerajkk01.log`, complete the
+   payments/profile setup, upload a signed AAB to internal testing, and create
+   monthly/yearly subscription products with base plans. Add license testers.
+   UPI/UPI AutoPay appears automatically for Indian buyers.
+2. **RevenueCat:** create the project/app, upload a Google Play service-account
+   key for receipt validation, create the entitlement `pro` and products
+   `pro_monthly` / `pro_yearly`, and attach them to a `default` offering.
+3. **Webhook:** point RevenueCat to
+   `https://api.neerajx.site/api/billing/revenuecat/webhook`; set its
+   Authorization header value to the same `REVENUECAT_WEBHOOK_SECRET`.
+4. **Backend `.env` on the VPS:**
+   `REVENUECAT_WEBHOOK_SECRET=...`,
+   `REVENUECAT_ENTITLEMENT_ID=pro`,
+   `BILLING_PURCHASE_ENABLED=true`.
+5. **Mobile build:** the RevenueCat SDK is a native module, so it cannot ship
+   by OTA. Rebuild the app (EAS preview/production), bump `version` if native
+   config changed, and reinstall before purchase testing.
+6. **Dashboard:** use the RevenueCat dashboard for MRR, trials, conversions,
+   churn, refunds and transactions. The backend's `billing_events` table is the
+   audit trail for reconciliation.
+7. **Trial:** keep the existing 14-day app trial. Store plans are paid from day
+   one; do not also configure a store introductory trial unless the server trial
+   is disabled.
+
+Until the webhook secret is set, `POST /api/billing/revenuecat/webhook` returns
+`503` and no entitlement changes are accepted. The mobile paywall continues to
+use `BILLING_PURCHASE_ENABLED` / `purchase_enabled` as its gate.
+
 ### Monitoring
 
 - **Uptime/health:** `/health` (process) and `/ready` (Neon reachable) are

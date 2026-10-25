@@ -508,6 +508,33 @@ Returns the athlete's entitlement plus this period's AI usage:
 the 1st. The Pro-only deterministic surfaces (eat-now suggestions, next-set aims)
 are not quota features — they are simply omitted/rejected for Free.
 
+`purchase_enabled` is `true` only once the store products exist and
+`BILLING_PURCHASE_ENABLED=true`; until then the paywall is honest that nothing
+can be purchased.
+
+## `POST /api/billing/revenuecat/webhook`
+
+RevenueCat calls this endpoint directly (no Clerk token). It is the source of
+truth for store purchases and updates `users.plan_tier` / `users.pro_until`;
+the app continues to read entitlements from `GET /api/billing/status`.
+
+- **Auth:** the request must carry the `Authorization` header value configured
+  on the RevenueCat webhook (`REVENUECAT_WEBHOOK_SECRET`; a `Bearer <value>`
+  form is also accepted). Missing config returns `503`; a bad value `401`.
+- **Idempotent:** every event id is stored in `billing_events` with a unique
+  constraint. Replayed events return `200` without re-applying. A failed
+  transaction rolls back, so RevenueCat's retry can process it again.
+- **Events acted on:** `INITIAL_PURCHASE`, `RENEWAL`, `UNCANCELLATION`,
+  `PRODUCT_CHANGE`, `SUBSCRIPTION_EXTENDED`, `NON_RENEWING_PURCHASE`,
+  `CANCELLATION` (keeps access until expiry; a refund-style negative-price
+  cancellation revokes), `BILLING_ISSUE` (keeps access through the grace
+  period), `EXPIRATION`, `SUBSCRIPTION_PAUSED`, `REFUND`, `REFUND_REVERSED`,
+  and `TRANSFER` (moves the entitlement between accounts).
+- **Audit:** the raw event, environment (`PRODUCTION`/`SANDBOX`), local user
+  link and processed marker are in `billing_events` for reconciliation.
+- **Revenue dashboard:** use the RevenueCat dashboard (MRR, trials, conversions,
+  churn, refunds, transactions); `billing_events` is the app-side audit trail.
+
 ## `POST /api/billing/dev/simulate`
 
 **Development only** — returns `404` when `NODE_ENV=production`. Body

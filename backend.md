@@ -107,6 +107,10 @@ GEMINI_MODEL=gemini-3.5-flash
 # 32 bytes (base64 or hex). Empty disables weekly physique check-ins; images are
 # never stored unencrypted.
 PHYSIQUE_ENCRYPTION_KEY=
+# RevenueCat webhook Authorization header value; empty rejects webhooks until
+# store billing is live. Entitlement id defaults to "pro".
+REVENUECAT_WEBHOOK_SECRET=
+REVENUECAT_ENTITLEMENT_ID=pro
 PORT=3000
 NODE_ENV=production
 ```

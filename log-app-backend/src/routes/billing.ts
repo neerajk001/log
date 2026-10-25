@@ -1,13 +1,77 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextFunction, Request, Response, Router } from "express";
 import { config } from "../config";
 import { prisma } from "../db/client";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { validate } from "../middleware/validate";
-import { billingSimulateSchema, type DevPlanMode } from "../validation/schemas";
+import {
+  billingSimulateSchema,
+  revenueCatWebhookSchema,
+  type DevPlanMode,
+  type RevenueCatEvent,
+} from "../validation/schemas";
 import { getUsage, isOnTrial, isPro, trialDaysLeft } from "../services/entitlements";
+import { processRevenueCatEvent } from "../services/revenueCat";
 
 const router = Router();
+
+/** Constant-time compare for the RevenueCat Authorization header. */
+function secureEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/**
+ * The dashboard's configured Authorization header value. RevenueCat may send it
+ * verbatim or prefixed with "Bearer "; accept both. Missing config fails closed
+ * so an unconfigured deployment never trusts an arbitrary caller.
+ */
+function verifyRevenueCatWebhook(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): void {
+  const secret = config.revenueCat.webhookSecret;
+  if (!secret) {
+    next(
+      new AppError(
+        503,
+        "BILLING_WEBHOOK_UNAVAILABLE",
+        "Store billing is not configured yet.",
+      ),
+    );
+    return;
+  }
+  const provided = req.headers.authorization ?? "";
+  if (!secureEqual(provided, secret) && !secureEqual(provided, `Bearer ${secret}`)) {
+    next(new AppError(401, "UNAUTHORIZED", "Invalid webhook authorization"));
+    return;
+  }
+  next();
+}
+
+/**
+ * RevenueCat calls this directly (no Clerk token). Authorization is the shared
+ * header value configured in the RevenueCat dashboard; delivery is idempotent
+ * by event id. Always return 200 for a handled/duplicate event so RevenueCat
+ * does not retry a successful delivery.
+ */
+router.post(
+  "/revenuecat/webhook",
+  verifyRevenueCatWebhook,
+  validate(revenueCatWebhookSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { event } = req.body as { event: RevenueCatEvent };
+      await processRevenueCatEvent(event);
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 const entitlementSelect = {
   planTier: true,

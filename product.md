@@ -92,7 +92,14 @@ conclude from the same three data trends.
   alone.
 - **The verdict stays free and rule-based.** It is the product; gating it would
   remove the reason to install the app.
-- Billing is server-managed in phase 1 (no store SDK, OTA-shippable); store
-  purchases and receipt sync are phase 2. Contracts: `api.md`
-  (`/api/billing/*`, `402 UPGRADE_REQUIRED`), `database.md` (`ai_usage`),
-  `security.md` (quota as a cost control).
+- Billing is server-managed in phase 1 (no store SDK, OTA-shippable). Phase 2
+  store billing uses **RevenueCat + Google Play** (Android first; iOS later):
+  Google Play handles UPI/UPI AutoPay in India and local payment methods
+  globally, while RevenueCat supplies entitlement sync, webhooks and the
+  revenue analytics dashboard. The backend stays the entitlement source of
+  truth; webhooks update `plan_tier`/`pro_until`. The existing 14-day app trial
+  remains, and store plans are paid immediately (no second store trial). The
+  RevenueCat SDK is native, so wiring it requires a fresh build — not OTA.
+  Contracts: `api.md` (`/api/billing/*`, `402 UPGRADE_REQUIRED`), `database.md`
+  (`ai_usage`, `billing_events`), `security.md` (quota as a cost control and
+  webhook auth).

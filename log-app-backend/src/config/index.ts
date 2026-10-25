@@ -98,6 +98,13 @@ export const config = {
   physique: {
     encryptionKey: process.env.PHYSIQUE_ENCRYPTION_KEY || "",
   },
+  // RevenueCat webhooks. The authorization header value is set in the
+  // RevenueCat dashboard; empty rejects every webhook (the store is not live).
+  revenueCat: {
+    webhookSecret: process.env.REVENUECAT_WEBHOOK_SECRET || "",
+    /** The entitlement identifier that unlocks Pro (created in RevenueCat). */
+    entitlementId: process.env.REVENUECAT_ENTITLEMENT_ID || "pro",
+  },
   // Food lookup: Open Food Facts first (free), optional web-search fallback.
   food: {
     offUserAgent: process.env.OFF_USER_AGENT || "LogApp/1.0 (meal logging)",
@@ -174,6 +181,11 @@ export function validateRuntimeConfig(): void {
   if (!config.physique.encryptionKey) {
     console.warn(
       "[config] PHYSIQUE_ENCRYPTION_KEY is not set — weekly physique check-ins are unavailable; core logging is unaffected.",
+    );
+  }
+  if (!config.revenueCat.webhookSecret) {
+    console.warn(
+      "[config] REVENUECAT_WEBHOOK_SECRET is not set — RevenueCat webhooks are rejected until store billing is configured.",
     );
   }
 }

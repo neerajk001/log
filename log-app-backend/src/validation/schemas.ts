@@ -425,6 +425,43 @@ export const billingSimulateSchema = z.object({
 
 export type DevPlanMode = z.infer<typeof billingSimulateSchema>["mode"];
 
+/**
+ * The subset of a RevenueCat webhook event the backend acts on. Unknown fields
+ * are kept (`passthrough`) because RevenueCat adds fields over time; the raw
+ * event is stored in `billing_events` for audit.
+ */
+export const revenueCatEventSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.string().min(1),
+    app_user_id: z.string().optional(),
+    original_app_user_id: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
+    entitlement_id: z.string().nullable().optional(),
+    entitlement_ids: z.array(z.string()).nullable().optional(),
+    product_id: z.string().nullable().optional(),
+    new_product_id: z.string().nullable().optional(),
+    expiration_at_ms: z.number().nullable().optional(),
+    event_timestamp_ms: z.number().optional(),
+    environment: z.string().optional(),
+    store: z.string().optional(),
+    price: z.number().nullable().optional(),
+    cancel_reason: z.string().nullable().optional(),
+    transferred_from: z.array(z.string()).optional(),
+    transferred_to: z.array(z.string()).optional(),
+    grace_period_expiration_at_ms: z.number().nullable().optional(),
+  })
+  .passthrough();
+
+export const revenueCatWebhookSchema = z
+  .object({
+    event: revenueCatEventSchema,
+    api_version: z.string().optional(),
+  })
+  .passthrough();
+
+export type RevenueCatEvent = z.infer<typeof revenueCatEventSchema>;
+
 export const coachChatSchema = z.object({
   message: z.string().min(1).max(2000),
   sessionId: z.string().uuid().optional(),

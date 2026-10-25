@@ -44,6 +44,7 @@ model User {
   coachDecisions      CoachDecision[]
   mealLogs            MealLog[]
   physiqueCheckins    PhysiqueCheckin[]
+  billingEvents       BillingEvent[]
   aiUsage             AiUsage[]
 
   @@map("users")
@@ -287,7 +288,7 @@ model PhysiqueCheckin {
   assessment        String            @db.Text
   /// Array of { area: "training"|"nutrition"|"recovery", action, reason }.
   recommendations   Json              @db.JsonB
-  /// The previous week's check-in the AI compared against, when one existed.
+  /// The previous check-in the AI compared against, when one existed.
   previousCheckinId String?           @map("previous_checkin_id") @db.Uuid
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
   updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
@@ -299,4 +300,23 @@ model PhysiqueCheckin {
   @@index([userId, date])
   @@index([previousCheckinId])
   @@map("physique_checkins")
+}
+
+/// RevenueCat webhook audit log. One row per delivered event; the unique event
+/// id makes retries idempotent. Entitlement changes are applied in the same
+/// transaction, so a failed processing attempt is retried by RevenueCat.
+model BillingEvent {
+  id                String    @id @default(uuid()) @db.Uuid
+  revenueCatEventId String    @unique @map("revenuecat_event_id") @db.Text
+  type              String    @db.Text
+  appUserId         String?   @map("app_user_id") @db.Text
+  userId            String?   @map("user_id") @db.Uuid
+  environment       String?   @db.Text
+  payload           Json      @db.JsonB
+  processedAt       DateTime? @map("processed_at") @db.Timestamptz()
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("billing_events")
 }

@@ -39,6 +39,24 @@ never write here — their requests are unlimited.
 
 Unique on `(user_id, feature, period_start)`.
 
+### `billing_events`
+
+RevenueCat webhook audit log. One row per delivered event; the unique event id
+makes retries idempotent. The entitlement change, the audit row and the
+`processed_at` marker are written in one transaction.
+
+| column               | type          | notes                              |
+|----------------------|---------------|-------------------------------------|
+| id                   | uuid, PK      | |
+| revenuecat_event_id  | text, unique, not null | RevenueCat's event id |
+| type                 | text, not null | `INITIAL_PURCHASE`, `RENEWAL`, `CANCELLATION`, `EXPIRATION`, `TRANSFER`, … |
+| app_user_id          | text, nullable | RevenueCat app user id (we set it to the Clerk user id) |
+| user_id              | uuid, FK → users.id, nullable, on delete set null | local user the event applied to |
+| environment          | text, nullable | `PRODUCTION` \| `SANDBOX` |
+| payload              | jsonb, not null | the raw event for reconciliation |
+| processed_at         | timestamptz, nullable | null = needs manual review (unknown user or transfer without an expiry) |
+| created_at           | timestamptz, default now() | |
+
 ### `daily_logs`
 
 One row per user per date. All metric fields nullable — a day can have
@@ -170,6 +188,7 @@ users 1---* lift_logs
 users 1---* workout_plans
 users 1---* weekly_verdicts
 users 1---* physique_checkins
+users 1---* billing_events
 physique_checkins 0..1---1 physique_checkins (previous_checkin_id)
 workout_plans 1---* plan_days
 plan_days 1---* lift_logs (optional link)
