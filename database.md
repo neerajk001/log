@@ -134,6 +134,34 @@ Trends/history can reference past verdicts without recomputation.
 **Constraint:** `unique(user_id, week_start_date)` — one verdict per user
 per week (recomputing overwrites).
 
+### `physique_checkins`
+
+Weekly body-photo check-ins. The image is encrypted at rest and decrypted only
+in memory for the owner's view and the AI comparison. The model's read and
+recommendations are stored as text/JSON.
+
+| column              | type          | notes                              |
+|---------------------|---------------|-------------------------------------|
+| id                  | uuid, PK      | |
+| user_id             | uuid, FK → users.id, not null | |
+| date                | date, not null | the athlete's local date of the check-in |
+| week_start_date     | date, not null | Monday (UTC) of the ISO week |
+| mime_type           | text, not null | `image/jpeg` \| `image/png` \| `image/webp` |
+| image_ciphertext    | bytea, not null | AES-256-GCM ciphertext |
+| image_iv            | bytea, not null | 12-byte random IV |
+| image_tag           | bytea, not null | 16-byte GCM authentication tag |
+| image_bytes         | integer, not null | original upload size (metadata only) |
+| headline            | text, not null | one-line coach summary |
+| assessment          | text, not null | the written physique read |
+| recommendations     | jsonb, not null | array of `{area: "training"\|"nutrition"\|"recovery", action, reason}` |
+| previous_checkin_id | uuid, nullable, FK → physique_checkins.id | the week the AI compared against; `ON DELETE SET NULL` |
+| created_at          | timestamptz, default now() | |
+| updated_at          | timestamptz, default now() | updated when the same week is replaced |
+
+**Constraint:** `unique(user_id, week_start_date)` — one check-in per user per
+ISO week; uploading again in the same week replaces that week. **Indexes:**
+`(user_id, date)` and `previous_checkin_id`.
+
 ## Relationships
 
 ```
@@ -141,6 +169,8 @@ users 1---* daily_logs
 users 1---* lift_logs
 users 1---* workout_plans
 users 1---* weekly_verdicts
+users 1---* physique_checkins
+physique_checkins 0..1---1 physique_checkins (previous_checkin_id)
 workout_plans 1---* plan_days
 plan_days 1---* lift_logs (optional link)
 ```

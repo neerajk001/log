@@ -16,6 +16,7 @@ import { MealSuggestionsSheet } from "../../src/components/MealSuggestionsSheet"
 import { EatingOutSheet } from "../../src/components/EatingOutSheet";
 import { TodaysWorkoutCard } from "../../src/components/home/TodaysWorkoutCard";
 import { NutritionCard } from "../../src/components/home/NutritionCard";
+import { PhysiqueEntryCard } from "../../src/components/home/PhysiqueCard";
 import { RecentLiftsRow } from "../../src/components/home/RecentLiftsRow";
 import {
   SectionHeader,
@@ -347,6 +348,12 @@ export default function TodayScreen() {
                 void save(field, value);
               }}
             />
+          </View>
+        ) : null}
+
+        {profile?.ai_coach_enabled !== false ? (
+          <View style={styles.block}>
+            <PhysiqueEntryCard />
           </View>
         ) : null}
 

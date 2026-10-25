@@ -92,6 +92,12 @@ export const config = {
     freeAnalyticsDays: 7,
     freeLiftProgressDays: 30,
   },
+  // Weekly physique check-ins. Images are encrypted at rest with this key
+  // (32 bytes, base64 or hex). Empty disables the feature rather than storing
+  // plaintext; it never blocks core logging.
+  physique: {
+    encryptionKey: process.env.PHYSIQUE_ENCRYPTION_KEY || "",
+  },
   // Food lookup: Open Food Facts first (free), optional web-search fallback.
   food: {
     offUserAgent: process.env.OFF_USER_AGENT || "LogApp/1.0 (meal logging)",
@@ -163,6 +169,11 @@ export function validateRuntimeConfig(): void {
   if (!config.openai.apiKey) {
     console.warn(
       "[config] OPENAI_API_KEY is not set — AI plan import (POST /api/plans/parse) is unavailable.",
+    );
+  }
+  if (!config.physique.encryptionKey) {
+    console.warn(
+      "[config] PHYSIQUE_ENCRYPTION_KEY is not set — weekly physique check-ins are unavailable; core logging is unaffected.",
     );
   }
 }

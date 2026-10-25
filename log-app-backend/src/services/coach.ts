@@ -2986,6 +2986,149 @@ export async function analyzePhysique(
   return { headline, assessment };
 }
 
+const PHYSIQUE_CHECKIN_PROMPT = `You review a weekly physique check-in for an athlete who is dieting while lifting.
+
+Return ONLY a JSON object, no prose and no markdown fences, matching exactly:
+{
+  "headline": "one short line summarising this week",
+  "assessment": "the read itself",
+  "recommendations": [
+    { "area": "training" | "nutrition" | "recovery", "action": "string", "reason": "string" }
+  ]
+}
+
+Rules:
+- When a PREVIOUS check-in is supplied, compare the two photos. Describe visible change in leanness,
+  fullness, waist and shoulders cautiously; lighting, pose, angle, pump and time of day can change the
+  look, so say when that limits the read. With no previous photo, treat this as the baseline.
+- Ground the read in ATHLETE CONTEXT: goal, weight trend, strength trend, protein adherence, training
+  and the latest weekly verdict. Quote only values present there; never invent numbers or history.
+  Respect the stated goal — never push a deficit if the athlete is maintaining or gaining.
+- Give 2-3 recommendations, each a concrete action for this week, with at most one per area:
+  - training: a specific change (hold, add a set, swap an exercise, deload) only when the data supports it.
+  - nutrition: hold calories, tighten portions, raise protein, or eat more — match the direction of the
+    weight trend and the verdict.
+  - recovery: sleep, rest day, stress or a lighter session when strength/sleep suggest it.
+- If the plan is working, say so and recommend holding. If fat loss has visibly stalled while adherence is
+  high, say plainly that calories/portions need tightening. If weight is dropping too fast or strength is
+  falling, say to eat more or check recovery. Do not contradict the latest verdict without explaining why.
+- Sound like a coach: warm, direct, second person, plain language. Never comment on attractiveness.
+  No medical claims or diagnoses; for pain or injury, tell them to consult a professional.
+- "assessment" must stay under 140 words.`;
+
+export type PhysiqueRecommendationArea = "training" | "nutrition" | "recovery";
+
+export interface PhysiqueRecommendation {
+  area: PhysiqueRecommendationArea;
+  action: string;
+  reason: string;
+}
+
+export interface PhysiqueCheckinReading {
+  headline: string;
+  assessment: string;
+  recommendations: PhysiqueRecommendation[];
+}
+
+const PHYSIQUE_AREAS: ReadonlySet<string> = new Set(["training", "nutrition", "recovery"]);
+
+/** Validates the model's JSON before anything is stored or shown. */
+export function parsePhysiqueCheckinReading(raw: string): PhysiqueCheckinReading {
+  let parsed: { headline?: unknown; assessment?: unknown; recommendations?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new AppError(502, "PHYSIQUE_FAILED", "Couldn't read that check-in. Try again.");
+  }
+
+  const assessment =
+    typeof parsed.assessment === "string" ? parsed.assessment.trim().slice(0, 2000) : "";
+  if (!assessment) {
+    throw new AppError(422, "PHYSIQUE_FAILED", "Couldn't read that photo. Try a clearer one.");
+  }
+
+  const recommendations: PhysiqueRecommendation[] = [];
+  const seenAreas = new Set<string>();
+  if (Array.isArray(parsed.recommendations)) {
+    for (const entry of parsed.recommendations) {
+      if (!entry || typeof entry !== "object") continue;
+      const item = entry as Record<string, unknown>;
+      const area = typeof item.area === "string" ? item.area : "";
+      const action = typeof item.action === "string" ? item.action.trim().slice(0, 300) : "";
+      if (!PHYSIQUE_AREAS.has(area) || seenAreas.has(area) || !action) continue;
+      seenAreas.add(area);
+      const reason = typeof item.reason === "string" ? item.reason.trim().slice(0, 400) : "";
+      recommendations.push({
+        area: area as PhysiqueRecommendationArea,
+        action,
+        reason,
+      });
+      if (recommendations.length === 3) break;
+    }
+  }
+  if (recommendations.length === 0) {
+    throw new AppError(
+      422,
+      "PHYSIQUE_FAILED",
+      "Couldn't find anything actionable in that check-in. Try another photo.",
+    );
+  }
+
+  const headline =
+    typeof parsed.headline === "string" && parsed.headline.trim()
+      ? parsed.headline.trim().slice(0, 200)
+      : assessment.slice(0, 120);
+
+  return { headline, assessment, recommendations };
+}
+
+/**
+ * Weekly physique read: compares the current photo with the previous week's
+ * (when one exists) and the athlete's logs, then returns 2-3 concrete actions.
+ * Both images are sent to the vision model transiently and never stored there.
+ */
+export async function analyzePhysiqueCheckin(
+  current: { buffer: Buffer; mimeType: string },
+  previous: { buffer: Buffer; mimeType: string; date: string } | null,
+  context: string,
+): Promise<PhysiqueCheckinReading> {
+  const content: InputPart[] = [
+    {
+      type: "input_text",
+      text: [
+        `--- ATHLETE CONTEXT ---\n${context}`,
+        previous
+          ? "The two photos below are this week's check-in and the previous check-in. Compare them."
+          : "This is the athlete's first check-in. Treat it as the baseline.",
+      ].join("\n\n"),
+    },
+    { type: "input_image", image_url: `data:${current.mimeType};base64,${current.buffer.toString("base64")}` },
+  ];
+  if (previous) {
+    content.push(
+      {
+        type: "input_text",
+        text: `PREVIOUS CHECK-IN (${previous.date}) — compare against the current photo above.`,
+      },
+      {
+        type: "input_image",
+        image_url: `data:${previous.mimeType};base64,${previous.buffer.toString("base64")}`,
+      },
+    );
+  }
+
+  const raw = await callModel(
+    PHYSIQUE_CHECKIN_PROMPT,
+    [{ role: "user", content }],
+    // Reasoning headroom: the read is short, but a thinking model can spend the
+    // whole budget before it writes the JSON.
+    3000,
+    { json: true, model: config.models.physique, thinking: false },
+  );
+
+  return parsePhysiqueCheckinReading(raw);
+}
+
 // Exported for the offline meal-accuracy evaluation (evals/runMealEval.ts) —
 // the eval measures the same instructions the photo/chat paths use.
 export const MEAL_SYSTEM = `You estimate the calories and protein of a meal from a photo and/or a short description.

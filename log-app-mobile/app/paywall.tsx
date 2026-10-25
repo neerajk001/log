@@ -45,8 +45,8 @@ const BENEFITS: { icon: IoniconName; title: string; body: string }[] = [
   },
   {
     icon: "body-outline",
-    title: "Photo check-ins",
-    body: "Compare how your physique changes over time. Photos are read once and never stored.",
+    title: "Weekly physique check-ins",
+    body: "One encrypted photo a week. The coach compares it with your previous check-in and tells you what to change in training or food.",
   },
 ];
 

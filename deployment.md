@@ -16,7 +16,11 @@ Compose (`param-api` container) → Node/Express app. Postgres lives in Neon
    `log-app-backend/.env`, fill in secrets (`DATABASE_URL` from Neon,
    `CLERK_SECRET_KEY`, and the AI provider key — `AI_API_KEY`, or
    `COMMANDCODE_API_KEY`/`OPENAI_API_KEY` — for the coach and meals), plus
-   `PORT` and `SENTRY_DSN` for error monitoring. `OPENAI_API_KEY` is only
+   `PHYSIQUE_ENCRYPTION_KEY` (32 bytes; `openssl rand -base64 32`, or
+   `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`)
+   for weekly physique check-ins, `PORT` and `SENTRY_DSN` for error monitoring. Leaving
+   `PHYSIQUE_ENCRYPTION_KEY` empty disables weekly check-ins; they never store
+   a photo unencrypted. `OPENAI_API_KEY` is only
    needed by AI plan import (`POST /api/plans/parse`); without it that
    endpoint replies "unavailable" while everything else works. Model routing
    can be tuned with `OPENAI_PARSE_MODEL`, `COACH_FAST_MODEL`, `COACH_MODEL`

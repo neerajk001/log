@@ -320,11 +320,33 @@ export interface TrendsResponse {
   max_days?: number | null;
 }
 
-/** The coach's read on a body photo. The image itself is never stored. */
+/** The coach's read on a one-off body photo (the image itself is never stored). */
 export interface PhysiqueReading {
   analysis: string;
   headline: string | null;
   review_on: string | null;
+}
+
+export type PhysiqueRecommendationArea = "training" | "nutrition" | "recovery";
+
+export interface PhysiqueRecommendation {
+  area: PhysiqueRecommendationArea;
+  action: string;
+  reason: string;
+}
+
+/** A stored weekly check-in. The image is encrypted at rest, never in this payload. */
+export interface PhysiqueCheckin {
+  id: string;
+  date: string;
+  week_start_date: string;
+  headline: string;
+  assessment: string;
+  recommendations: PhysiqueRecommendation[];
+  previous_checkin_id: string | null;
+  image_bytes: number;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Something the coach advised, with when to follow it up. */

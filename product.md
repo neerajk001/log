@@ -54,8 +54,10 @@ their own weight trend and strength trend, not a generic calculator.
   - **Updated:** the AI Coach (`/api/coach/*`) is now in scope as an *additive*
     feature — optional onboarding, AI plan generation, and a chat that knows the
     user's logs. The weekly verdict itself stays deterministic and rule-based;
-    the coach sits beside it, and body photos are analyzed transiently (never
-    stored).
+    the coach sits beside it. One-off body/menu photos are analyzed transiently
+    (never stored), while explicit weekly physique check-ins are stored
+    AES-256-GCM encrypted at rest so the coach can compare week to week; the
+    athlete can delete them at any time.
 
 ## Success criteria for MVP
 
@@ -70,12 +72,13 @@ conclude from the same three data trends.
   plan CRUD, 7-day insights, and the weekly verdict. These have zero marginal
   server cost and are the acquisition loop.
 - **Pro:** the AI coach (chat, memory, tools), AI meal estimation, AI plan
-  generation and import, physique check-ins, the wide analytics ranges
-  (3M/1Y), lift-progress drilldowns, PR history, **eat-now suggestions**
-  (meals from the athlete's own history that fit today's remaining macros),
-  **next-set aims** (deterministic double progression from the last session),
-  and **eating-out mode** (a menu photo or restaurant description turned into
-  two orders inside the remaining macros).
+  generation and import, one-off physique check-ins, the wide analytics ranges
+  (3M/1Y), lift-progress drilldowns, PR history, **weekly encrypted physique
+  check-ins** (one photo per ISO week, compared with the previous check-in plus the logs),
+  **eat-now suggestions** (meals from the athlete's own history that fit
+  today's remaining macros), **next-set aims** (deterministic double progression
+  from the last session), and **eating-out mode** (a menu photo or restaurant
+  description turned into two orders inside the remaining macros).
 - **14-day Pro trial** on every new account, started when onboarding
   completes — not at sign-up, so an abandoned setup doesn't burn it. When it
   expires the account **falls back to Free**; it never loses access to its own

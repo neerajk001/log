@@ -527,8 +527,8 @@ can be re-tested immediately instead of waiting for the window to roll.
 ### `402 UPGRADE_REQUIRED`
 
 The billable AI endpoints (`/api/coach/chat/stream`, `/api/coach/plan`,
-`/api/coach/analyze`, `/api/meals/analyze`, `/api/meals/eating-out`,
-`/api/plans/parse`) return
+`/api/coach/analyze`, `/api/coach/physique`, `/api/meals/analyze`,
+`/api/meals/eating-out`, `/api/plans/parse`) return
 `402 {"error":{"code":"UPGRADE_REQUIRED","message":"…"}}` when a Free athlete
 has spent this period's allowance. `/api/meals/suggestions` is Pro-only and
 returns the same code for any Free athlete without an active trial.
@@ -647,10 +647,65 @@ the profile + recent data. **Does not persist** — returns the same plan shape 
 
 ## `POST /api/coach/analyze`
 
-`multipart/form-data` with a `file` image (JPEG/PNG/WebP, ≤5 MB) and an optional
-`description`. Returns `{ "analysis": "..." }`. The image is sent to the vision
-model **transiently and never stored** (see `docs/security.md`). Rate-limited to
+One-off check-in: `multipart/form-data` with a `file` image (JPEG/PNG/WebP,
+≤5 MB) and an optional `description`. Returns `{ "analysis": "..." }`. The image
+is sent to the vision model **transiently and never stored** (see
+`docs/security.md`). For the stored weekly flow use `/api/coach/physique`.
+Rate-limited to 10/hour per user.
+
+## Weekly physique check-ins
+
+Stored at rest as AES-256-GCM ciphertext (`PHYSIQUE_ENCRYPTION_KEY` must be set
+server-side; without it, creating a check-in or fetching an image fails closed
+with `503` — metadata may still be listed). One check-in per ISO week: posting
+again in the same week replaces that week's photo and read.
+The AI compares the photo with the previous check-in (decrypted only in memory)
+and the athlete's weight/strength/adherence context.
+
+### `GET /api/coach/physique`
+
+Newest first, metadata and the coach's read only — never the image bytes:
+
+```json
+[
+  {
+    "id": "uuid", "date": "2026-10-25", "week_start_date": "2026-10-19",
+    "headline": "Waist tighter, shoulders fuller",
+    "assessment": "Visible change against the previous check-in with the same lighting…",
+    "recommendations": [
+      { "area": "nutrition", "action": "Hold calories", "reason": "Weight trend is in range." }
+    ],
+    "previous_checkin_id": "uuid | null",
+    "image_bytes": 184233,
+    "created_at": "2026-10-25T06:00:00.000Z",
+    "updated_at": "2026-10-25T06:00:00.000Z"
+  }
+]
+```
+
+`area` is `training`, `nutrition` or `recovery`. The list is owner-scoped and
+remains readable after a downgrade to Free (own data is never lost); creating a
+new check-in is Pro-only (`physique` free allowance is 0).
+
+### `POST /api/coach/physique`
+
+`multipart/form-data` with a required `file` (JPEG/PNG/WebP, ≤5 MB), the
+athlete's local `date`, and `consent=true` (explicit consent to encrypted
+storage). Returns the created/replaced check-in in the list shape. Metered as
+`physique`; a Free account gets `402 UPGRADE_REQUIRED`. Rate-limited to
 10/hour per user.
+
+### `GET /api/coach/physique/:id/image`
+
+Owner-only decrypted image bytes, `Content-Type` as uploaded and
+`Cache-Control: private, no-store`. `404` when the id does not belong to the
+caller.
+
+### `DELETE /api/coach/physique/:id` / `DELETE /api/coach/physique`
+
+Deletes one owned check-in (`{ "ok": true }`) or every check-in for the caller
+(`{ "ok": true, "deleted": n }`). Any check-in that pointed at a deleted row has
+its `previous_checkin_id` set null.
 
 ## `GET /metrics`
 

@@ -14,36 +14,37 @@ enum PlanTier {
 }
 
 model User {
-  id               String        @id @default(uuid()) @db.Uuid
-  clerkUserId      String        @unique @map("clerk_user_id") @db.Text
-  proteinTargetG   Int?          @map("protein_target_g")
-  calorieTarget    Int?          @map("calorie_target")
-  dailyDefaults    Json?         @map("daily_defaults")
-  restDays         Json?         @map("rest_days")
-  mealTrackingEnabled Boolean    @default(true) @map("meal_tracking_enabled")
-  aiCoachEnabled   Boolean       @default(true) @map("ai_coach_enabled")
+  id                  String            @id @default(uuid()) @db.Uuid
+  clerkUserId         String            @unique @map("clerk_user_id") @db.Text
+  proteinTargetG      Int?              @map("protein_target_g")
+  calorieTarget       Int?              @map("calorie_target")
+  dailyDefaults       Json?             @map("daily_defaults")
+  restDays            Json?             @map("rest_days")
+  mealTrackingEnabled Boolean           @default(true) @map("meal_tracking_enabled")
+  aiCoachEnabled      Boolean           @default(true) @map("ai_coach_enabled")
   /// Off = the athlete doesn't weigh themselves: hide weigh-ins and judge without them.
-  trackWeight      Boolean       @default(true) @map("track_weight")
+  trackWeight         Boolean           @default(true) @map("track_weight")
   /// Entitlement. `pro` is only honoured while `proUntil` is null or in the future.
-  planTier         PlanTier      @default(free) @map("plan_tier")
+  planTier            PlanTier          @default(free) @map("plan_tier")
   /// Server-managed 14-day trial started when onboarding completes.
-  trialEndsAt      DateTime?     @map("trial_ends_at") @db.Timestamptz()
+  trialEndsAt         DateTime?         @map("trial_ends_at") @db.Timestamptz()
   /// Paid subscription window (written by the store sync in phase 2).
-  proUntil         DateTime?     @map("pro_until") @db.Timestamptz()
-  onboardedAt      DateTime?     @map("onboarded_at") @db.Timestamptz()
-  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
-  dailyLogs        DailyLog[]
-  liftLogs         LiftLog[]
-  activityLogs     ActivityLog[]
-  workoutPlans     WorkoutPlan[]
-  weeklyVerdicts   WeeklyVerdict[]
-  coachProfile     CoachProfile?
-  coachMessages    CoachMessage[]
-  coachSessions    CoachSession[]
-  coachMemory      CoachMemory?
-  coachDecisions   CoachDecision[]
-  mealLogs         MealLog[]
-  aiUsage          AiUsage[]
+  proUntil            DateTime?         @map("pro_until") @db.Timestamptz()
+  onboardedAt         DateTime?         @map("onboarded_at") @db.Timestamptz()
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  dailyLogs           DailyLog[]
+  liftLogs            LiftLog[]
+  activityLogs        ActivityLog[]
+  workoutPlans        WorkoutPlan[]
+  weeklyVerdicts      WeeklyVerdict[]
+  coachProfile        CoachProfile?
+  coachMessages       CoachMessage[]
+  coachSessions       CoachSession[]
+  coachMemory         CoachMemory?
+  coachDecisions      CoachDecision[]
+  mealLogs            MealLog[]
+  physiqueCheckins    PhysiqueCheckin[]
+  aiUsage             AiUsage[]
 
   @@map("users")
 }
@@ -67,38 +68,38 @@ model AiUsage {
 }
 
 model DailyLog {
-  id           String    @id @default(uuid()) @db.Uuid
-  userId       String    @map("user_id") @db.Uuid
-  date         DateTime  @db.Date
-  weightKg     Decimal?  @map("weight_kg") @db.Decimal(5, 2)
-  calories     Int?
-  proteinG     Int?      @map("protein_g")
-  sleepHours   Decimal?  @map("sleep_hours") @db.Decimal(3, 1)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
-  user         User      @relation(fields: [userId], references: [id])
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  date       DateTime @db.Date
+  weightKg   Decimal? @map("weight_kg") @db.Decimal(5, 2)
+  calories   Int?
+  proteinG   Int?     @map("protein_g")
+  sleepHours Decimal? @map("sleep_hours") @db.Decimal(3, 1)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user       User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, date])
   @@map("daily_logs")
 }
 
 model LiftLog {
-  id            String     @id @default(uuid()) @db.Uuid
-  userId        String     @map("user_id") @db.Uuid
-  date          DateTime   @db.Date
-  exerciseName  String     @map("exercise_name") @db.Text
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  date           DateTime @db.Date
+  exerciseName   String   @map("exercise_name") @db.Text
   /// Null = bodyweight set or a machine plate-stack set (see platePosition).
-  weightKg      Decimal?   @map("weight_kg") @db.Decimal(6, 2)
-  reps          Int
+  weightKg       Decimal? @map("weight_kg") @db.Decimal(6, 2)
+  reps           Int
   /// Numbered stack position for machine exercises. Snapshot of the plan's
   /// calibration is stored alongside it so history stays correct after edits.
-  platePosition  Int?      @map("plate_position")
-  plateIncrement Decimal?  @map("plate_increment") @db.Decimal(6, 2)
-  plateUnit      String?   @map("plate_unit") @db.Text
-  planDayId     String?    @map("plan_day_id") @db.Uuid
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
-  user          User       @relation(fields: [userId], references: [id])
-  planDay       PlanDay?   @relation(fields: [planDayId], references: [id])
+  platePosition  Int?     @map("plate_position")
+  plateIncrement Decimal? @map("plate_increment") @db.Decimal(6, 2)
+  plateUnit      String?  @map("plate_unit") @db.Text
+  planDayId      String?  @map("plan_day_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user           User     @relation(fields: [userId], references: [id])
+  planDay        PlanDay? @relation(fields: [planDayId], references: [id])
 
   @@index([userId, exerciseName, date])
   // Date-only reads (history, insights, coach context) can't use the index above.
@@ -109,47 +110,47 @@ model LiftLog {
 }
 
 model WorkoutPlan {
-  id         String     @id @default(uuid()) @db.Uuid
-  userId     String     @map("user_id") @db.Uuid
-  name       String     @db.Text
-  source     String     @db.Text
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  name      String    @db.Text
+  source    String    @db.Text
   /// The coach's "why this program" summary (AI-generated; null for manual/imported plans).
-  rationale  String?    @db.Text
-  isActive   Boolean    @default(true) @map("is_active")
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz()
-  user       User       @relation(fields: [userId], references: [id])
-  planDays   PlanDay[]
+  rationale String?   @db.Text
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz()
+  user      User      @relation(fields: [userId], references: [id])
+  planDays  PlanDay[]
 
   @@index([userId])
   @@map("workout_plans")
 }
 
 model PlanDay {
-  id         String     @id @default(uuid()) @db.Uuid
-  planId     String     @map("plan_id") @db.Uuid
-  dayName    String     @map("day_name") @db.Text
+  id        String      @id @default(uuid()) @db.Uuid
+  planId    String      @map("plan_id") @db.Uuid
+  dayName   String      @map("day_name") @db.Text
   /// One line on what this day trains and why (AI-generated; null otherwise).
-  rationale  String?    @db.Text
-  dayOrder   Int        @map("day_order")
-  exercises  Json       @db.JsonB
-  plan       WorkoutPlan @relation(fields: [planId], references: [id])
-  liftLogs   LiftLog[]
+  rationale String?     @db.Text
+  dayOrder  Int         @map("day_order")
+  exercises Json        @db.JsonB
+  plan      WorkoutPlan @relation(fields: [planId], references: [id])
+  liftLogs  LiftLog[]
 
   @@index([planId])
   @@map("plan_days")
 }
 
 model WeeklyVerdict {
-  id                  String    @id @default(uuid()) @db.Uuid
-  userId              String    @map("user_id") @db.Uuid
-  weekStartDate       DateTime  @map("week_start_date") @db.Date
-  verdict             String    @db.Text
-  weightTrendKgPerWeek Decimal?  @map("weight_trend_kg_per_week") @db.Decimal(4, 2)
-  strengthTrend       String?   @map("strength_trend") @db.Text
-  adherencePct        Int?      @map("adherence_pct")
-  reasoning           Json      @db.JsonB
-  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz()
-  user                User      @relation(fields: [userId], references: [id])
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @map("user_id") @db.Uuid
+  weekStartDate        DateTime @map("week_start_date") @db.Date
+  verdict              String   @db.Text
+  weightTrendKgPerWeek Decimal? @map("weight_trend_kg_per_week") @db.Decimal(4, 2)
+  strengthTrend        String?  @map("strength_trend") @db.Text
+  adherencePct         Int?     @map("adherence_pct")
+  reasoning            Json     @db.JsonB
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user                 User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, weekStartDate])
   @@map("weekly_verdicts")
@@ -266,4 +267,36 @@ model MealLog {
 
   @@index([userId, date])
   @@map("meal_logs")
+}
+
+/// A weekly body-photo check-in. The image is encrypted at rest (AES-256-GCM)
+/// and only decrypted in memory for the owner's view and the AI comparison.
+model PhysiqueCheckin {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @map("user_id") @db.Uuid
+  /// The athlete's local date of the check-in.
+  date              DateTime          @db.Date
+  /// Monday (UTC) of the check-in's ISO week; one row per user per week.
+  weekStartDate     DateTime          @map("week_start_date") @db.Date
+  mimeType          String            @map("mime_type") @db.Text
+  imageCiphertext   Bytes             @map("image_ciphertext")
+  imageIv           Bytes             @map("image_iv")
+  imageTag          Bytes             @map("image_tag")
+  imageBytes        Int               @map("image_bytes")
+  headline          String            @db.Text
+  assessment        String            @db.Text
+  /// Array of { area: "training"|"nutrition"|"recovery", action, reason }.
+  recommendations   Json              @db.JsonB
+  /// The previous week's check-in the AI compared against, when one existed.
+  previousCheckinId String?           @map("previous_checkin_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user              User              @relation(fields: [userId], references: [id])
+  previousCheckin   PhysiqueCheckin?  @relation("PhysiqueCheckinPrevious", fields: [previousCheckinId], references: [id], onDelete: SetNull)
+  nextCheckins      PhysiqueCheckin[] @relation("PhysiqueCheckinPrevious")
+
+  @@unique([userId, weekStartDate])
+  @@index([userId, date])
+  @@index([previousCheckinId])
+  @@map("physique_checkins")
 }

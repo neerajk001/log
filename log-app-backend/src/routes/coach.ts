@@ -9,6 +9,14 @@ import { rateLimit } from "../middleware/rateLimit";
 import { requireFeature } from "../middleware/entitlements";
 import { validate } from "../middleware/validate";
 import { analyzePhysique, generateCoachPlan, runCoachChatStream } from "../services/coach";
+import {
+  createPhysiqueCheckin,
+  deleteAllPhysiqueCheckins,
+  deletePhysiqueCheckin,
+  getPhysiqueCheckinImage,
+  listPhysiqueCheckins,
+} from "../services/physiqueCheckins";
+import { isPhysiqueEncryptionConfigured } from "../services/physiqueImage";
 import { incrementCounter } from "../utils/metricRegistry";
 import { coachChatSchema, coachPlanSchema, coachProfileSchema, idParamSchema } from "../validation/schemas";
 
@@ -53,6 +61,21 @@ function receiveImage(req: Request, res: Response, next: NextFunction): void {
     }
     next(err);
   });
+}
+
+/** Fail before buffering a body photo when the encryption key is missing. */
+function requirePhysiqueStorage(_req: Request, _res: Response, next: NextFunction): void {
+  if (!isPhysiqueEncryptionConfigured()) {
+    next(
+      new AppError(
+        503,
+        "PHYSIQUE_UNAVAILABLE",
+        "Weekly physique check-ins aren't available right now.",
+      ),
+    );
+    return;
+  }
+  next();
 }
 
 interface ProfileRow {
@@ -359,6 +382,92 @@ router.post(
     }
   },
 );
+
+/* ------------------------------------------------ weekly physique check-ins */
+
+router.get("/physique", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json(await listPhysiqueCheckins(req.userId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post(
+  "/physique",
+  requireAuth,
+  analyzeRateLimit,
+  // Physique is Pro-only (free allowance 0); the trial passes as Pro.
+  requireFeature("physique"),
+  requirePhysiqueStorage,
+  receiveImage,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        next(new AppError(400, "VALIDATION_ERROR", "A check-in photo is required"));
+        return;
+      }
+      const consent = req.body?.consent === "true" || req.body?.consent === true;
+      const localDate = typeof req.body?.date === "string" ? req.body.date : undefined;
+      const checkin = await createPhysiqueCheckin(req.userId, {
+        image: req.file.buffer,
+        mimeType: req.file.mimetype,
+        localDate,
+        consent,
+      });
+      res.json(checkin);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.get(
+  "/physique/:id/image",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const image = await getPhysiqueCheckinImage(req.userId, req.params.id as string);
+      if (!image) {
+        next(new AppError(404, "NOT_FOUND", "Check-in not found"));
+        return;
+      }
+      res.setHeader("Content-Type", image.mimeType);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.send(image.buffer);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.delete(
+  "/physique/:id",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const ok = await deletePhysiqueCheckin(req.userId, req.params.id as string);
+      if (!ok) {
+        next(new AppError(404, "NOT_FOUND", "Check-in not found"));
+        return;
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.delete("/physique", requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ ok: true, deleted: await deleteAllPhysiqueCheckins(req.userId) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.post(
   "/analyze",

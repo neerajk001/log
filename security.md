@@ -57,9 +57,21 @@
 
 - Onboarding answers live in `coach_profiles`, scoped to `req.userId`, and are
   never returned for another user.
-- **Body photos and menu photos are transient.** An uploaded image is held in
-  memory only for the duration of the model call and is never written to disk,
-  the database, or logs.
+- **One-off body photos and menu photos are transient.** The onboarding physique
+  read and menu scans are held in memory only for the duration of the model call
+  and are never written to disk, the database, or logs.
+- **Weekly physique check-ins are stored encrypted.** A check-in image is
+  AES-256-GCM encrypted before it reaches the database (random 12-byte IV and
+  16-byte auth tag per image), with the 32-byte key supplied only via
+  `PHYSIQUE_ENCRYPTION_KEY`. It is decrypted in memory for the owner's image
+  request and for the weekly AI comparison, and never written to logs. If the
+  key is missing or malformed the feature fails closed (503) — a body photo is
+  never stored plaintext. The athlete can delete a single check-in or all of
+  them, and a deleted check-in's comparison pointer is set null.
+  `GET /api/coach/physique/:id/image` is owner-scoped and responds with
+  `Cache-Control: private, no-store`. Treat `PHYSIQUE_ENCRYPTION_KEY` as
+  long-lived: changing it makes existing check-ins undecryptable (there is no
+  key-rotation/re-encryption path in this phase).
 - Every coach endpoint is rate-limited per user (`chat` 30/hr, `plan` 10/hr,
   `analyze` 10/hr) — each call costs real money.
 - On top of the per-hour limiter, each billable AI endpoint enforces a
@@ -91,7 +103,8 @@ The policy is **mask by default, then explicitly verify**:
   health data.
 - Free-text health content that inputs masking does not cover is wrapped in
   `PostHogMaskView` (`ph-no-capture`): the coach chat transcript, the meal
-  editor sheet, and the day's meal list.
+  editor sheet, the day's meal list, and the physique check-in screens, detail,
+  upload sheet and Today card.
 - Analytics events themselves are numbers and enums only — audit the
   `captureTiming` call sites before adding any property
   (`src/utils/perf.ts` documents the contract).
@@ -100,8 +113,9 @@ The policy is **mask by default, then explicitly verify**:
 
 1. Build a dev/preview client with replay on; open Today, Meal sheet, and the
    coach chat.
-2. In the PostHog replay, confirm the coach transcript and meal names/calories
-   render as masked blocks (not text).
+2. In the PostHog replay, confirm the coach transcript, meal names/calories and
+   physique check-in text render as masked blocks (not text), and that body
+   photos never appear (image replay is masked globally).
 3. Confirm weigh-in/meal inputs and any photo attachments are masked
    placeholders.
 4. Confirm no `console` events appear for the session.

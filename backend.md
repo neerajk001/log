@@ -104,6 +104,9 @@ DATABASE_URL=            # Neon pooled connection string
 CLERK_SECRET_KEY=
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-3.5-flash
+# 32 bytes (base64 or hex). Empty disables weekly physique check-ins; images are
+# never stored unencrypted.
+PHYSIQUE_ENCRYPTION_KEY=
 PORT=3000
 NODE_ENV=production
 ```

@@ -13,6 +13,7 @@ import { invalidateResources } from "./cache";import type {
   CoachUsage,
   DismissedMeal,
   ParsedPlanPreview,
+  PhysiqueCheckin,
   PhysiqueReading,
 } from "./types";
 
@@ -44,9 +45,27 @@ export function useCoachApi() {
         }),
       analyzePhoto: (formData: FormData) =>
         client.postFormData<PhysiqueReading>("/api/coach/analyze", formData),
+      listPhysiqueCheckins: (opts?: { force?: boolean }) =>
+        client.get<PhysiqueCheckin[]>("/api/coach/physique", opts),
+      createPhysiqueCheckin: (formData: FormData) =>
+        client.postFormData<PhysiqueCheckin>("/api/coach/physique", formData),
+      deletePhysiqueCheckin: (id: string) =>
+        client.del<{ ok: true }>(`/api/coach/physique/${id}`),
+      deleteAllPhysiqueCheckins: () =>
+        client.del<{ ok: true; deleted: number }>("/api/coach/physique"),
     }),
     [client],
   );
+}
+
+/**
+ * Owner-only image URL. The caller must send the Clerk token in an
+ * `Authorization` header (see `CheckinImage`); the server never serves an
+ * image without it. `version` busts the image cache after a same-week replace.
+ */
+export function physiqueImageUrl(id: string, version?: string): string {
+  const suffix = version ? `?v=${encodeURIComponent(version)}` : "";
+  return `${API_BASE_URL}/api/coach/physique/${id}/image${suffix}`;
 }
 
 /**

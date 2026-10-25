@@ -210,7 +210,7 @@ export async function physiqueContext(userId: string): Promise<string | null> {
   }
   if (!row) return null;
 
-  const detail = (row.detail ?? {}) as { assessment?: unknown };
+  const detail = (row.detail ?? {}) as { assessment?: unknown; recommendations?: unknown };
   const assessment = typeof detail.assessment === "string" ? detail.assessment.trim() : "";
   const body = assessment
     ? ` — ${
@@ -219,5 +219,20 @@ export async function physiqueContext(userId: string): Promise<string | null> {
           : assessment
       }`
     : "";
-  return `PHYSIQUE (last check-in ${isoDate(row.createdAt)}): ${row.summary}${body}`;
+  // The weekly check-in's concrete priorities travel with the decision so the
+  // chat coach can follow them up without re-reading the photo.
+  const priorities = Array.isArray(detail.recommendations)
+    ? detail.recommendations
+        .flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const item = entry as Record<string, unknown>;
+          return typeof item.action === "string" && item.action.trim()
+            ? [`${typeof item.area === "string" ? `${item.area}: ` : ""}${item.action.trim()}`]
+            : [];
+        })
+        .slice(0, 3)
+    : [];
+  const priorityLine =
+    priorities.length > 0 ? ` — priorities: ${priorities.join("; ")}` : "";
+  return `PHYSIQUE (last check-in ${isoDate(row.createdAt)}): ${row.summary}${body}${priorityLine}`;
 }
