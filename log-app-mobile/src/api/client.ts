@@ -73,6 +73,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A 402 from a billable AI endpoint: the free allowance is spent and the only
+ * way forward is the paywall. Screens use this to route there instead of
+ * showing a generic failure.
+ */
+export function isUpgradeRequired(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 402 || err.code === "UPGRADE_REQUIRED");
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   getToken: () => Promise<string | null>,

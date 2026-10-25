@@ -44,6 +44,16 @@ vi.mock("../src/services/coach", () => ({
   runCoachChatStream: hooks.runCoachChatStream,
 }));
 
+/**
+ * Entitlement/quota enforcement is not what this suite tests — and the auth stub
+ * above uses a non-UUID id, which the real middleware would send to Postgres.
+ * Pass through so the SSE transport assertions stay the subject.
+ */
+vi.mock("../src/middleware/entitlements", () => ({
+  requireFeature: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  requirePro: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import type { Express } from "express";
 import app from "../src/app";

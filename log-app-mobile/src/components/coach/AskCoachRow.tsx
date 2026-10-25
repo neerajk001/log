@@ -5,6 +5,7 @@ import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
 import { IconBadge, type IoniconName } from "../ui/primitives";
 import { useMe } from "../../hooks/useMe";
+import { useEntitlement } from "../../hooks/useEntitlement";
 import type { AgentId } from "../../api/types";
 
 /**
@@ -30,15 +31,32 @@ export function AskCoachRow({
   const { colors, typography } = useTheme();
   const styles = useStyles();
   const { profile } = useMe();
+  const { isLocked, remaining } = useEntitlement();
 
   // Hidden when the athlete turned the AI coach off during onboarding.
   if (profile?.ai_coach_enabled === false) return null;
 
-  const open = () =>
+  const exhausted = isLocked("chat");
+  const left = remaining("chat");
+  const quotaHint =
+    exhausted
+      ? "You've used this week's free messages"
+      : left !== null && left <= 1
+        ? `${left} free message${left === 1 ? "" : "s"} left this week`
+        : null;
+
+  // Out of free messages: the row becomes the upgrade entry point rather than
+  // opening a chat that would immediately 402.
+  const open = () => {
+    if (exhausted) {
+      router.navigate("/paywall" as never);
+      return;
+    }
     router.navigate({
       pathname: "/coach/new",
       params: { agent, ...(question ? { q: question } : {}) },
     } as never);
+  };
 
   if (compact) {
     return (
@@ -51,7 +69,7 @@ export function AskCoachRow({
       >
         <Ionicons name={icon} size={15} color={colors.primary} />
         <Text style={styles.compactText} numberOfLines={1}>
-          {label}
+          {exhausted ? "Coach — included with Pro" : label}
         </Text>
       </Pressable>
     );
@@ -66,10 +84,12 @@ export function AskCoachRow({
     >
       <IconBadge name={icon} bg={colors.primarySoft} color={colors.primary} size={36} rounded={false} />
       <View style={styles.text}>
-        <Text style={typography.bodyStrong}>{label}</Text>
-        {hint ? (
+        <Text style={typography.bodyStrong} numberOfLines={1}>
+          {exhausted ? "Ask the coach — included with Pro" : label}
+        </Text>
+        {quotaHint ?? hint ? (
           <Text style={typography.small} numberOfLines={1}>
-            {hint}
+            {quotaHint ?? hint}
           </Text>
         ) : null}
       </View>

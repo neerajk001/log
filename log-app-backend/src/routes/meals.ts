@@ -4,6 +4,7 @@ import { config } from "../config";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
+import { requireFeature, requirePro } from "../middleware/entitlements";
 import { validate } from "../middleware/validate";
 import {
   createMealSchema,
@@ -18,7 +19,8 @@ import {
   serializeMeal,
   updateMeal,
 } from "../services/meals";
-import { analyzeMeal } from "../services/coach";
+import { analyzeMeal, analyzeEatingOut } from "../services/coach";
+import { getMealSuggestions } from "../services/mealSuggestions";
 
 const router = Router();
 
@@ -63,6 +65,26 @@ router.get(
         { calories: 0, protein_g: 0 },
       );
       res.json({ date, meals: meals.map(serializeMeal), totals });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
+ * Pro-only eat-now suggestions: meals the athlete has logged before that fit
+ * what is left of today's calorie budget. Deterministic and DB-only — no model
+ * call and no quota row; the entitlement check is the only gate.
+ */
+router.get(
+  "/suggestions",
+  requireAuth,
+  validate(mealDateQuerySchema, "query"),
+  requirePro("Eat-now suggestions are part of Pro."),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { date } = req.query as unknown as { date: string };
+      res.json(await getMealSuggestions(req.userId, date));
     } catch (err) {
       next(err);
     }
@@ -145,10 +167,51 @@ function receiveImage(req: Request, res: Response, next: NextFunction): void {
   });
 }
 
+/**
+ * Eating-out helper: a menu photo and/or a description, metered under its own
+ * allowance (2/month Free, unlimited on Pro/trial). The photo is transient.
+ */
+router.post(
+  "/eating-out",
+  requireAuth,
+  analyzeRateLimit,
+  requireFeature("eating_out"),
+  receiveImage,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const description =
+        typeof req.body?.description === "string" ? req.body.description : undefined;
+      if (!req.file && !description?.trim()) {
+        next(
+          new AppError(
+            400,
+            "VALIDATION_ERROR",
+            "Add a menu photo or describe the restaurant and what you fancy.",
+          ),
+        );
+        return;
+      }
+      const localDate = typeof req.body?.date === "string" ? req.body.date : undefined;
+      const result = await analyzeEatingOut(
+        req.userId,
+        req.file?.buffer,
+        req.file?.mimetype,
+        description,
+        localDate,
+      );
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
 router.post(
   "/analyze",
   requireAuth,
   analyzeRateLimit,
+  // Metered before the upload is read: a quota-rejected photo is never buffered.
+  requireFeature("meal_scan"),
   receiveImage,
   async (req: Request, res: Response, next: NextFunction) => {
     try {

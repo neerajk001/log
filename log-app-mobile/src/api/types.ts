@@ -99,10 +99,19 @@ export interface ActivityLogCreate {
   notes?: string | null;
 }
 
+export type PlanTier = "free" | "pro";
+
 export interface UserProfile {
   id: string;
   protein_target_g: number | null;
   calorie_target: number | null;
+  /** Entitlement. `is_pro` covers an active trial or an unexpired subscription. */
+  plan_tier?: PlanTier;
+  trial_ends_at?: string | null;
+  pro_until?: string | null;
+  is_pro?: boolean;
+  is_trial?: boolean;
+  trial_days_left?: number | null;
   daily_defaults?: DailyDefaults | null;
   /** Weekdays the athlete doesn't train (0 = Sun … 6 = Sat). */
   rest_days?: number[] | null;
@@ -113,6 +122,39 @@ export interface UserProfile {
   track_weight?: boolean;
   /** Null until first-run onboarding is finished. */
   onboarded_at?: string | null;
+}
+
+/** One billable AI surface. `limit` is null when unlimited (Pro or trial). */
+export type ProFeature =
+  | "chat"
+  | "meal_scan"
+  | "eating_out"
+  | "plan_generate"
+  | "plan_parse"
+  | "physique";
+
+export interface FeatureUsage {
+  feature: ProFeature;
+  used: number;
+  limit: number | null;
+  /** ISO date the allowance next resets. */
+  resets_on: string;
+  allowed: boolean;
+}
+
+/** Dev-only plan states, mirroring `POST /api/billing/dev/simulate`. */
+export type DevPlanMode = "free" | "trial" | "trial_expired" | "pro";
+
+/** `GET /api/billing/status` — entitlement plus this period's usage. */
+export interface BillingStatus {
+  plan_tier: PlanTier;
+  is_pro: boolean;
+  is_trial: boolean;
+  trial_ends_at: string | null;
+  trial_days_left: number | null;
+  pro_until: string | null;
+  purchase_enabled: boolean;
+  features: FeatureUsage[];
 }
 
 /** First-run onboarding payload — every field optional. */
@@ -272,6 +314,10 @@ export interface TrendsResponse {
   lifts: LiftDelta[];
   adherence_pct: number | null;
   calorie_adherence_pct: number | null;
+  /** The range actually served (the server clamps Free accounts to 7d). */
+  range?: TrendRange;
+  limited?: boolean;
+  max_days?: number | null;
 }
 
 /** The coach's read on a body photo. The image itself is never stored. */
@@ -395,6 +441,51 @@ export interface MealAnalysis {
   } | null;
 }
 
+/** A meal the athlete has logged before, offered against today's remaining macros. */
+export interface MealSuggestion {
+  id: string;
+  date: string;
+  title: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+  source: MealLog["source"];
+  last_logged: string;
+  remaining_after: { calories: number | null; protein_g: number | null };
+  fits: boolean;
+}
+
+export type MealSuggestionReason =
+  | "no_targets"
+  | "target_met"
+  | "no_history"
+  | "nothing_fits"
+  | null;
+
+export interface MealSuggestionsResponse {
+  targets: { calories: number | null; protein_g: number | null };
+  consumed: { calories: number; protein_g: number };
+  remaining: { calories: number | null; protein_g: number | null };
+  suggestions: MealSuggestion[];
+  reason: MealSuggestionReason;
+}
+
+/** One order that fits the athlete's remaining macros. */
+export interface EatingOutOption {
+  title: string;
+  order: string;
+  items: MealItem[];
+  calories: number;
+  protein_g: number;
+}
+
+export interface EatingOutAnalysis {
+  restaurant: string;
+  note?: string;
+  options: EatingOutOption[];
+  day?: MealAnalysis["day"];
+}
+
 /** A change the coach has prepared and the user must confirm. */
 export type CoachProposal = (
   | {
@@ -487,12 +578,32 @@ export interface LastSessionSets {
   sets: LiftSetLoad[];
 }
 
+/** One target set for the next session. */
+export interface ProgressionSet {
+  weight_kg: number | null;
+  reps: number;
+  plate_position?: number | null;
+}
+
+/** Deterministic next-session aim, computed from the previous session. */
+export interface ProgressionTarget {
+  mode: "kg" | "plate" | "bw";
+  from_date: string;
+  sets: ProgressionSet[];
+  /** Display-ready, e.g. "62.5 kg × 8". */
+  headline: string;
+  reason: string;
+  added_load: boolean;
+}
+
 /** Recent exercise names, plus the top set from each one's previous session. */
 export interface LiftSummary {
   names: string[];
   last_by_exercise: LiftLog[];
   /** Every set of each exercise's previous session, for set-by-set pre-filling. */
   last_sets_by_exercise: Record<string, LastSessionSets>;
+  /** Pro only: next-session aims, omitted entirely for Free accounts. */
+  progression_by_exercise?: Record<string, ProgressionTarget>;
 }
 
 /** One exercise's rollup from the Insights metrics endpoint. */
@@ -558,4 +669,7 @@ export interface LiftProgress {
   prev_from: string;
   prev_to: string;
   exercises: LiftProgressExercise[];
+  /** True when the server clamped a wider window to the free allowance. */
+  limited?: boolean;
+  max_days?: number | null;
 }

@@ -37,8 +37,23 @@ Returns (and creates on first call) the current user's profile row.
 
 Response:
 ```json
-{ "id": "uuid", "protein_target_g": 135, "calorie_target": 1650 }
+{
+  "id": "uuid",
+  "protein_target_g": 135,
+  "calorie_target": 1650,
+  "plan_tier": "free",
+  "trial_ends_at": "2026-11-07T10:00:00.000Z",
+  "pro_until": null,
+  "is_pro": true,
+  "is_trial": true,
+  "trial_days_left": 14
+}
 ```
+
+`is_pro` is true during an active trial or an unexpired subscription. Free-tier
+AI usage counters are **not** included here (they live on
+`GET /api/billing/status`) so the root-layout profile fetch stays a single
+cheap row read.
 
 ## `PUT /api/me`
 
@@ -117,6 +132,15 @@ was bodyweight (no plate fields) or a machine stack (`plate_position` set). Lift
 rows pre-fill a plate exercise's previous position (falling back to the plan's
 minimum) and never pre-fill a kg load for it.
 
+**Pro only:** the response also carries
+`progression_by_exercise: Record<string, ProgressionTarget>` where each target is
+`{ mode: "kg" | "plate" | "bw", from_date, sets: LiftSetLoad[], headline, reason,
+added_load }`. It is computed deterministically from the previous session
+(double progression: hit the top of the plan's rep range on every working set →
++2.5 kg / +1 stack position / +1 rep; otherwise repeat the load and aim for one
+more rep). The field is omitted entirely for Free accounts — clients must not
+invent it.
+
 ## `GET /api/logs/lift/progress?from&to&prev_from&prev_to`
 
 Per-exercise progress for the Insights card and the exercise detail screen.
@@ -175,6 +199,103 @@ each exercise carries `sets`, `volume`, `best_kg/best_reps/best_date`, `prev_bes
 The client keeps the presentation maths (muscle names via its own table, streaks,
 series) — only the row transfer moved here. It replaced pulling up to 5,000 individual
 sets, twice the range, on every visit.
+
+## Meals
+
+### `GET /api/meals?date=YYYY-MM-DD`
+
+Returns that day's meals and their totals:
+```json
+{
+  "date": "2026-10-24",
+  "meals": [
+    {
+      "id": "uuid", "date": "2026-10-24", "title": "Chicken bowl",
+      "items": [{ "name": "Chicken", "quantity": "150 g", "calories": 250, "protein_g": 40 }],
+      "calories": 620, "protein_g": 48, "source": "ai"
+    }
+  ],
+  "totals": { "calories": 620, "protein_g": 48 }
+}
+```
+
+### `POST /api/meals`
+
+Body `{ id?, date, title, items, calories, protein_g, source }` where `source` is
+`"ai" | "photo" | "manual"` and the totals must equal the sum of the items (±1).
+`calories` and `protein_g` roll into that day's `daily_logs` totals in the same
+transaction. An optional client UUID makes retries idempotent: the same payload
+replays the existing row (`200`), a different payload is `409
+IDEMPOTENCY_CONFLICT`. Returns the meal (`201` on create).
+
+### `PUT /api/meals/:id` / `DELETE /api/meals/:id`
+
+Edit or delete an owned meal; the day's totals are adjusted by the delta. A
+concurrent edit that changes the totals first is rejected with `409 MEAL_CHANGED`
+so a stale delta never corrupts the day.
+
+### `POST /api/meals/analyze`
+
+`multipart/form-data` with a required `file` image (JPEG/PNG/WebP, ≤5 MB), an
+optional `description` and the athlete's local `date`. Estimates a meal from the
+photo; the image is sent to the vision model transiently and never stored.
+Returns `{ title, items, calories, protein_g, confidence, question?, day }`.
+Metered as `meal_scan` (3/month Free).
+
+### `GET /api/meals/suggestions?date=YYYY-MM-DD`
+
+**Pro only** (`402 UPGRADE_REQUIRED` otherwise). Deterministic and DB-only — no
+model call and no quota row. Returns meals the athlete has logged in the last 90
+days that fit what's left of that day's targets:
+
+```json
+{
+  "targets": { "calories": 2200, "protein_g": 160 },
+  "consumed": { "calories": 1200, "protein_g": 80 },
+  "remaining": { "calories": 1000, "protein_g": 80 },
+  "suggestions": [
+    {
+      "id": "uuid", "date": "2026-10-20", "title": "Chicken rice bowl",
+      "items": [], "calories": 620, "protein_g": 48, "source": "ai",
+      "last_logged": "2026-10-20",
+      "remaining_after": { "calories": 380, "protein_g": 32 },
+      "fits": true
+    }
+  ],
+  "reason": null
+}
+```
+
+`reason` is `null` on success or one of `no_targets`, `target_met`,
+`no_history`, `nothing_fits`. Up to three suggestions, ranked by protein fit,
+budget use, protein density and recency; a repeated meal title keeps its newest
+version.
+
+### `POST /api/meals/eating-out`
+
+**Pro or Free allowance** (`eating_out`, 2/month Free) — `402 UPGRADE_REQUIRED`
+when spent. `multipart/form-data` with an optional `file` menu photo, an optional
+`description` (restaurant/dish text), and the athlete's local `date`; at least
+one of `file`/`description` is required. The photo is transient, never stored.
+Rate-limited to 10 requests/hour per user.
+
+Returns two orders inside the remaining macros:
+```json
+{
+  "restaurant": "Chipotle",
+  "note": "Both stay inside what's left today.",
+  "options": [
+    {
+      "title": "Chicken bowl, no rice",
+      "order": "Chicken bowl with double chicken, no rice, extra fajita veg",
+      "items": [{ "name": "Chicken", "quantity": "2 scoops", "calories": 260, "protein_g": 46 }],
+      "calories": 430, "protein_g": 52
+    }
+  ],
+  "day": { "calorie_target": 2200, "protein_target_g": 160, "calories": 1200, "protein_g": 80 }
+}
+```
+Totals are recomputed from the validated items, never trusted from the model.
 
 ## `GET /api/plans`
 
@@ -356,6 +477,63 @@ Returns:
   "adherence_pct": 86
 }
 ```
+
+Free accounts are clamped to `range=7d` server-side. The response then carries
+`"limited": true` and `"max_days": 7`, alongside the effective `range`, so the
+client can show an upgrade prompt without inventing numbers. Pro (and the
+trial) gets the requested range.
+
+## `GET /api/billing/status`
+
+Returns the athlete's entitlement plus this period's AI usage:
+
+```json
+{
+  "plan_tier": "free",
+  "is_pro": false,
+  "is_trial": false,
+  "trial_ends_at": "2026-11-07T10:00:00.000Z",
+  "trial_days_left": 0,
+  "pro_until": null,
+  "purchase_enabled": false,
+  "features": [
+    { "feature": "chat", "used": 2, "limit": 3, "resets_on": "2026-10-26", "allowed": true }
+  ]
+}
+```
+
+`limit` is `null` for unlimited (Pro/trial). Free allowances: `chat` 3/week,
+`meal_scan` 3/month, `eating_out` 2/month, `plan_generate` 1/month, `plan_parse`
+2/month, `physique` 0. Weekly windows start on the UTC Monday; monthly ones on
+the 1st. The Pro-only deterministic surfaces (eat-now suggestions, next-set aims)
+are not quota features — they are simply omitted/rejected for Free.
+
+## `POST /api/billing/dev/simulate`
+
+**Development only** — returns `404` when `NODE_ENV=production`. Body
+`{ "mode": "free" | "trial" | "trial_expired" | "pro" }` puts the account in
+that state without a store:
+
+| mode            | stored state                                              |
+|-----------------|-----------------------------------------------------------|
+| `trial`         | Free tier + `trial_ends_at = now + BILLING_TRIAL_DAYS`     |
+| `trial_expired` | Free tier + `trial_ends_at` in the past (falls back to Free) |
+| `pro`           | `plan_tier = pro`, no trial running                        |
+| `free`          | Free tier, never trialled                                  |
+
+Every call also clears that user's `ai_usage` rows, so "out of free messages"
+can be re-tested immediately instead of waiting for the window to roll.
+
+### `402 UPGRADE_REQUIRED`
+
+The billable AI endpoints (`/api/coach/chat/stream`, `/api/coach/plan`,
+`/api/coach/analyze`, `/api/meals/analyze`, `/api/meals/eating-out`,
+`/api/plans/parse`) return
+`402 {"error":{"code":"UPGRADE_REQUIRED","message":"…"}}` when a Free athlete
+has spent this period's allowance. `/api/meals/suggestions` is Pro-only and
+returns the same code for any Free athlete without an active trial.
+The message is written for the athlete, so clients should show it and route to
+the paywall rather than a generic error.
 
 ## `GET /api/verdict/weekly`
 

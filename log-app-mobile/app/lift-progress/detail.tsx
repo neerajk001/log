@@ -23,6 +23,7 @@ import {
 } from "../../src/components/ui/primitives";
 import { StatTile } from "../../src/components/StatTile";
 import { useLiftProgress } from "../../src/hooks/useLiftProgress";
+import { useEntitlement } from "../../src/hooks/useEntitlement";
 import { formatNumber } from "../../src/utils/derive";
 import { formatMediumDate } from "../../src/utils/date";
 import {
@@ -51,8 +52,20 @@ export default function ExerciseProgressScreen() {
   const exerciseName = raw ?? "";
   const initialRange: ProgressRange =
     params.days === "365" ? "1y" : params.days === "30" ? "30d" : "90d";
-  const [range, setRange] = useState<ProgressRange>(initialRange);
-  const days = RANGES.find((r) => r.value === range)?.days ?? 90;
+  const [requested, setRequested] = useState<ProgressRange>(initialRange);
+  const { isLocked } = useEntitlement();
+  // Wider windows are Pro; Free always reads 30D (the server clamps too).
+  const locked = isLocked("lift_progress_full");
+  const range: ProgressRange = locked && requested !== "30d" ? "30d" : requested;
+  const days = RANGES.find((r) => r.value === range)?.days ?? 30;
+
+  const changeRange = (next: ProgressRange) => {
+    if (locked && next !== "30d") {
+      router.navigate("/paywall" as never);
+      return;
+    }
+    setRequested(next);
+  };
   const { data, loading, error, refetch } = useLiftProgress(days);
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -92,9 +105,14 @@ export default function ExerciseProgressScreen() {
 
         <SegmentedControl
           value={range}
-          onChange={setRange}
+          onChange={changeRange}
           options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
         />
+        {locked ? (
+          <Text style={[typography.caption, styles.gateNote]}>
+            90-day and 1-year windows are part of Pro.
+          </Text>
+        ) : null}
 
         {error ? (
           <ErrorState message={error} onRetry={refetch} />
@@ -228,6 +246,7 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
+    gateNote: { color: t.colors.textDim, marginTop: -spacing.sm },
     tiles: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
     section: { gap: spacing.md },
     cardHeader: {

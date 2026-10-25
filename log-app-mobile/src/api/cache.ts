@@ -13,7 +13,8 @@ export type Resource =
   | "meals"
   | "trends"
   | "verdict"
-  | "coach";
+  | "coach"
+  | "billing";
 
 /** Checked in order, so `/api/meals` is matched before `/api/me`. */
 const PATH_RESOURCES: readonly (readonly [string, Resource])[] = [
@@ -25,6 +26,7 @@ const PATH_RESOURCES: readonly (readonly [string, Resource])[] = [
   ["/api/trends", "trends"],
   ["/api/verdict", "verdict"],
   ["/api/coach", "coach"],
+  ["/api/billing", "billing"],
   ["/api/me", "me"],
 ];
 
@@ -43,15 +45,19 @@ export function resourceForPath(path: string): Resource | null {
  * logging a set ticks off today's plan day; both feed trends and the verdict.
  */
 const WRITE_EFFECTS: Record<Resource, readonly Resource[]> = {
-  meals: ["meals", "daily", "trends", "verdict"],
+  // The AI paths (meal scans, plan generation/import, coach turns) spend quota,
+  // so the "N left" readouts must refetch after any of them succeeds.
+  meals: ["meals", "daily", "trends", "verdict", "billing"],
   lift: ["lift", "plans", "trends", "verdict"],
   daily: ["daily", "trends", "verdict"],
   activity: ["activity"],
-  plans: ["plans"],
+  plans: ["plans", "billing"],
   me: ["me"],
   trends: ["trends"],
   verdict: ["verdict"],
-  coach: ["coach"],
+  coach: ["coach", "billing"],
+  // A plan change (purchase, trial, dev switch) also moves /me's is_pro/trial.
+  billing: ["billing", "me"],
 };
 
 /**
@@ -69,6 +75,7 @@ const RESOURCE_TTL_MS: Record<Resource, number> = {
   activity: 60_000,
   daily: 30_000,
   meals: 30_000,
+  billing: 60_000,
 };
 
 const DEFAULT_TTL_MS = 30_000;

@@ -10,7 +10,7 @@ import { TextField } from "../../src/components/ui/controls";
 import { OptionCard } from "../../src/components/OptionCard";
 import { usePlansApi } from "../../src/api/plans";
 import { setPendingPlan } from "../../src/state/parsedPlan";
-import { ApiError } from "../../src/api/client";
+import { ApiError, isUpgradeRequired } from "../../src/api/client";
 import { filePart } from "../../src/utils/upload";
 import {
   emptyDay,
@@ -99,6 +99,10 @@ export default function ImportPlanScreen() {
       const result = await api.parsePlanText(trimmed);
       goPreview(toEditableDays(result.days), "ai_parsed", result.rationale ?? undefined);
     } catch (err) {
+      if (isUpgradeRequired(err)) {
+        router.navigate("/paywall" as never);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Couldn't parse that — try pasting plain text.");
     } finally {
       setLoading(false);
@@ -140,6 +144,10 @@ export default function ImportPlanScreen() {
       const parsed = await api.parsePlanPdfForm(formData);
       goPreview(toEditableDays(parsed.days), "ai_parsed", parsed.rationale ?? undefined);
     } catch (err) {
+      if (isUpgradeRequired(err)) {
+        router.navigate("/paywall" as never);
+        return;
+      }
       if (err instanceof ApiError) {
         if (err.status === 0) {
           setError("Couldn't reach the server. Check your connection and try again.");

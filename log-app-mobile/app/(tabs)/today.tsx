@@ -12,6 +12,8 @@ import { ActivitySheet } from "../../src/components/ActivitySheet";
 import { CalendarSheet } from "../../src/components/CalendarSheet";
 import { MealSheet } from "../../src/components/MealSheet";
 import { MealsSheet } from "../../src/components/MealsSheet";
+import { MealSuggestionsSheet } from "../../src/components/MealSuggestionsSheet";
+import { EatingOutSheet } from "../../src/components/EatingOutSheet";
 import { TodaysWorkoutCard } from "../../src/components/home/TodaysWorkoutCard";
 import { NutritionCard } from "../../src/components/home/NutritionCard";
 import { RecentLiftsRow } from "../../src/components/home/RecentLiftsRow";
@@ -77,6 +79,8 @@ export default function TodayScreen() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [mealsOpen, setMealsOpen] = useState(false);
   const [editingMeal, setEditingMeal] = useState<MealLog | null>(null);
+  const [eatNowOpen, setEatNowOpen] = useState(false);
+  const [eatingOutOpen, setEatingOutOpen] = useState(false);
 
   const {
     data,
@@ -177,6 +181,12 @@ export default function TodayScreen() {
       params: { agent: "meal", date: activeDate },
     } as never);
   }, [activeDate]);
+
+  // A Pro suggestion/order is logged as a meal row, and the server also rolls it
+  // into the day's totals — refresh both so Today doesn't keep the old numbers.
+  const onProMealLogged = useCallback(async () => {
+    await Promise.allSettled([refetchMeals(), refetch()]);
+  }, [refetchMeals, refetch]);
 
   // Pull-to-refresh owns its own spinner: coupling it to the slowest section's
   // load state (refreshing = OR of all loadings) pinned the indicator on screen
@@ -331,6 +341,8 @@ export default function TodayScreen() {
               mealCount={meals.length}
               onLogMeal={goLogMeal}
               onPressMeals={() => setMealsOpen(true)}
+              onEatNow={() => setEatNowOpen(true)}
+              onEatingOut={() => setEatingOutOpen(true)}
               onEdit={(field, value) => {
                 void save(field, value);
               }}
@@ -462,6 +474,24 @@ export default function TodayScreen() {
         onClose={() => setEditingMeal(null)}
         onSaved={refetchMeals}
       />
+
+      {eatNowOpen ? (
+        <MealSuggestionsSheet
+          visible
+          date={activeDate}
+          onClose={() => setEatNowOpen(false)}
+          onLogged={onProMealLogged}
+        />
+      ) : null}
+
+      {eatingOutOpen ? (
+        <EatingOutSheet
+          visible
+          date={activeDate}
+          onClose={() => setEatingOutOpen(false)}
+          onLogged={onProMealLogged}
+        />
+      ) : null}
 
       <OverflowMenu
         visible={menuOpen}

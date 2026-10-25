@@ -8,6 +8,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum PlanTier {
+  free
+  pro
+}
+
 model User {
   id               String        @id @default(uuid()) @db.Uuid
   clerkUserId      String        @unique @map("clerk_user_id") @db.Text
@@ -19,6 +24,12 @@ model User {
   aiCoachEnabled   Boolean       @default(true) @map("ai_coach_enabled")
   /// Off = the athlete doesn't weigh themselves: hide weigh-ins and judge without them.
   trackWeight      Boolean       @default(true) @map("track_weight")
+  /// Entitlement. `pro` is only honoured while `proUntil` is null or in the future.
+  planTier         PlanTier      @default(free) @map("plan_tier")
+  /// Server-managed 14-day trial started when onboarding completes.
+  trialEndsAt      DateTime?     @map("trial_ends_at") @db.Timestamptz()
+  /// Paid subscription window (written by the store sync in phase 2).
+  proUntil         DateTime?     @map("pro_until") @db.Timestamptz()
   onboardedAt      DateTime?     @map("onboarded_at") @db.Timestamptz()
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz()
   dailyLogs        DailyLog[]
@@ -32,8 +43,27 @@ model User {
   coachMemory      CoachMemory?
   coachDecisions   CoachDecision[]
   mealLogs         MealLog[]
+  aiUsage          AiUsage[]
 
   @@map("users")
+}
+
+/// Free-tier AI quota per feature and period. Rows are only written for Free
+/// users — a Pro/trial request never counts against a limit.
+model AiUsage {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  /// chat | meal_scan | eating_out | plan_generate | plan_parse | physique
+  feature     String   @db.Text
+  /// Bucket key: the ISO Monday for weekly features, the 1st for monthly ones.
+  periodStart DateTime @map("period_start") @db.Date
+  count       Int      @default(0)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, feature, periodStart])
+  @@index([userId])
+  @@map("ai_usage")
 }
 
 model DailyLog {

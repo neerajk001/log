@@ -31,8 +31,10 @@ import { useInsights } from "../../src/hooks/useInsights";
 import { useLiftProgress } from "../../src/hooks/useLiftProgress";
 import { useTrends } from "../../src/hooks/useTrends";
 import { useMe } from "../../src/hooks/useMe";
+import { useEntitlement } from "../../src/hooks/useEntitlement";
 import { useWeeklyVerdict } from "../../src/hooks/useWeeklyVerdict";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
+import { ProGate } from "../../src/components/billing/ProGate";
 import { VERDICT_LABELS } from "../../src/components/VerdictStamp";
 import { formatNumber } from "../../src/utils/derive";
 import {
@@ -138,8 +140,20 @@ export default function InsightsScreen() {
 
   const rangeDays = RANGE_DAYS[range];
   const { profile } = useMe();
+  const { isLocked } = useEntitlement();
   const restDays = profile?.rest_days ?? [];
   const trackWeight = profile?.track_weight !== false;
+
+  // The wider ranges are the Pro analytics gate. Keep every chip visible (it was
+  // there before) but send a locked tap to the paywall instead of silently
+  // re-rendering the same 7-day numbers under a different label.
+  const changeRange = (next: TrendRange) => {
+    if (next !== "7d" && isLocked("insights_full")) {
+      router.navigate("/paywall" as never);
+      return;
+    }
+    setRange(next);
+  };
 
   const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
   const {
@@ -340,7 +354,7 @@ export default function InsightsScreen() {
           title="Insights"
           right={
             <View style={styles.rangeWrap}>
-              <SegmentedControl value={range} onChange={setRange} options={RANGES} />
+              <SegmentedControl value={range} onChange={changeRange} options={RANGES} />
             </View>
           }
         />
@@ -775,7 +789,12 @@ export default function InsightsScreen() {
         ) : null}
 
         {show.progress ? (
-          <>
+          <ProGate
+            gate="insights_full"
+            icon="trending-up-outline"
+            title="Lift progress over time"
+            subtitle="Per-exercise trends, best sets and sparklines from your full history."
+          >
             {category === "overview" ? <SectionHeader title="Lift Progress" /> : null}
             <Card style={styles.section}>
               <View style={styles.cardHeader}>
@@ -858,11 +877,17 @@ export default function InsightsScreen() {
                 </Text>
               )}
             </Card>
-          </>
+          </ProGate>
         ) : null}
 
         {/* Personal records */}
         {show.records ? (
+          <ProGate
+            gate="insights_full"
+            icon="trophy-outline"
+            title="Personal records"
+            subtitle="Your best set per exercise, PR deltas and new records."
+          >
           <Card style={styles.section}>
             <View style={styles.cardHeader}>
               <View style={styles.cardHeaderLeft}>
@@ -903,10 +928,17 @@ export default function InsightsScreen() {
               </Text>
             )}
           </Card>
+          </ProGate>
         ) : null}
 
         {/* Consistency */}
         {show.consistency ? (
+          <ProGate
+            gate="insights_full"
+            icon="flame-outline"
+            title="Consistency"
+            subtitle="Training days in a row, week dots and your rest-day rules."
+          >
           <Card style={styles.section}>
             <View style={styles.cardHeaderLeft}>
               <IconBadge name="flame" bg={colors.orangeSoft} color={colors.orange} size={32} rounded={false} />
@@ -937,6 +969,7 @@ export default function InsightsScreen() {
                 : "Rest days never break it — set yours in Settings."}
             </Text>
           </Card>
+          </ProGate>
         ) : null}
 
         <AskCoachRow

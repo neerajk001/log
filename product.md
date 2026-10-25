@@ -63,3 +63,33 @@ A user can, without any manual intervention from the developer:
 sign up → log a full week of daily + lift data → optionally import a plan →
 see an accurate weekly verdict that matches what a human coach would
 conclude from the same three data trends.
+
+## Monetization (freemium)
+
+- **Free forever:** daily/lift/activity logging, history, manual meal logging,
+  plan CRUD, 7-day insights, and the weekly verdict. These have zero marginal
+  server cost and are the acquisition loop.
+- **Pro:** the AI coach (chat, memory, tools), AI meal estimation, AI plan
+  generation and import, physique check-ins, the wide analytics ranges
+  (3M/1Y), lift-progress drilldowns, PR history, **eat-now suggestions**
+  (meals from the athlete's own history that fit today's remaining macros),
+  **next-set aims** (deterministic double progression from the last session),
+  and **eating-out mode** (a menu photo or restaurant description turned into
+  two orders inside the remaining macros).
+- **14-day Pro trial** on every new account, started when onboarding
+  completes — not at sign-up, so an abandoned setup doesn't burn it. When it
+  expires the account **falls back to Free**; it never loses access to its own
+  logged data or the verdict.
+- **Free AI allowance outside the trial:** 3 coach messages/week, 3 meal scans
+  /month, 2 eating-out checks /month, 1 AI plan /month, 2 plan imports /month,
+  no physique scans. Eat-now suggestions and next-set aims are Pro-only with
+  no free allowance (both are deterministic and DB-only, so they cost nothing
+  per call).
+  Enforced server-side (`requireFeature` on `ai_usage`), never by hiding UI
+  alone.
+- **The verdict stays free and rule-based.** It is the product; gating it would
+  remove the reason to install the app.
+- Billing is server-managed in phase 1 (no store SDK, OTA-shippable); store
+  purchases and receipt sync are phase 2. Contracts: `api.md`
+  (`/api/billing/*`, `402 UPGRADE_REQUIRED`), `database.md` (`ai_usage`),
+  `security.md` (quota as a cost control).

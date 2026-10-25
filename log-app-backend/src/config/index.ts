@@ -72,6 +72,26 @@ export const config = {
     // observed slow successes, or it converts slow replies into failures.
     stallMs: Math.max(0, parseInt(process.env.AI_STALL_MS || "0", 10) || 0),
   },
+  // Freemium: the trial is server-managed (no store dependency), and every
+  // billable AI path has a free allowance so the app can be tried without a
+  // purchase. Pro removes the AI limits and unlocks the wide analytics ranges.
+  billing: {
+    trialDays: Math.max(0, parseInt(process.env.BILLING_TRIAL_DAYS || "14", 10) || 14),
+    // Flipped on once store products exist; the paywall then shows a purchase CTA.
+    purchaseEnabled: process.env.BILLING_PURCHASE_ENABLED === "true",
+    /** Free-tier AI allowance per period (chat is weekly, the rest monthly). */
+    freeLimits: {
+      chat: Math.max(0, parseInt(process.env.BILLING_FREE_CHAT || "3", 10) || 3),
+      meal_scan: Math.max(0, parseInt(process.env.BILLING_FREE_MEAL_SCANS || "3", 10) || 3),
+      eating_out: Math.max(0, parseInt(process.env.BILLING_FREE_EATING_OUT || "2", 10) || 2),
+      plan_generate: Math.max(0, parseInt(process.env.BILLING_FREE_PLAN_GENERATIONS || "1", 10) || 1),
+      plan_parse: Math.max(0, parseInt(process.env.BILLING_FREE_PLAN_IMPORTS || "2", 10) || 2),
+      physique: 0,
+    },
+    /** Free-tier analytics windows. */
+    freeAnalyticsDays: 7,
+    freeLiftProgressDays: 30,
+  },
   // Food lookup: Open Food Facts first (free), optional web-search fallback.
   food: {
     offUserAgent: process.env.OFF_USER_AGENT || "LogApp/1.0 (meal logging)",

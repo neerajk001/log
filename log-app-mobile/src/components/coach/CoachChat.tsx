@@ -24,6 +24,7 @@ import { Banner, IconBadge } from "../ui/primitives";
 import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
+import { useEntitlement } from "../../hooks/useEntitlement";
 import { useMealsApi } from "../../api/meals";
 import { pickPhoto, preparePhoto, type PhotoSource, type UploadPhoto } from "../../utils/image";
 import { filePart } from "../../utils/upload";
@@ -84,6 +85,11 @@ export function CoachChat({
   const mealsApi = useMealsApi();
   const posthog = usePostHog();
   const insets = useSafeAreaInsets();
+  const { isLocked } = useEntitlement();
+  // Chat and meal scans have separate allowances: running out of chat must not
+  // take away meal logging, which is a different endpoint.
+  const chatLocked = isLocked("chat");
+  const scanLocked = isLocked("meal_scan");
   const [input, setInput] = useState(initialMessage ?? "");
   const [menuOpen, setMenuOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -98,6 +104,11 @@ export function CoachChat({
     const photo = pendingPhoto;
     if (loading || streaming || photoBusy || photoBusyRef.current) return;
     if (!caption && !photo) return;
+    // Out of allowance: send them to the paywall instead of a 402 mid-stream.
+    if (photo ? scanLocked : chatLocked) {
+      router.navigate("/paywall" as never);
+      return;
+    }
     setInput("");
     setPendingPhoto(null);
     if (!photo) {
@@ -334,13 +345,36 @@ export function CoachChat({
           </View>
         ) : null}
 
+        {chatLocked || scanLocked ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="See what Pro includes"
+            onPress={() => router.navigate("/paywall" as never)}
+            style={styles.lockedNotice}
+          >
+            <Ionicons name="lock-closed-outline" size={15} color={colors.primary} />
+            <Text style={styles.lockedText} numberOfLines={2}>
+              {chatLocked
+                ? "You've used this week's free coach messages."
+                : "You've used this month's free meal scans."}
+            </Text>
+            <Text style={styles.lockedAction}>See Pro</Text>
+          </Pressable>
+        ) : null}
+
         <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
           <IconButton
             name={photoBusy ? "hourglass-outline" : "camera-outline"}
             accessibilityLabel="Log a meal from a photo"
             size={26}
             color={photoBusy ? colors.textMuted : colors.text}
-            onPress={photoBusy ? undefined : pickMealPhoto}
+            onPress={
+              photoBusy
+                ? undefined
+                : scanLocked
+                  ? () => router.navigate("/paywall" as never)
+                  : pickMealPhoto
+            }
           />
           <TextInput
             value={input}
@@ -473,6 +507,19 @@ const useStyles = makeUseStyles((t) =>
       borderTopColor: t.colors.border,
       backgroundColor: t.colors.surface,
     },
+    lockedNotice: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginHorizontal: spacing.screen,
+      marginTop: spacing.sm,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.md,
+      backgroundColor: t.colors.primarySoft,
+    },
+    lockedText: { flex: 1, fontSize: 12, color: t.colors.text },
+    lockedAction: { fontSize: 12, fontWeight: "700", color: t.colors.primary },
     attachRow: {
       flexDirection: "row",
       alignItems: "center",

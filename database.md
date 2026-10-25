@@ -18,7 +18,26 @@ and to store app-specific profile fields.
 | clerk_user_id    | text, unique, not null | Clerk's user ID |
 | protein_target_g | integer, nullable | user-set daily protein target |
 | calorie_target   | integer, nullable | user-set daily calorie target |
+| plan_tier        | enum `PlanTier` (`free`\|`pro`), default `free` | entitlement; `pro` only honoured while `pro_until` is null or future |
+| trial_ends_at    | timestamptz, nullable | server-managed 14-day trial, started when onboarding completes |
+| pro_until        | timestamptz, nullable | paid subscription window (written by the store sync) |
 | created_at       | timestamptz, default now() | |
+
+### `ai_usage`
+
+Free-tier AI quota, one row per user/feature/period. Pro and active-trial users
+never write here — their requests are unlimited.
+
+| column       | type          | notes                                |
+|--------------|---------------|----------------------------------------|
+| id           | uuid, PK      | |
+| user_id      | uuid, FK → users.id, not null | |
+| feature      | text, not null | `chat` \| `meal_scan` \| `eating_out` \| `plan_generate` \| `plan_parse` \| `physique` |
+| period_start | date, not null | UTC Monday for `chat`, 1st of the month otherwise |
+| count        | integer, default 0 | |
+| updated_at   | timestamptz, default now() | |
+
+Unique on `(user_id, feature, period_start)`.
 
 ### `daily_logs`
 

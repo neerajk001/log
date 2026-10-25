@@ -415,6 +415,16 @@ export const onboardingSchema = z.object({
 
 export type OnboardingInput = z.infer<typeof onboardingSchema>;
 
+/**
+ * Dev-only entitlement switch (`POST /api/billing/dev/simulate`). Each mode
+ * reproduces one real state so every gate can be exercised without waiting.
+ */
+export const billingSimulateSchema = z.object({
+  mode: z.enum(["free", "trial", "trial_expired", "pro"]),
+});
+
+export type DevPlanMode = z.infer<typeof billingSimulateSchema>["mode"];
+
 export const coachChatSchema = z.object({
   message: z.string().min(1).max(2000),
   sessionId: z.string().uuid().optional(),

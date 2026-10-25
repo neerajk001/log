@@ -15,6 +15,7 @@ import {
   Tag,
 } from "../../src/components/ui/primitives";
 import { useLiftProgress } from "../../src/hooks/useLiftProgress";
+import { useEntitlement } from "../../src/hooks/useEntitlement";
 import {
   formatProgressBest,
   progressChange,
@@ -32,8 +33,21 @@ type ProgressRange = (typeof RANGES)[number]["value"];
 
 /** Every exercise with enough history to show a trend. */
 export default function LiftProgressScreen() {
-  const [range, setRange] = useState<ProgressRange>("90d");
-  const days = RANGES.find((r) => r.value === range)?.days ?? 90;
+  const [requested, setRequested] = useState<ProgressRange>("90d");
+  const { isLocked } = useEntitlement();
+  // 90-day and 1-year windows are Pro. The Free account always sees 30D — the
+  // server clamps the same way, so the label and the data can never disagree.
+  const locked = isLocked("lift_progress_full");
+  const range: ProgressRange = locked ? "30d" : requested;
+  const days = RANGES.find((r) => r.value === range)?.days ?? 30;
+
+  const changeRange = (next: ProgressRange) => {
+    if (locked && next !== "30d") {
+      router.navigate("/paywall" as never);
+      return;
+    }
+    setRequested(next);
+  };
   const { data, loading, error, refetch } = useLiftProgress(days);
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -61,9 +75,14 @@ export default function LiftProgressScreen() {
 
         <SegmentedControl
           value={range}
-          onChange={setRange}
+          onChange={changeRange}
           options={RANGES.map((r) => ({ value: r.value, label: r.label }))}
         />
+        {locked ? (
+          <Text style={[typography.caption, styles.gateNote]}>
+            90-day and 1-year windows are part of Pro.
+          </Text>
+        ) : null}
 
         {error ? (
           <ErrorState message={error} onRetry={refetch} />
@@ -133,6 +152,7 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
+    gateNote: { color: t.colors.textDim, marginTop: -spacing.sm },
     listCard: { overflow: "hidden" },
     row: {
       flexDirection: "row",

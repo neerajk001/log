@@ -3139,6 +3139,177 @@ async function loadMealDayContext(
   };
 }
 
+const EATING_OUT_SYSTEM = `You help an athlete order at a restaurant without blowing today's calorie and protein budget.
+
+Return ONLY a JSON object, no prose and no markdown fences, matching exactly:
+{
+  "restaurant": "string",
+  "note": "string (optional)",
+  "options": [
+    {
+      "title": "string",
+      "order": "string",
+      "items": [ { "name": "string", "quantity": "string", "calories": number, "protein_g": number } ],
+      "calories": number,
+      "protein_g": number
+    }
+  ]
+}
+
+Rules:
+- Give exactly 2 options. Each is a complete order the athlete can read out or tap through.
+- When REMAINING calories/protein are provided, both options must fit inside them with room to spare;
+  prefer high-protein choices that use most of the remaining calories.
+- With no targets, give two high-protein, moderate-calorie options.
+- "order" is what to say to the server, including the side or swap that keeps the meal in budget.
+- "quantity" states the assumed portion (e.g. "1 bowl", "150 g"), and estimates stay realistic.
+- If a menu photo is provided, only use dishes that appear on it. If the athlete names a restaurant or
+  dishes, use those; otherwise use typical menu choices.
+- "calories" and "protein_g" must equal the sum of the items.
+- Never invent prices, nutrition-label values you cannot read, or medical claims.`;
+
+export interface EatingOutOption {
+  title: string;
+  order: string;
+  items: MealItemDraft[];
+  calories: number;
+  protein_g: number;
+}
+
+export interface EatingOutAnalysis {
+  restaurant: string;
+  note?: string;
+  options: EatingOutOption[];
+  /** Targets + what was already logged today, so the app can show what's left. */
+  day: MealDayContext | null;
+}
+
+function remainingLine(day: MealDayContext): string | null {
+  const parts: string[] = [];
+  if (day.calorie_target != null) {
+    const left = Math.max(0, day.calorie_target - (day.calories ?? 0));
+    parts.push(`${left} kcal`);
+  }
+  if (day.protein_target_g != null) {
+    const left = Math.max(0, day.protein_target_g - (day.protein_g ?? 0));
+    parts.push(`${left} g protein`);
+  }
+  return parts.length > 0 ? `REMAINING TODAY: ${parts.join(", ")}.` : null;
+}
+
+/**
+ * Restaurant/menu helper: reads a menu photo and/or a short order description
+ * and returns two ways to order inside the athlete's remaining macros. The
+ * image is transient (never stored), exactly like the meal-photo path.
+ */
+export async function analyzeEatingOut(
+  userId: string,
+  imageBuffer: Buffer | undefined,
+  mimeType: string | undefined,
+  description?: string,
+  localDate?: string,
+): Promise<EatingOutAnalysis> {
+  const today = localDate && isCalendarDate(localDate) ? localDate : fmtDate(new Date());
+  const { day, promptLine: mealContext, memoryLine } = await loadMealDayContext(userId, today);
+  const note = cleanDescription(description);
+  const remaining = remainingLine(day);
+  const text = [
+    note
+      ? `The athlete is eating out and says: ${note}`
+      : "The athlete is eating out. Use the menu photo to find two orders.",
+    remaining,
+    mealContext,
+    memoryLine,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const content: InputPart[] = [{ type: "input_text", text }];
+  if (imageBuffer && mimeType) {
+    content.push({
+      type: "input_image",
+      image_url: `data:${mimeType};base64,${imageBuffer.toString("base64")}`,
+    });
+  }
+
+  const raw = await callModel(
+    EATING_OUT_SYSTEM,
+    [{ role: "user", content }],
+    // Same reasoning headroom as the meal photo path: a thinking model can spend
+    // most of the budget before it writes the JSON.
+    3000,
+    {
+      json: true,
+      model: imageBuffer ? config.models.mealVision : config.models.meal,
+      thinking: false,
+    },
+  );
+
+  let parsed: { restaurant?: unknown; note?: unknown; options?: unknown };
+  try {
+    parsed = JSON.parse(raw) as typeof parsed;
+  } catch {
+    throw new AppError(
+      502,
+      "EATING_OUT_FAILED",
+      "Couldn't read that menu. Try again, or type the restaurant and what you fancy.",
+    );
+  }
+
+  if (!Array.isArray(parsed.options)) {
+    throw new AppError(
+      422,
+      "EATING_OUT_FAILED",
+      "Couldn't find an order that fits. Try another photo or describe the menu.",
+    );
+  }
+
+  const options: EatingOutOption[] = [];
+  for (const entry of parsed.options.slice(0, 2)) {
+    if (!entry || typeof entry !== "object") continue;
+    const option = entry as Record<string, unknown>;
+    const items = mealItemsFromArgs(option.items);
+    if (!items) continue;
+    const title =
+      typeof option.title === "string" && option.title.trim()
+        ? option.title.trim().slice(0, 120)
+        : "Option";
+    const order =
+      typeof option.order === "string" && option.order.trim()
+        ? option.order.trim().slice(0, 500)
+        : title;
+    // Recompute totals from the items — never trust a model-supplied sum.
+    const calories = items.reduce((sum, item) => sum + item.calories, 0);
+    if (calories <= 0) continue;
+    options.push({
+      title,
+      order,
+      items,
+      calories,
+      protein_g: Math.round(items.reduce((sum, item) => sum + item.protein_g, 0)),
+    });
+  }
+
+  if (options.length === 0) {
+    throw new AppError(
+      422,
+      "EATING_OUT_FAILED",
+      "Couldn't find an order that fits. Try another photo or describe the restaurant.",
+    );
+  }
+
+  const restaurant =
+    typeof parsed.restaurant === "string" && parsed.restaurant.trim()
+      ? parsed.restaurant.trim().slice(0, 120)
+      : "Eating out";
+  const noteOut =
+    typeof parsed.note === "string" && parsed.note.trim()
+      ? parsed.note.trim().slice(0, 300)
+      : undefined;
+
+  return { restaurant, ...(noteOut ? { note: noteOut } : {}), options, day };
+}
+
 /**
  * Estimates a meal from a photo (+ optional description). The image is sent to
  * the model and the buffer is discarded — never stored.

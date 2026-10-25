@@ -11,15 +11,26 @@ import { SettingField } from "../src/components/SettingField";
 import { SegmentedControl, Chip, ChipRow } from "../src/components/ui/controls";
 import { Banner, Button, Card, Divider, IconBadge, ListRow, LoadingState, ErrorState } from "../src/components/ui/primitives";
 import { useMe } from "../src/hooks/useMe";
+import { useEntitlement } from "../src/hooks/useEntitlement";
+import { useBillingApi } from "../src/api/billing";
 import { lightTick, useHapticsPref } from "../src/hooks/useHaptics";
 import { setDevPreview } from "../src/state/onboarding";
 import { clearAllCache } from "../src/api/cache";
+import type { DevPlanMode } from "../src/api/types";
 
 const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
   { value: "trueBlack", label: "True Black" },
+];
+
+/** Dev-only: the four states worth exercising by hand. */
+const DEV_PLANS: { value: DevPlanMode; label: string }[] = [
+  { value: "free", label: "Free" },
+  { value: "trial", label: "Trial" },
+  { value: "trial_expired", label: "Ended" },
+  { value: "pro", label: "Pro" },
 ];
 
 /** Sunday-first, matching the streak's weekday numbering (0 = Sun). */
@@ -44,6 +55,39 @@ export default function SettingsScreen() {
   const [cacheCleared, setCacheCleared] = useState(false);
   /** A failed preference save, surfaced instead of silently snapping back. */
   const [writeError, setWriteError] = useState<string | null>(null);
+  const billingApi = useBillingApi();
+  const { isPro, isTrial, trialDaysLeft, refetch: refetchBilling } = useEntitlement();
+
+  const planValue = isPro ? (isTrial ? `${trialDaysLeft ?? 0}d` : "Active") : "Free";
+  const planSubtitle = isPro
+    ? isTrial
+      ? `Pro trial · ${trialDaysLeft ?? 0} ${trialDaysLeft === 1 ? "day" : "days"} left.`
+      : "Every Pro feature is unlocked."
+    : "AI coach, meal scans, plan generation and full analytics.";
+
+  // Which simulated state the account is in right now (dev section highlight).
+  const devPlanState: DevPlanMode = profile?.is_trial
+    ? "trial"
+    : profile?.is_pro
+      ? "pro"
+      : profile?.trial_ends_at
+        ? "trial_expired"
+        : "free";
+
+  /** Dev-only entitlement switch; the server 404s this in production. */
+  const simulatePlan = useCallback(
+    async (mode: DevPlanMode) => {
+      setWriteError(null);
+      try {
+        await billingApi.simulatePlan(mode);
+        lightTick();
+        await Promise.all([refetchBilling(), refetch()]);
+      } catch (err) {
+        setWriteError(err instanceof Error ? err.message : "Couldn't change the plan.");
+      }
+    },
+    [billingApi, refetchBilling, refetch],
+  );
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const version = Constants.expoConfig?.version ?? "1.0.0";
@@ -157,6 +201,19 @@ export default function SettingsScreen() {
             />
           </>
         )}
+
+        <Text style={styles.sectionLabel}>Plan</Text>
+        <Card padded={false}>
+          <ListRow
+            icon="diamond-outline"
+            iconBg={colors.primarySoft}
+            iconColor={colors.primary}
+            title="Repora Pro"
+            subtitle={planSubtitle}
+            value={planValue}
+            onPress={() => router.navigate("/paywall" as never)}
+          />
+        </Card>
 
         <Text style={styles.sectionLabel}>AI Coach</Text>
         <Card padded={false}>
@@ -340,6 +397,24 @@ export default function SettingsScreen() {
                   router.replace("/(tabs)/today" as never);
                 }}
               />
+            </Card>
+
+            <Card style={styles.restCard}>
+              <Text style={typography.bodyStrong}>Test plan state</Text>
+              <Text style={typography.small}>
+                Switch the entitlement to see every gate. AI counters reset each time, so a
+                used-up state can be re-tested immediately.
+              </Text>
+              <ChipRow style={styles.restRow}>
+                {DEV_PLANS.map((p) => (
+                  <Chip
+                    key={p.value}
+                    label={p.label}
+                    active={devPlanState === p.value}
+                    onPress={() => void simulatePlan(p.value)}
+                  />
+                ))}
+              </ChipRow>
             </Card>
           </>
         ) : null}

@@ -5,6 +5,7 @@ import { prisma } from "../db/client";
 import { requireAuth } from "../middleware/auth";
 import { AppError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
+import { requireFeature } from "../middleware/entitlements";
 import { validate } from "../middleware/validate";
 import {
     parsePlanPdf,
@@ -161,6 +162,7 @@ router.post(
   "/parse",
   requireAuth,
   parseRateLimit,
+  requireFeature("plan_parse"),
   (req, res, next) => {
     upload.single("file")(req, res, (err) => {
       if (err instanceof multer.MulterError) {

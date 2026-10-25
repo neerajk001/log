@@ -12,6 +12,8 @@ import { OptionCard } from "../../src/components/OptionCard";
 import { StepScaffold } from "../../src/components/onboarding/StepScaffold";
 import { useCoachProfile } from "../../src/hooks/useCoachProfile";
 import { useCoachApi } from "../../src/api/coach";
+import { useEntitlement } from "../../src/hooks/useEntitlement";
+import { isUpgradeRequired } from "../../src/api/client";
 import { setPendingPlan } from "../../src/state/parsedPlan";
 import { parsePositiveInt, parsePositiveNumber } from "../../src/utils/parse";
 import { editorWeightsFromExercise } from "../../src/utils/planTargets";
@@ -151,6 +153,7 @@ function PlanBuilderWizard({
   const { typography } = useTheme();
   const styles = useStyles();
   const coachApi = useCoachApi();
+  const { isLocked } = useEntitlement();
 
   const [step, setStep] = useState(1);
   const [goals, setGoals] = useState<string[]>(parseGoals(initial?.goal));
@@ -200,6 +203,11 @@ function PlanBuilderWizard({
   }, [onSave, payload]);
 
   const onGeneratePlan = useCallback(async () => {
+    // Out of free plans this month: the paywall is the honest next step.
+    if (isLocked("plan_generate")) {
+      router.navigate("/paywall" as never);
+      return;
+    }
     setBusy("plan");
     setError(null);
     try {
@@ -216,14 +224,23 @@ function PlanBuilderWizard({
       });
       router.navigate("/plan/preview" as never);
     } catch (err) {
+      if (isUpgradeRequired(err)) {
+        router.navigate("/paywall" as never);
+        return;
+      }
       setError(err instanceof Error ? err.message : "Couldn't generate a plan. Try again.");
     } finally {
       setBusy(null);
     }
-  }, [onSave, payload, coachApi, goals, notes]);
+  }, [onSave, payload, coachApi, goals, notes, isLocked]);
 
   const onPickPhoto = useCallback(
     async (source: PhotoSource) => {
+      // Photo check-ins are Pro only; don't start the camera for a 402.
+      if (isLocked("physique")) {
+        router.navigate("/paywall" as never);
+        return;
+      }
       setError(null);
       try {
         const picked = await pickPhoto(source);
@@ -246,12 +263,16 @@ function PlanBuilderWizard({
         setBusy("photo");
         setReading(await coachApi.analyzePhoto(form));
       } catch (err) {
+        if (isUpgradeRequired(err)) {
+          router.navigate("/paywall" as never);
+          return;
+        }
         setError(err instanceof Error ? err.message : "Couldn't analyze that photo.");
       } finally {
         setBusy(null);
       }
     },
-    [coachApi, notes],
+    [coachApi, notes, isLocked],
   );
 
   /** Snap it or pick one — the camera is offered first. */

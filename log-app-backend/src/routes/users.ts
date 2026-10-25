@@ -4,6 +4,8 @@ import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { onboardingSchema, updateMeSchema, type OnboardingInput } from "../validation/schemas";
 import { prisma } from "../db/client";
+import { config } from "../config";
+import { isOnTrial, isPro, trialDaysLeft } from "../services/entitlements";
 
 const router = Router();
 
@@ -16,6 +18,9 @@ const userSelect = {
   mealTrackingEnabled: true,
   aiCoachEnabled: true,
   trackWeight: true,
+  planTier: true,
+  trialEndsAt: true,
+  proUntil: true,
   onboardedAt: true,
 } satisfies Prisma.UserSelect;
 
@@ -31,6 +36,12 @@ function serializeUser(user: SelectedUser) {
     meal_tracking_enabled: user.mealTrackingEnabled,
     ai_coach_enabled: user.aiCoachEnabled,
     track_weight: user.trackWeight,
+    plan_tier: user.planTier,
+    trial_ends_at: user.trialEndsAt ? user.trialEndsAt.toISOString() : null,
+    pro_until: user.proUntil ? user.proUntil.toISOString() : null,
+    is_pro: isPro(user),
+    is_trial: isOnTrial(user),
+    trial_days_left: trialDaysLeft(user),
     onboarded_at: user.onboardedAt ? user.onboardedAt.toISOString() : null,
   };
 }
@@ -133,6 +144,13 @@ router.post(
             userId: req.userId,
           },
           update: profileData,
+        }),
+        // The trial starts when setup finishes, not at sign-up: a trial that ran
+        // during an abandoned onboarding would expire before any value is seen.
+        // Guarded on null so re-running onboarding never restarts it.
+        prisma.user.updateMany({
+          where: { id: req.userId, trialEndsAt: null },
+          data: { trialEndsAt: new Date(Date.now() + config.billing.trialDays * 86_400_000) },
         }),
       ]);
 

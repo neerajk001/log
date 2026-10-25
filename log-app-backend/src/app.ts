@@ -20,6 +20,7 @@ import mealsRouter from "./routes/meals";
 import trendsRouter from "./routes/trends";
 import verdictRouter from "./routes/verdict";
 import coachRouter from "./routes/coach";
+import billingRouter from "./routes/billing";
 
 const app = express();
 const READINESS_REPORT_INTERVAL_MS = 5 * 60 * 1000;
@@ -118,6 +119,7 @@ app.use("/api/meals", mealsRouter);
 app.use("/api/trends", trendsRouter);
 app.use("/api/verdict", verdictRouter);
 app.use("/api/coach", coachRouter);
+app.use("/api/billing", billingRouter);
 
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: { code: "NOT_FOUND", message: "Not found" } });

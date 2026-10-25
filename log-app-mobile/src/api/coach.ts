@@ -144,6 +144,9 @@ export async function streamCoachChat({
     } catch {
       // keep the generic message
     }
+    // Free allowance spent (e.g. from another device): keep the server's
+    // plain-language message and its code so the UI can offer the paywall.
+    if (res.status === 402) throw new CoachStreamError(text, "UPGRADE_REQUIRED");
     throw new Error(text);
   }
 
@@ -216,6 +219,7 @@ export async function streamCoachChat({
   if (serverError) throw new CoachStreamError(serverError, serverErrorCode);
   // The stream bypasses the API client, so the turn's own writes (a new session,
   // its title) are announced here instead.
-  invalidateResources(["coach"]);
+  // The turn also spends free-tier quota, so the "N left" readouts refetch too.
+  invalidateResources(["coach", "billing"]);
   return full;
 }

@@ -6,6 +6,7 @@ import { clearDecisions, listDecisions, recordDecision } from "../services/coach
 import { requireAuth } from "../middleware/auth";
 import { AppError, logUnhandledError } from "../middleware/errorHandler";
 import { rateLimit } from "../middleware/rateLimit";
+import { requireFeature } from "../middleware/entitlements";
 import { validate } from "../middleware/validate";
 import { analyzePhysique, generateCoachPlan, runCoachChatStream } from "../services/coach";
 import { incrementCounter } from "../utils/metricRegistry";
@@ -261,7 +262,9 @@ router.post(
   "/chat/stream",
   requireAuth,
   chatRateLimit,
+  // Validate before metering: a malformed body must not spend a free message.
   validate(coachChatSchema),
+  requireFeature("chat"),
   async (req: Request, res: Response) => {
     const { message, sessionId, localDate, agent, dismissedMeal, retry } = req.body as z.infer<
       typeof coachChatSchema
@@ -345,6 +348,7 @@ router.post(
   requireAuth,
   planRateLimit,
   validate(coachPlanSchema),
+  requireFeature("plan_generate"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { goal, notes } = req.body as z.infer<typeof coachPlanSchema>;
@@ -360,6 +364,7 @@ router.post(
   "/analyze",
   requireAuth,
   analyzeRateLimit,
+  requireFeature("physique"),
   receiveImage,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
