@@ -6,7 +6,6 @@ import { AppError } from "../middleware/errorHandler";
 export type Feature =
   | "chat"
   | "meal_scan"
-  | "eating_out"
   | "plan_generate"
   | "plan_parse"
   | "physique";
@@ -14,7 +13,6 @@ export type Feature =
 export const FEATURES: readonly Feature[] = [
   "chat",
   "meal_scan",
-  "eating_out",
   "plan_generate",
   "plan_parse",
   "physique",
@@ -101,8 +99,6 @@ function upgradeMessage(feature: Feature): string {
       return "You've used this week's free coach messages. Pro keeps the coach available whenever you need it.";
     case "meal_scan":
       return "You've used this month's free meal scans. Pro lets you scan as many meals as you like.";
-    case "eating_out":
-      return "You've used this month's free eating-out checks. Pro keeps them available whenever you eat out.";
     case "plan_generate":
       return "You've used this month's free AI plan. Pro builds as many plans as you need.";
     case "plan_parse":

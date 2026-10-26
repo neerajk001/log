@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
-import { radii, spacing } from "../../theme/spacing";
-import { Button, Card, IconBadge, ProgressBar, Tag } from "../ui/primitives";
-import { useEntitlement } from "../../hooks/useEntitlement";
+import { spacing } from "../../theme/spacing";
+import { Button, Card, IconBadge, ProgressBar } from "../ui/primitives";
 import { formatNumber } from "../../utils/derive";
 import { MAX_DAILY, parsePositiveInt } from "../../utils/parse";
 
@@ -120,8 +118,6 @@ export function NutritionCard({
   mealCount,
   onLogMeal,
   onPressMeals,
-  onEatNow,
-  onEatingOut,
   onEdit,
 }: {
   loggedCalories: number;
@@ -131,28 +127,10 @@ export function NutritionCard({
   mealCount: number;
   onLogMeal: () => void;
   onPressMeals: () => void;
-  /** Pro: meals from the athlete's own history that fit what's left. */
-  onEatNow: () => void;
-  /** Pro: two orders inside the remaining macros. */
-  onEatingOut: () => void;
   onEdit: (field: "calories" | "protein_g", value: number | null) => void;
 }) {
-  const { colors, typography } = useTheme();
+  const { colors } = useTheme();
   const styles = useStyles();
-  const { isPro, isLocked, remaining } = useEntitlement();
-  // Eat-now is Pro-only; eating out has its own 2/month Free allowance before
-  // the paywall, matching the other billable meal surface.
-  const eatOutLocked = isLocked("eating_out");
-  const eatOutLeft = remaining("eating_out");
-
-  const openPro = (action: () => void) => {
-    if (isPro) action();
-    else router.navigate("/paywall" as never);
-  };
-  const openEatingOut = () => {
-    if (eatOutLocked) router.navigate("/paywall" as never);
-    else onEatingOut();
-  };
 
   return (
     <Card style={styles.card}>
@@ -160,7 +138,6 @@ export function NutritionCard({
         <View style={styles.headerLeft}>
           <IconBadge name="restaurant" bg={colors.primarySoft} color={colors.primary} size={34} rounded={false} />
           <Text style={styles.title}>Nutrition</Text>
-          {!isPro ? <Tag label="PRO" bg={colors.surfaceAlt} text={colors.textDim} /> : null}
           {mealCount > 0 ? (
             <Pressable
               onPress={onPressMeals}
@@ -197,54 +174,6 @@ export function NutritionCard({
           onEdit={(v) => onEdit("protein_g", v)}
         />
       </View>
-
-      <View style={styles.proActions}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            isPro
-              ? "What can I eat now"
-              : "What can I eat now, included with Pro"
-          }
-          onPress={() => openPro(onEatNow)}
-          style={({ pressed }) => [styles.proAction, pressed && styles.proActionPressed]}
-        >
-          <Ionicons
-            name={isPro ? "sparkles-outline" : "lock-closed-outline"}
-            size={15}
-            color={isPro ? colors.primary : colors.textMuted}
-          />
-          <Text style={[typography.small, styles.proActionText]} numberOfLines={1}>
-            What can I eat?
-          </Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            eatOutLocked
-              ? "Eating out helper, included with Pro"
-              : eatOutLeft != null && !isPro
-                ? `Eating out helper, ${eatOutLeft} free checks left`
-                : "Eating out helper"
-          }
-          onPress={openEatingOut}
-          style={({ pressed }) => [styles.proAction, pressed && styles.proActionPressed]}
-        >
-          <Ionicons
-            name={eatOutLocked ? "lock-closed-outline" : "restaurant-outline"}
-            size={15}
-            color={eatOutLocked ? colors.textMuted : colors.primary}
-          />
-          <Text style={[typography.small, styles.proActionText]} numberOfLines={1}>
-            Eating out
-          </Text>
-          {!isPro && eatOutLeft != null ? (
-            <View style={styles.proActionBadge}>
-              <Text style={styles.proActionBadgeText}>{eatOutLeft}</Text>
-            </View>
-          ) : null}
-        </Pressable>
-      </View>
     </Card>
   );
 }
@@ -257,30 +186,6 @@ const useStyles = makeUseStyles((t) =>
     title: { fontSize: 17, fontWeight: "700", color: t.colors.text },
     mealChip: { flexDirection: "row", alignItems: "center", gap: 2, flexShrink: 1, minWidth: 0 },
     mealChipText: { ...t.typography.caption, color: t.colors.textDim },
-
-    proActions: { flexDirection: "row", gap: spacing.sm },
-    proAction: {
-      flex: 1,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-      height: 40,
-      borderRadius: radii.md,
-      backgroundColor: t.colors.surfaceAlt,
-    },
-    proActionPressed: { opacity: 0.75 },
-    proActionText: { fontWeight: "600", color: t.colors.text, flexShrink: 1 },
-    proActionBadge: {
-      minWidth: 18,
-      height: 18,
-      borderRadius: 9,
-      paddingHorizontal: 5,
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: t.colors.surface,
-    },
-    proActionBadgeText: { fontSize: 10, fontWeight: "700", color: t.colors.textDim },
 
     macros: { gap: spacing.md },
     macro: { gap: 6 },

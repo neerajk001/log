@@ -26,7 +26,6 @@ import type {
   LiftSetLoad,
   PlanSetTarget,
   PlateConfig,
-  ProgressionTarget,
 } from "../api/types";
 import { successTick } from "../hooks/useHaptics";
 import { SegmentedControl, StepField } from "./ui/controls";
@@ -120,7 +119,6 @@ export function ExerciseRow({
   muscle,
   lastLog,
   lastSession,
-  progression,
   setTargets,
   loggedSets,
   planDayId,
@@ -149,8 +147,6 @@ export function ExerciseRow({
   lastLog?: LiftSetLoad | null;
   /** The previous session in full (date + every set), for the reference line. */
   lastSession?: LastSessionSets | null;
-  /** Pro: the deterministic next-session target, used for pre-fill and the aim strip. */
-  progression?: ProgressionTarget | null;
   /** The plan's per-set targets, in order — shown as the caption under each row. */
   setTargets?: PlanSetTarget[] | null;
   loggedSets?: LiftLog[];
@@ -206,29 +202,21 @@ export function ExerciseRow({
     if (initializedScopeRef.current === scopeKey) return;
     initializedScopeRef.current = scopeKey;
     setHistoryOpen(false);
-    const mode = progression
-      ? progression.mode === "bw"
-        ? "bw"
-        : "kg"
-      : plateMode
-        ? "kg"
-        : inferLoadMode({ name, lastSets, lastLog, plannedWeight, setTargets });
+    const mode = plateMode ? "kg" : inferLoadMode({ name, lastSets, lastLog, plannedWeight, setTargets });
     loadModeRef.current = mode;
     setLoadMode(mode);
     const count = Math.max(1, sets - confirmedLogged.length);
     // Pre-fill set by set from the previous session (a pyramid comes back as it
-    // was lifted); extra rows repeat its last set. Pro gets the computed next
-    // target instead, so "add 2.5 kg" is already in the inputs. No history => the
-    // plan target.
+    // was lifted); extra rows repeat its last set. No history => the plan target.
     const seeds = buildSetSeeds({
       count,
       loggedSetCount: confirmedLogged.length,
-      lastSets: progression?.sets ?? lastSets,
-      setTargets: progression ? null : setTargets,
-      plannedWeight: progression ? null : plannedWeight,
-      plannedReps: progression ? null : reps,
-      lastLog: progression ? null : lastLog,
-      bodyweight: progression ? progression.mode === "bw" : !plateMode && mode === "bw",
+      lastSets,
+      setTargets,
+      plannedWeight,
+      plannedReps: reps,
+      lastLog,
+      bodyweight: !plateMode && mode === "bw",
       plate: plateMode,
       minPlatePosition: plateMin,
     });
@@ -256,7 +244,6 @@ export function ExerciseRow({
     plateMin,
     plateMode,
     plannedWeight,
-    progression,
     reps,
     scopeKey,
     setTargets,
@@ -546,27 +533,6 @@ export function ExerciseRow({
               ))}
             </View>
           ) : null}
-        </View>
-      ) : null}
-
-      {progression ? (
-        <View style={styles.aimStrip}>
-          <View style={styles.aimIcon}>
-            <Ionicons
-              name={progression.added_load ? "trending-up" : "flag"}
-              size={15}
-              color={colors.primary}
-            />
-          </View>
-          <View style={styles.aimMain}>
-            <View style={styles.aimTitleRow}>
-              <Text style={styles.aimLabel}>AIM TODAY</Text>
-              <Text style={styles.aimValue}>{progression.headline}</Text>
-            </View>
-            <Text style={styles.aimReason} numberOfLines={2}>
-              {progression.reason}
-            </Text>
-          </View>
         </View>
       ) : null}
 
@@ -910,29 +876,6 @@ const useStyles = makeUseStyles((t) =>
     setPillIndex: { fontSize: 10, fontWeight: "700", color: t.colors.textMuted },
     setPillValue: { fontSize: 12, fontWeight: "600", color: t.colors.text },
     tags: { flexDirection: "row", gap: spacing.xs, marginTop: 2, flexWrap: "wrap" },
-    aimStrip: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: spacing.sm,
-      marginTop: spacing.sm,
-      backgroundColor: t.colors.primarySoft,
-      borderRadius: radii.md,
-      paddingHorizontal: spacing.sm,
-      paddingVertical: spacing.sm,
-    },
-    aimIcon: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: t.colors.surface,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    aimMain: { flex: 1, gap: 1, minWidth: 0 },
-    aimTitleRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm, flexWrap: "wrap" },
-    aimLabel: { ...t.typography.caption, color: t.colors.primary, fontWeight: "700", letterSpacing: 0.4 },
-    aimValue: { ...t.typography.small, fontWeight: "700", color: t.colors.text },
-    aimReason: { ...t.typography.caption, color: t.colors.textDim },
     expanded: { marginTop: spacing.md, gap: spacing.sm },
     plateModeNote: { color: t.colors.textDim },
     loggedList: { gap: spacing.xs },

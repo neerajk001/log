@@ -76,13 +76,10 @@
   `analyze` 10/hr) — each call costs real money.
 - On top of the per-hour limiter, each billable AI endpoint enforces a
   per-period **free quota** (`requireFeature`, backed by `ai_usage`): `chat`
-  3/week, `meal_scan` 3/month, `eating_out` 2/month, `plan_generate` 1/month,
-  `plan_parse` 2/month, `physique` locked. Pro and active-trial accounts bypass
-  the quota. The quota check runs **after** the rate limiter, so an
-  abuse-rejected request never burns a unit. Pro-only surfaces with no free
-  allowance (`GET /api/meals/suggestions`, the next-set aims in
-  `GET /api/logs/lift/summary`) use `requirePro` / omit the field server-side —
-  the UI gate is never the only enforcement.
+  3/week, `meal_scan` 3/month, `plan_generate` 1/month, `plan_parse` 2/month,
+  `physique` locked. Pro and active-trial accounts bypass the quota. The quota
+  check runs **after** the rate limiter, so an abuse-rejected request never
+  burns a unit.
 - Quota counters are keyed by `req.userId`, never a client-supplied id, and are
   the only place a tier changes what the model may be asked to do.
 - The athlete context sent to the model is a bounded aggregate summary, not a raw

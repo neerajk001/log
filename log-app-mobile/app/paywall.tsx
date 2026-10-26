@@ -24,21 +24,6 @@ const BENEFITS: { icon: IoniconName; title: string; body: string }[] = [
     body: "Generate a training plan from your goal and equipment, or import one you already follow.",
   },
   {
-    icon: "nutrition-outline",
-    title: "What can I eat now?",
-    body: "Reuses meals you've logged before that fit what's left of today's calories and protein.",
-  },
-  {
-    icon: "trending-up-outline",
-    title: "Next-set aims",
-    body: "Turns your last session into today's target: when to add 2.5 kg, hold, or chase another rep.",
-  },
-  {
-    icon: "restaurant-outline",
-    title: "Eating out, handled",
-    body: "Snap the menu or name the place and get two orders that fit your remaining macros.",
-  },
-  {
     icon: "analytics-outline",
     title: "The full picture",
     body: "3-month and 1-year trends, per-exercise progress, personal records and consistency.",
@@ -148,7 +133,7 @@ export default function PaywallScreen() {
         <Text style={[typography.small, styles.footnote]}>
           {isPro
             ? "No charge today. Your account returns to the free plan automatically when the trial ends."
-            : "While you're not on Pro you still get 3 coach messages a week, 3 meal scans a month, 2 eating-out checks a month, 1 AI plan a month and 2 plan imports a month."}
+            : "While you're not on Pro you still get 3 coach messages a week, 3 meal scans a month, 1 AI plan a month and 2 plan imports a month."}
         </Text>
       </ScrollView>
     </View>

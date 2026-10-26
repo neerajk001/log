@@ -128,7 +128,6 @@ export interface UserProfile {
 export type ProFeature =
   | "chat"
   | "meal_scan"
-  | "eating_out"
   | "plan_generate"
   | "plan_parse"
   | "physique";
@@ -463,51 +462,6 @@ export interface MealAnalysis {
   } | null;
 }
 
-/** A meal the athlete has logged before, offered against today's remaining macros. */
-export interface MealSuggestion {
-  id: string;
-  date: string;
-  title: string;
-  items: MealItem[];
-  calories: number;
-  protein_g: number;
-  source: MealLog["source"];
-  last_logged: string;
-  remaining_after: { calories: number | null; protein_g: number | null };
-  fits: boolean;
-}
-
-export type MealSuggestionReason =
-  | "no_targets"
-  | "target_met"
-  | "no_history"
-  | "nothing_fits"
-  | null;
-
-export interface MealSuggestionsResponse {
-  targets: { calories: number | null; protein_g: number | null };
-  consumed: { calories: number; protein_g: number };
-  remaining: { calories: number | null; protein_g: number | null };
-  suggestions: MealSuggestion[];
-  reason: MealSuggestionReason;
-}
-
-/** One order that fits the athlete's remaining macros. */
-export interface EatingOutOption {
-  title: string;
-  order: string;
-  items: MealItem[];
-  calories: number;
-  protein_g: number;
-}
-
-export interface EatingOutAnalysis {
-  restaurant: string;
-  note?: string;
-  options: EatingOutOption[];
-  day?: MealAnalysis["day"];
-}
-
 /** A change the coach has prepared and the user must confirm. */
 export type CoachProposal = (
   | {
@@ -600,32 +554,12 @@ export interface LastSessionSets {
   sets: LiftSetLoad[];
 }
 
-/** One target set for the next session. */
-export interface ProgressionSet {
-  weight_kg: number | null;
-  reps: number;
-  plate_position?: number | null;
-}
-
-/** Deterministic next-session aim, computed from the previous session. */
-export interface ProgressionTarget {
-  mode: "kg" | "plate" | "bw";
-  from_date: string;
-  sets: ProgressionSet[];
-  /** Display-ready, e.g. "62.5 kg × 8". */
-  headline: string;
-  reason: string;
-  added_load: boolean;
-}
-
 /** Recent exercise names, plus the top set from each one's previous session. */
 export interface LiftSummary {
   names: string[];
   last_by_exercise: LiftLog[];
   /** Every set of each exercise's previous session, for set-by-set pre-filling. */
   last_sets_by_exercise: Record<string, LastSessionSets>;
-  /** Pro only: next-session aims, omitted entirely for Free accounts. */
-  progression_by_exercise?: Record<string, ProgressionTarget>;
 }
 
 /** One exercise's rollup from the Insights metrics endpoint. */

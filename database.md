@@ -32,7 +32,7 @@ never write here — their requests are unlimited.
 |--------------|---------------|----------------------------------------|
 | id           | uuid, PK      | |
 | user_id      | uuid, FK → users.id, not null | |
-| feature      | text, not null | `chat` \| `meal_scan` \| `eating_out` \| `plan_generate` \| `plan_parse` \| `physique` |
+| feature      | text, not null | `chat` \| `meal_scan` \| `plan_generate` \| `plan_parse` \| `physique` |
 | period_start | date, not null | UTC Monday for `chat`, 1st of the month otherwise |
 | count        | integer, default 0 | |
 | updated_at   | timestamptz, default now() | |

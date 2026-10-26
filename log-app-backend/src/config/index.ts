@@ -83,7 +83,6 @@ export const config = {
     freeLimits: {
       chat: Math.max(0, parseInt(process.env.BILLING_FREE_CHAT || "3", 10) || 3),
       meal_scan: Math.max(0, parseInt(process.env.BILLING_FREE_MEAL_SCANS || "3", 10) || 3),
-      eating_out: Math.max(0, parseInt(process.env.BILLING_FREE_EATING_OUT || "2", 10) || 2),
       plan_generate: Math.max(0, parseInt(process.env.BILLING_FREE_PLAN_GENERATIONS || "1", 10) || 1),
       plan_parse: Math.max(0, parseInt(process.env.BILLING_FREE_PLAN_IMPORTS || "2", 10) || 2),
       physique: 0,

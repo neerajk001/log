@@ -32,8 +32,6 @@ import { requestIdForAttempt, parsePositiveInt, parsePositiveNumber } from "../.
 import { formatMediumDate } from "../../src/utils/date";
 import { successTick } from "../../src/hooks/useHaptics";
 import { AskCoachRow } from "../../src/components/coach/AskCoachRow";
-import { LockedCard } from "../../src/components/billing/ProGate";
-import { useEntitlement } from "../../src/hooks/useEntitlement";
 
 interface QuickSet {
   key: string;
@@ -74,13 +72,7 @@ export default function LiftScreen() {
     clearMutationError,
     refetch: refetchLifts,
   } = useLiftLogs(logDate);
-  const {
-    names: recent,
-    lastByExercise,
-    lastSetsByExercise,
-    progressionByExercise,
-  } = useRecentExercises();
-  const { isPro } = useEntitlement();
+  const { names: recent, lastByExercise, lastSetsByExercise } = useRecentExercises();
   const quickRecent = useMemo(
     () =>
       recent.filter(
@@ -106,9 +98,6 @@ export default function LiftScreen() {
   const quickMode: LoadMode =
     quickModeOverride ?? (isBodyweightName(quickName) ? "bw" : "kg");
   const quickBodyweight = quickMode === "bw";
-  const quickProgression = quickName.trim()
-    ? progressionByExercise.get(quickName.trim())
-    : undefined;
 
   const day = useMemo(() => {
     if (overrideDayId) return days.find((d) => d.id === overrideDayId) ?? rotatedDay;
@@ -148,17 +137,13 @@ export default function LiftScreen() {
     (name: string) => {
       if (name === quickName) return;
       setQuickName(name);
-      const progression = progressionByExercise.get(name);
-      const last = progression?.sets ?? lastSetsByExercise.get(name)?.sets ?? [];
-      // A Pro aim wins; otherwise last session, then the name heuristic. Plate
-      // sets are not quick-loggable (they need a position), but if one is
-      // selected by name anyway, treat it as weighted rather than bodyweight.
+      const last = lastSetsByExercise.get(name)?.sets ?? [];
+      // Last session wins; otherwise fall back to the name heuristic. Plate sets
+      // are not quick-loggable (they need a position), but if one is selected by
+      // name anyway, treat it as weighted rather than bodyweight.
       const hasPlate = last.some((set) => set.plate_position != null);
-      const mode: LoadMode = progression
-        ? progression.mode === "bw"
-          ? "bw"
-          : "kg"
-        : last.length > 0
+      const mode: LoadMode =
+        last.length > 0
           ? !hasPlate && last.every((set) => set.weight_kg == null)
             ? "bw"
             : "kg"
@@ -177,7 +162,7 @@ export default function LiftScreen() {
         })),
       );
     },
-    [lastSetsByExercise, progressionByExercise, quickName, quickSets],
+    [lastSetsByExercise, quickName, quickSets],
   );
 
   const quickLog = useCallback(async () => {
@@ -374,7 +359,6 @@ export default function LiftScreen() {
                     muscle={muscleGroupsForDay(day.day_name, [ex.name])[0]}
                     lastLog={lastByExercise.get(ex.name) ?? null}
                     lastSession={lastSetsByExercise.get(ex.name) ?? null}
-                    progression={progressionByExercise.get(ex.name) ?? null}
                     setTargets={ex.set_targets ?? null}
                     loggedSets={setsByExercise.get(ex.name) ?? []}
                     planDayId={day.id}
@@ -389,14 +373,6 @@ export default function LiftScreen() {
                 );
               })}
             </View>
-
-            {!isPro && lastSetsByExercise.size > 0 ? (
-              <LockedCard
-                title="Next-set aims"
-                subtitle="Pro reads your last session and tells you the weight and reps to aim for today."
-                icon="trending-up-outline"
-              />
-            ) : null}
 
             <AskCoachRow
               agent="training"
@@ -454,15 +430,6 @@ export default function LiftScreen() {
                 <Chip key={r} label={r} active={r === quickName} onPress={() => pickRecentExercise(r)} />
               ))}
             </ChipRow>
-          ) : null}
-          {quickProgression ? (
-            <View style={styles.quickAim}>
-              <Ionicons name="trending-up" size={14} color={colors.primary} />
-              <View style={styles.quickAimText}>
-                <Text style={styles.quickAimTitle}>Aim {quickProgression.headline}</Text>
-                <Text style={typography.caption}>{quickProgression.reason}</Text>
-              </View>
-            </View>
           ) : null}
           {quickSets.map((q, i) => (
             <View key={q.key} style={styles.quickSet}>
@@ -560,16 +527,6 @@ const useStyles = makeUseStyles((t) =>
     emptyWrap: { marginTop: spacing.lg },
     recentWrap: { gap: spacing.sm },
     quickCard: { gap: spacing.md },
-    quickAim: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: spacing.sm,
-      backgroundColor: t.colors.primarySoft,
-      borderRadius: radii.md,
-      padding: spacing.sm,
-    },
-    quickAimText: { flex: 1, gap: 1 },
-    quickAimTitle: { fontSize: 13, fontWeight: "700", color: t.colors.text },
     quickSet: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
     quickNum: { fontSize: 13, fontWeight: "700", color: t.colors.textDim, width: 16, textAlign: "center" },
     quickSmall: { flex: 1 },

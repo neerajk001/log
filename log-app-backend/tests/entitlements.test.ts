@@ -93,7 +93,6 @@ describe("periodStart", () => {
 
   it("buckets monthly quotas to the 1st of the month", () => {
     expect(periodStart("meal_scan", NOW).toISOString()).toBe("2026-10-01T00:00:00.000Z");
-    expect(periodStart("eating_out", NOW).toISOString()).toBe("2026-10-01T00:00:00.000Z");
     expect(periodStart("plan_generate", NOW).toISOString()).toBe("2026-10-01T00:00:00.000Z");
   });
 });
@@ -118,7 +117,6 @@ describe("limitFor", () => {
   it("returns the configured free allowance", () => {
     expect(limitFor("chat", false)).toBe(config.billing.freeLimits.chat);
     expect(limitFor("meal_scan", false)).toBe(config.billing.freeLimits.meal_scan);
-    expect(limitFor("eating_out", false)).toBe(config.billing.freeLimits.eating_out);
     expect(limitFor("plan_generate", false)).toBe(config.billing.freeLimits.plan_generate);
     expect(limitFor("plan_parse", false)).toBe(config.billing.freeLimits.plan_parse);
   });

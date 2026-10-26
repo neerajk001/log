@@ -16,11 +16,6 @@ import {
   type LiftLogUpdateInput,
 } from "../services/liftLogs";
 import { getLiftProgress } from "../services/liftProgress";
-import {
-  computeProgression,
-  type ProgressionPrescription,
-  type ProgressionTarget,
-} from "../services/liftProgression";
 import { assertRangeSize } from "../utils/range";
 
 const router = Router();
@@ -193,69 +188,6 @@ router.get(
   },
 );
 
-/** The active plan's prescriptions, keyed by exercise name (first match wins). */
-function planPrescriptions(plan: { planDays: { exercises: unknown }[] } | null) {
-  const map = new Map<string, ProgressionPrescription>();
-  if (!plan) return map;
-  for (const day of plan.planDays) {
-    if (!Array.isArray(day.exercises)) continue;
-    for (const raw of day.exercises) {
-      if (!raw || typeof raw !== "object") continue;
-      const exercise = raw as Record<string, unknown>;
-      const name = typeof exercise.name === "string" ? exercise.name.trim() : "";
-      if (!name || map.has(name)) continue;
-      const plateConfig =
-        exercise.plate_config && typeof exercise.plate_config === "object"
-          ? (exercise.plate_config as { min_position?: number; max_position?: number })
-          : null;
-      map.set(name, {
-        sets: typeof exercise.sets === "number" ? exercise.sets : 3,
-        reps: typeof exercise.reps === "string" ? exercise.reps : "8-12",
-        ...(typeof exercise.weight_kg === "number" ? { weight_kg: exercise.weight_kg } : {}),
-        ...(Array.isArray(exercise.set_targets)
-          ? {
-              set_targets: exercise.set_targets as {
-                weight_kg?: number | null;
-                reps?: string | null;
-              }[],
-            }
-          : {}),
-        ...(exercise.load_mode === "plate" ? { load_mode: "plate" as const } : {}),
-        ...(plateConfig ? { plate_config: plateConfig } : {}),
-      });
-    }
-  }
-  return map;
-}
-
-/**
- * Pro next-session aims ride with the summary so the Lift screen gets them in
- * the read it already makes. Free accounts get the exact same response without
- * the field, and the server — not the UI — decides who sees it.
- */
-async function progressionFor(
-  userId: string,
-  summary: Awaited<ReturnType<typeof getLiftSummary>>,
-): Promise<Record<string, ProgressionTarget> | null> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { planTier: true, trialEndsAt: true, proUntil: true },
-  });
-  if (!user || !isPro(user)) return null;
-
-  const plan = await prisma.workoutPlan.findFirst({
-    where: { userId, isActive: true },
-    select: { planDays: { select: { exercises: true } } },
-  });
-  const prescriptions = planPrescriptions(plan);
-  const progression: Record<string, ProgressionTarget> = {};
-  for (const [name, session] of Object.entries(summary.lastSetsByExercise)) {
-    const target = computeProgression(session.sets, session.date, prescriptions.get(name) ?? null);
-    if (target) progression[name] = target;
-  }
-  return progression;
-}
-
 router.get(
   "/lift/summary",
   requireAuth,
@@ -266,12 +198,10 @@ router.get(
       days: days ?? 120,
       before: before ?? new Date().toISOString().slice(0, 10),
     });
-    const progression = await progressionFor(req.userId, summary);
     res.json({
       names: summary.names,
       last_by_exercise: summary.lastByExercise.map(serializeLiftLog),
       last_sets_by_exercise: summary.lastSetsByExercise,
-      ...(progression ? { progression_by_exercise: progression } : {}),
     });
   },
 );

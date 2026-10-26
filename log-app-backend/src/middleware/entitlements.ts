@@ -36,33 +36,3 @@ export function requireFeature(feature: Feature) {
   };
 }
 
-/**
- * Pro-only surfaces with no free allowance (deterministic features such as the
- * eat-now suggestions). Must run after `requireAuth`; Pro and active-trial
- * accounts pass, everyone else gets the same 402 the client already routes to
- * the paywall.
- */
-export function requirePro(message = "This is part of Pro. Upgrade to unlock it.") {
-  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: req.userId },
-        select: { planTier: true, trialEndsAt: true, proUntil: true },
-      });
-
-      if (!user) {
-        next(new AppError(401, "UNAUTHORIZED", "Account not found. Please sign in again."));
-        return;
-      }
-
-      if (isPro(user)) {
-        next();
-        return;
-      }
-
-      next(new AppError(402, "UPGRADE_REQUIRED", message));
-    } catch (err) {
-      next(err);
-    }
-  };
-}

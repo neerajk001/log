@@ -3,7 +3,7 @@ import { useLiftLogsApi } from "../api/liftLogs";
 import { useDataSyncOnFocus } from "./useDataSync";
 import { useCurrentDate } from "./useCurrentDate";
 import { useLatest } from "./useLatest";
-import type { LastSessionSets, LiftLog, ProgressionTarget } from "../api/types";
+import type { LastSessionSets, LiftLog } from "../api/types";
 
 /**
  * Distinct exercises logged in the recent window (for quick re-entry), the top set
@@ -20,9 +20,6 @@ export function useRecentExercises(days = 120) {
   const [lastSetsByExercise, setLastSetsByExercise] = useState<Map<string, LastSessionSets>>(
     new Map(),
   );
-  const [progressionByExercise, setProgressionByExercise] = useState<
-    Map<string, ProgressionTarget>
-  >(new Map());
   const [error, setError] = useState<string | null>(null);
   const { begin, isCurrent } = useLatest();
   // Live "today": at midnight the window moves, so the "Last:" cue must refetch.
@@ -38,10 +35,6 @@ export function useRecentExercises(days = 120) {
         new Map(summary.last_by_exercise.map((log) => [log.exercise_name, log])),
       );
       setLastSetsByExercise(new Map(Object.entries(summary.last_sets_by_exercise ?? {})));
-      // Present for Pro only; Free keeps the ordinary last-session pre-fill.
-      setProgressionByExercise(
-        new Map(Object.entries(summary.progression_by_exercise ?? {})),
-      );
       setError(null);
     } catch (err) {
       if (!isCurrent(token)) return;
@@ -52,12 +45,5 @@ export function useRecentExercises(days = 120) {
 
   useDataSyncOnFocus(["lift"], load);
 
-  return {
-    names,
-    lastByExercise,
-    lastSetsByExercise,
-    progressionByExercise,
-    error,
-    refetch: load,
-  };
+  return { names, lastByExercise, lastSetsByExercise, error, refetch: load };
 }

@@ -73,23 +73,16 @@ conclude from the same three data trends.
   server cost and are the acquisition loop.
 - **Pro:** the AI coach (chat, memory, tools), AI meal estimation, AI plan
   generation and import, one-off physique check-ins, the wide analytics ranges
-  (3M/1Y), lift-progress drilldowns, PR history, **weekly encrypted physique
-  check-ins** (one photo per ISO week, compared with the previous check-in plus the logs),
-  **eat-now suggestions** (meals from the athlete's own history that fit
-  today's remaining macros), **next-set aims** (deterministic double progression
-  from the last session), and **eating-out mode** (a menu photo or restaurant
-  description turned into two orders inside the remaining macros).
+  (3M/1Y), lift-progress drilldowns, PR history, and **weekly encrypted physique
+  check-ins** (one photo per ISO week, compared with the previous check-in plus
+  the logs).
 - **14-day Pro trial** on every new account, started when onboarding
   completes — not at sign-up, so an abandoned setup doesn't burn it. When it
   expires the account **falls back to Free**; it never loses access to its own
   logged data or the verdict.
 - **Free AI allowance outside the trial:** 3 coach messages/week, 3 meal scans
-  /month, 2 eating-out checks /month, 1 AI plan /month, 2 plan imports /month,
-  no physique scans. Eat-now suggestions and next-set aims are Pro-only with
-  no free allowance (both are deterministic and DB-only, so they cost nothing
-  per call).
-  Enforced server-side (`requireFeature` on `ai_usage`), never by hiding UI
-  alone.
+  /month, 1 AI plan /month, 2 plan imports /month, no physique scans. Enforced
+  server-side (`requireFeature` on `ai_usage`), never by hiding UI alone.
 - **The verdict stays free and rule-based.** It is the product; gating it would
   remove the reason to install the app.
 - Billing is server-managed in phase 1 (no store SDK, OTA-shippable). Phase 2
