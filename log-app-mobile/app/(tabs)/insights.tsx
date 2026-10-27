@@ -13,7 +13,7 @@ import { router, type ErrorBoundaryProps } from "expo-router";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
-import { BarChart, DonutChart, Sparkline } from "../../src/components/ui/charts";
+import { BarChart, Sparkline } from "../../src/components/ui/charts";
 import { WeightChart } from "../../src/components/body/WeightChart";
 import {
   Banner,
@@ -43,7 +43,6 @@ import {
   progressChange,
   progressSparkValues,
 } from "../../src/utils/liftProgress";
-import { weekDayLabels } from "../../src/utils/date";
 import type { TrendBucket, TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -149,7 +148,6 @@ export default function InsightsScreen() {
   const rangeDays = RANGE_DAYS[range];
   const { profile } = useMe();
   const { isLocked } = useEntitlement();
-  const restDays = profile?.rest_days ?? [];
   const trackWeight = profile?.track_weight !== false;
 
   // The wider ranges are the Pro analytics gate. Keep every chip visible (it was
@@ -163,7 +161,7 @@ export default function InsightsScreen() {
     setRange(next);
   };
 
-  const { metrics, loading, error, refetch } = useInsights(rangeDays, restDays);
+  const { metrics, loading, error, refetch } = useInsights(rangeDays);
   const {
     data: liftProgress,
     loading: liftProgressLoading,
@@ -334,23 +332,7 @@ export default function InsightsScreen() {
   }, [series, bucket]);
 
   /* ------------------------------------------------------------- training */
-  // The set series is daily until 90 days, where it aggregates weekly (matching
-  // useInsights) — the title must follow the series, not the trends bucket.
-  const setsWeekly = rangeDays >= 90;
-  const setsTitle = setsWeekly ? "Sets per week" : "Sets by day";
   const progressExercises = liftProgress?.exercises.slice(0, 5) ?? [];
-  const muscleColors = [
-    colors.orange,
-    colors.blue,
-    colors.green,
-    colors.purple,
-    colors.pink,
-    colors.teal,
-    colors.amber,
-  ];
-  const donutSlices = metrics.muscles
-    .slice(0, 7)
-    .map((m, i) => ({ label: m.muscle, value: m.sets, color: muscleColors[i % muscleColors.length] }));
 
   const adherence = trends?.adherence_pct ?? null;
 
@@ -364,10 +346,8 @@ export default function InsightsScreen() {
     weight: (category === "overview" || category === "body" || category === "all") && trackWeight,
     nutrition: category === "overview" || category === "nutrition" || category === "all",
     nutritionHeading: category !== "training",
-    training: category === "training" || category === "all",
     progress: category === "overview" || category === "training" || category === "all",
     records: category === "training" || category === "all",
-    consistency: category === "training" || category === "all",
   };
   const bodyHeading =
     category === "body" ? "Body" : category === "nutrition" ? "Nutrition" : "Body & Nutrition";
@@ -765,103 +745,7 @@ export default function InsightsScreen() {
           </Card>
         ) : null}
 
-        {/* Training Performance */}
-        {show.training ? (
-          <>
-            <SectionHeader title="Training Performance" />
-
-            <Card style={styles.section}>
-              <View style={styles.cardHeaderLeft}>
-                <IconBadge name="bar-chart-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
-                <View style={styles.cardHeaderText}>
-                  <Text style={typography.bodyStrong}>{setsTitle}</Text>
-                  <Text style={typography.caption}>Total sets logged</Text>
-                </View>
-              </View>
-              <View style={styles.metricRow}>
-                <Text style={typography.metric}>
-                  {firstLoad ? "—" : formatNumber(metrics.sets)}
-                  <Text style={typography.metricUnit}> sets</Text>
-                </Text>
-              </View>
-              <Text style={[typography.small, styles.note]}>
-                {metrics.workouts} workout{metrics.workouts === 1 ? "" : "s"} · {RANGE_NOUN[range]}
-              </Text>
-              {loading && metrics.sets === 0 ? (
-                <LoadingState label="Crunching your numbers…" />
-              ) : metrics.sets > 0 ? (
-                <BarChart data={metrics.setsSeries} axis color={colors.primary} unit="sets" />
-              ) : (
-                <Text style={[typography.small, styles.note]}>No sets logged in this range yet.</Text>
-              )}
-            </Card>
-
-            <Card style={styles.section}>
-              <View style={styles.cardHeaderLeft}>
-                <IconBadge name="pie-chart-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
-                <View style={styles.cardHeaderText}>
-                  <Text style={typography.bodyStrong}>Muscle groups</Text>
-                  <Text style={typography.caption}>Sets logged per muscle group</Text>
-                </View>
-              </View>
-              {donutSlices.length > 0 ? (
-                <View style={styles.muscleWrap}>
-                  <DonutChart
-                    slices={donutSlices}
-                    size={124}
-                    thickness={17}
-                    centerTop={formatNumber(metrics.sets)}
-                    centerBottom="sets"
-                  />
-                  <View style={styles.legend}>
-                    {donutSlices.map((s) => {
-                      const slice = metrics.muscles.find((m) => m.muscle === s.label);
-                      return (
-                        <View key={s.label} style={styles.legendRow}>
-                          <View style={[styles.legendDot, { backgroundColor: s.color }]} />
-                          <Text style={[typography.small, styles.legendLabel]} numberOfLines={1}>
-                            {s.label}
-                          </Text>
-                          <Text style={typography.bodyStrong}>{s.value}</Text>
-                          <Text style={[typography.caption, styles.legendPct]}>{slice?.pct ?? 0}%</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              ) : (
-                <Text style={[typography.small, styles.note]}>
-                  No sets in this range yet — log a lift to see your breakdown.
-                </Text>
-              )}
-            </Card>
-
-            <Card style={styles.section}>
-              <View style={styles.cardHeaderLeft}>
-                <IconBadge name="trophy-outline" bg={colors.surfaceAlt} color={colors.text} size={32} rounded={false} />
-                <View style={styles.cardHeaderText}>
-                  <Text style={typography.bodyStrong}>Top exercises</Text>
-                  <Text style={typography.caption}>By sets logged · {RANGE_NOUN[range]}</Text>
-                </View>
-              </View>
-              {metrics.top.length > 0 ? (
-                <View style={styles.rankList}>
-                  {metrics.top.map((t, i) => (
-                    <View key={t.exercise} style={styles.rankRow}>
-                      <Text style={styles.rank}>{i + 1}</Text>
-                      <Text style={[typography.small, styles.rankName]} numberOfLines={1}>
-                        {t.exercise}
-                      </Text>
-                      <Text style={typography.bodyStrong}>{t.sets} sets</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <Text style={[typography.small, styles.note]}>No exercises logged in this range yet.</Text>
-              )}
-            </Card>
-          </>
-        ) : null}
+        {show.progress || show.records ? <SectionHeader title="Training" /> : null}
 
         {show.progress ? (
           <ProGate
@@ -870,7 +754,6 @@ export default function InsightsScreen() {
             title="Lift progress over time"
             subtitle="Per-exercise trends, best sets and sparklines from your full history."
           >
-            {category === "overview" ? <SectionHeader title="Lift Progress" /> : null}
             <Card style={styles.section}>
               <View style={styles.cardHeader}>
                 <View style={styles.cardHeaderLeft}>
@@ -1002,47 +885,6 @@ export default function InsightsScreen() {
                 Log some lifts and your best sets show up here.
               </Text>
             )}
-          </Card>
-          </ProGate>
-        ) : null}
-
-        {/* Consistency */}
-        {show.consistency ? (
-          <ProGate
-            gate="insights_full"
-            icon="flame-outline"
-            title="Consistency"
-            subtitle="Training days in a row, week dots and your rest-day rules."
-          >
-          <Card style={styles.section}>
-            <View style={styles.cardHeaderLeft}>
-              <IconBadge name="flame" bg={colors.orangeSoft} color={colors.orange} size={32} rounded={false} />
-              <View style={styles.cardHeaderText}>
-                <Text style={typography.bodyStrong}>Consistency</Text>
-                <Text style={typography.caption}>Training days in a row</Text>
-              </View>
-            </View>
-            <View style={styles.streakBody}>
-              <Text style={styles.streakValue}>{firstLoad ? "—" : metrics.streak}</Text>
-              <Text style={typography.small}>
-                {metrics.streak === 1 ? "training day" : "training days"} in a row
-              </Text>
-            </View>
-            <View style={styles.dots}>
-              {metrics.weekInfo.map((d, i) => (
-                <View key={d.iso} style={styles.dotCol}>
-                  <View
-                    style={[styles.dot, d.trained ? styles.dotActive : d.rest ? styles.dotRest : null]}
-                  />
-                  <Text style={styles.dotLabel}>{weekDayLabels()[i]}</Text>
-                </View>
-              ))}
-            </View>
-            <Text style={[typography.caption, styles.note]}>
-              {restDays.length > 0
-                ? `Rest days: ${restDays.map((d) => WEEKDAY_NAMES[d]).join(", ")}. They don't break it.`
-                : "Rest days never break it — set yours in Settings."}
-            </Text>
           </Card>
           </ProGate>
         ) : null}
@@ -1200,18 +1042,6 @@ const useStyles = makeUseStyles((t) =>
     row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
     rowName: { flex: 1, color: t.colors.text },
 
-    muscleWrap: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    legend: { flex: 1, gap: spacing.sm, minWidth: 0 },
-    legendRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    legendDot: { width: 9, height: 9, borderRadius: 5 },
-    legendLabel: { flex: 1, color: t.colors.text, minWidth: 0 },
-    legendPct: { color: t.colors.textDim, width: 34, textAlign: "right" },
-
-    rankList: { gap: spacing.sm },
-    rankRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-    rank: { width: 16, fontSize: 12, fontWeight: "700", color: t.colors.textDim },
-    rankName: { flex: 1, color: t.colors.text },
-
     pressed: { opacity: 0.8 },
     progressList: { gap: 0 },
     progressRow: {
@@ -1233,22 +1063,6 @@ const useStyles = makeUseStyles((t) =>
     },
     recordText: { flex: 1, gap: 2 },
     recordName: { color: t.colors.text },
-
-    streakBody: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
-    streakValue: { ...t.typography.h1, fontSize: 30, fontWeight: "800" },
-    dots: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xs },
-    dotCol: { alignItems: "center", gap: 6 },
-    dot: {
-      width: 14,
-      height: 14,
-      borderRadius: 7,
-      backgroundColor: t.colors.surfaceAlt,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-    },
-    dotActive: { backgroundColor: t.colors.primary, borderColor: t.colors.primary },
-    dotRest: { borderColor: t.colors.textMuted, borderStyle: "dashed" },
-    dotLabel: { fontSize: 10, fontWeight: "600", color: t.colors.textMuted },
 
     errorWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.sm, padding: spacing.xl },
     errorTitle: { textAlign: "center" },

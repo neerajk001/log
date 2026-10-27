@@ -26,7 +26,7 @@ const BENEFITS: { icon: IoniconName; title: string; body: string }[] = [
   {
     icon: "analytics-outline",
     title: "The full picture",
-    body: "3-month and 1-year trends, per-exercise progress, personal records and consistency.",
+    body: "3-month and 1-year trends, per-exercise progress, personal records and adherence.",
   },
   {
     icon: "stats-chart-outline",

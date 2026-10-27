@@ -14,10 +14,10 @@ export function uniqueWorkoutDates(logs: LiftLog[]): string[] {
   return Array.from(new Set(logs.map((l) => l.date))).sort((a, b) => (a < b ? 1 : -1));
 }
 
-export interface TopExercise {
-  exercise: string;
-  volume: number;
-  sets: number;
+export interface VolumeBar {
+  iso: string;
+  label: string;
+  value: number;
 }
 
 export interface PersonalRecord {
@@ -28,24 +28,6 @@ export interface PersonalRecord {
   delta: number | null;
   /** True when the record was set within the last 7 days. */
   isNew: boolean;
-}
-
-export interface MuscleSlice {
-  muscle: string;
-  sets: number;
-  pct: number;
-}
-
-export interface VolumeBar {
-  iso: string;
-  label: string;
-  value: number;
-}
-
-export interface WeekDayInfo {
-  iso: string;
-  trained: boolean;
-  rest: boolean;
 }
 
 const MUSCLE_RULES: { pattern: RegExp; muscle: string }[] = [

@@ -187,9 +187,9 @@ The Insights rollup: `{ days: [{ date, sets }], exercises: ExerciseMetrics[] }` 
 each exercise carries `sets`, `volume`, `best_kg/best_reps/best_date`, `prev_best_kg`
 (the record that preceded the current best, for the PR delta) and
 `current_top_kg`/`previous_top_kg` (the period comparison behind the Strength tile).
-The client keeps the presentation maths (muscle names via its own table, streaks,
-series) — only the row transfer moved here. It replaced pulling up to 5,000 individual
-sets, twice the range, on every visit.
+The client keeps the presentation maths (strength deltas and PR records) — only the
+row transfer moved here. It replaced pulling up to 5,000 individual sets, twice the
+range, on every visit.
 
 ## Meals
 
