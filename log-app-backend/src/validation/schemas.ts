@@ -378,6 +378,12 @@ export const trendsQuerySchema = z.object({
   date: dateString.optional(),
 });
 
+/** Detailed body/nutrition analysis window. */
+export const bodyAnalysisQuerySchema = z.object({
+  range: z.enum(["30d", "90d", "1y"]).optional(),
+  date: dateString.optional(),
+});
+
 export type ParsedPlan = z.infer<typeof parsedPlanSchema>;
 export type CreatePlanInput = z.infer<typeof createPlanSchema>;
 

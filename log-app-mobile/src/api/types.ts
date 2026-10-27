@@ -295,6 +295,66 @@ export interface MonthSummary {
 
 export type TrendRange = "7d" | "30d" | "90d" | "1y";
 
+/** The detailed body/nutrition analysis excludes the 7-day overview. */
+export type BodyAnalysisRange = "30d" | "90d" | "1y";
+
+export interface BodyAnalysisMacro {
+  target: number | null;
+  average: number | null;
+  /** Calories: days within ±5% of target. Protein: days at or above target. */
+  hit_rate_pct: number | null;
+  days_logged: number;
+  weekday_avg: number | null;
+  weekend_avg: number | null;
+  variability: number | null;
+}
+
+export interface BodyAnalysisWeightPoint {
+  date: string;
+  kg: number;
+}
+
+export interface BodyAnalysis {
+  range: BodyAnalysisRange;
+  from: string;
+  to: string;
+  data_quality: {
+    days: number;
+    days_with_calories: number;
+    days_with_protein: number;
+    weigh_ins: number;
+    coverage_pct: number;
+    sufficient: boolean;
+  };
+  weight: {
+    latest_kg: number | null;
+    average_7d_kg: number | null;
+    start_kg: number | null;
+    change_kg: number | null;
+    rate_kg_per_week: number | null;
+    plateau: boolean;
+    weigh_ins: number;
+    points: BodyAnalysisWeightPoint[];
+    goal: {
+      target_kg: number | null;
+      direction: "losing" | "gaining" | "maintaining" | null;
+      weeks_to_target: number | null;
+      target_date: string | null;
+    } | null;
+  };
+  calories: BodyAnalysisMacro;
+  protein: BodyAnalysisMacro & { grams_per_kg: number | null };
+  implied_maintenance: {
+    kcal: number;
+    low: number;
+    high: number;
+    span_days: number;
+    logged_days: number;
+    note: string;
+  } | null;
+  insights: string[];
+}
+
 export interface LiftDelta {
   exercise: string;
   this_week_kg: number | null;

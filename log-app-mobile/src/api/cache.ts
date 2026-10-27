@@ -22,6 +22,7 @@ const PATH_RESOURCES: readonly (readonly [string, Resource])[] = [
   ["/api/logs/daily", "daily"],
   ["/api/logs/activity", "activity"],
   ["/api/meals", "meals"],
+  ["/api/insights", "daily"],
   ["/api/plans", "plans"],
   ["/api/trends", "trends"],
   ["/api/verdict", "verdict"],

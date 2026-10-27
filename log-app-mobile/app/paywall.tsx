@@ -29,6 +29,11 @@ const BENEFITS: { icon: IoniconName; title: string; body: string }[] = [
     body: "3-month and 1-year trends, per-exercise progress, personal records and consistency.",
   },
   {
+    icon: "stats-chart-outline",
+    title: "Body & nutrition deep dive",
+    body: "Weight rate, calorie and protein hit rates, weekend patterns and an estimated maintenance calorie level.",
+  },
+  {
     icon: "body-outline",
     title: "Weekly physique check-ins",
     body: "One encrypted photo a week. The coach compares it with your previous check-in and tells you what to change in training or food.",

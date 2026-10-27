@@ -73,9 +73,11 @@ conclude from the same three data trends.
   server cost and are the acquisition loop.
 - **Pro:** the AI coach (chat, memory, tools), AI meal estimation, AI plan
   generation and import, one-off physique check-ins, the wide analytics ranges
-  (3M/1Y), lift-progress drilldowns, PR history, and **weekly encrypted physique
+  (3M/1Y), lift-progress drilldowns, PR history, **weekly encrypted physique
   check-ins** (one photo per ISO week, compared with the previous check-in plus
-  the logs).
+  the logs), and **detailed body & nutrition analysis** (weight rate and plateau,
+  calorie/protein hit rates, weekday vs weekend patterns, implied maintenance
+  and a goal ETA).
 - **14-day Pro trial** on every new account, started when onboarding
   completes — not at sign-up, so an abandoned setup doesn't burn it. When it
   expires the account **falls back to Free**; it never loses access to its own

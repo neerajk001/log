@@ -392,6 +392,31 @@ export default function InsightsScreen() {
           </Pressable>
         ) : null}
 
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open detailed body and nutrition analysis"
+          onPress={() => router.navigate("/insights/body" as never)}
+          style={({ pressed }) => [pressed && styles.pressed]}
+        >
+          <Card style={styles.deepDive}>
+            <IconBadge name="analytics-outline" bg={colors.primarySoft} color={colors.primary} size={38} rounded={false} />
+            <View style={styles.deepDiveText}>
+              <View style={styles.deepDiveTitleRow}>
+                <Text style={typography.bodyStrong} numberOfLines={1}>
+                  Body & nutrition analysis
+                </Text>
+                {isLocked("insights_full") ? (
+                  <Tag label="PRO" bg={colors.primarySoft} text={colors.primary} />
+                ) : null}
+              </View>
+              <Text style={typography.small} numberOfLines={2}>
+                Weight rate, calorie and protein hit rates, weekend patterns, maintenance estimate.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </Card>
+        </Pressable>
+
         {/* Progress summary */}
         {show.summary ? (
           <View style={styles.summary}>
@@ -1026,6 +1051,9 @@ const useStyles = makeUseStyles((t) =>
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.lg },
     footerSpace: { height: spacing.xxl },
     rangeWrap: { minWidth: 132, maxWidth: 168, flexShrink: 1 },
+    deepDive: { flexDirection: "row", alignItems: "center", gap: spacing.md, borderColor: t.colors.cardBorder },
+    deepDiveText: { flex: 1, gap: 2, minWidth: 0 },
+    deepDiveTitleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
 
     section: { gap: spacing.md },
     cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },

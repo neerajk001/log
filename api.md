@@ -419,6 +419,57 @@ Free accounts are clamped to `range=7d` server-side. The response then carries
 client can show an upgrade prompt without inventing numbers. Pro (and the
 trial) gets the requested range.
 
+## `GET /api/insights/body?range=30d|90d|1y&date=YYYY-MM-DD`
+
+**Pro only** (`402 UPGRADE_REQUIRED` otherwise). Deterministic and DB-only — no
+model call and no quota. Returns the detailed weight/nutrition analysis for the
+window ending on the athlete's local `date`:
+
+```json
+{
+  "range": "90d",
+  "from": "2026-07-27",
+  "to": "2026-10-24",
+  "data_quality": {
+    "days": 90, "days_with_calories": 74, "days_with_protein": 74,
+    "weigh_ins": 41, "coverage_pct": 82, "sufficient": true
+  },
+  "weight": {
+    "latest_kg": 78, "average_7d_kg": 78.2, "start_kg": 81.4,
+    "change_kg": -3.4, "rate_kg_per_week": -0.48, "plateau": false,
+    "weigh_ins": 41,
+    "points": [{ "date": "2026-07-27", "kg": 81.4 }],
+    "goal": {
+      "target_kg": 75, "direction": "losing",
+      "weeks_to_target": 6, "target_date": "2026-12-05"
+    }
+  },
+  "calories": {
+    "target": 1800, "average": 1832, "hit_rate_pct": 71, "days_logged": 74,
+    "weekday_avg": 1750, "weekend_avg": 2200, "variability": 210
+  },
+  "protein": {
+    "target": 150, "average": 148, "hit_rate_pct": 71, "days_logged": 74,
+    "weekday_avg": 160, "weekend_avg": 120, "variability": 24,
+    "grams_per_kg": 1.9
+  },
+  "implied_maintenance": {
+    "kcal": 2360, "low": 2160, "high": 2560,
+    "span_days": 88, "logged_days": 74,
+    "note": "Estimate from 74 logged days and 88 days of weigh-ins."
+  },
+  "insights": ["Weight is down 0.48 kg/week.", "…"]
+}
+```
+
+`calories.hit_rate_pct` counts days within ±5% of the calorie target;
+`protein.hit_rate_pct` counts days at or above the protein target. Nutrition
+averages exclude the current incomplete day; weight includes today's reading.
+`implied_maintenance` is `null` until there are at least three weeks of
+weigh-ins and 14 logged days in that span. The figures are directional, not
+medical advice. All newer metadata is exposed in `data_quality` so the client
+can show when the data is too thin to trust.
+
 ## `GET /api/billing/status`
 
 Returns the athlete's entitlement plus this period's AI usage:

@@ -51,6 +51,7 @@ vi.mock("../src/services/coach", () => ({
  */
 vi.mock("../src/middleware/entitlements", () => ({
   requireFeature: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+  requirePro: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
