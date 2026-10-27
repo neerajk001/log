@@ -33,6 +33,27 @@ export interface MacroAnalysis {
 export interface WeightPoint {
   date: string;
   kg: number;
+  calories: number | null;
+  protein_g: number | null;
+}
+
+export interface DayPattern {
+  /** 0 = Sunday … 6 = Saturday. */
+  day: number;
+  label: string;
+  calories: number | null;
+  protein_g: number | null;
+  days: number;
+}
+
+export interface PreviousPeriod {
+  from: string;
+  to: string;
+  weight_rate_kg_per_week: number | null;
+  calories_average: number | null;
+  protein_hit_rate_pct: number | null;
+  weigh_ins: number;
+  calories_days: number;
 }
 
 export interface BodyAnalysis {
@@ -65,6 +86,10 @@ export interface BodyAnalysis {
   };
   calories: MacroAnalysis;
   protein: MacroAnalysis & { grams_per_kg: number | null };
+  /** Monday-first averages for each day of the week. */
+  weekly_pattern: DayPattern[];
+  /** The equally-long window immediately before this one, for context. */
+  previous: PreviousPeriod | null;
   implied_maintenance: {
     kcal: number;
     low: number;
@@ -81,6 +106,8 @@ export interface BodyAnalysisInput {
   to: string;
   days: number;
   logs: BodyAnalysisLog[];
+  /** The equally-long window immediately before `from`; empty when unavailable. */
+  previous_logs?: BodyAnalysisLog[];
   calorieTarget: number | null;
   proteinTarget: number | null;
   targetWeightKg: number | null;
@@ -178,9 +205,74 @@ function macroStats(
   };
 }
 
+const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+function weeklyPattern(completed: BodyAnalysisLog[]): DayPattern[] {
+  return DAY_ORDER.map((day, index) => {
+    const rows = completed.filter((log) => dayOfWeek(log.date) === day);
+    const calorieValues = rows
+      .map((log) => log.calories)
+      .filter((value): value is number => value != null);
+    const proteinValues = rows
+      .map((log) => log.protein_g)
+      .filter((value): value is number => value != null);
+    return {
+      day,
+      label: DAY_LABELS[index],
+      calories:
+        calorieValues.length > 0 ? round(average(calorieValues) as number) : null,
+      protein_g:
+        proteinValues.length > 0 ? round(average(proteinValues) as number) : null,
+      days: rows.filter((log) => log.calories != null || log.protein_g != null).length,
+    };
+  });
+}
+
+function previousPeriod(input: BodyAnalysisInput): PreviousPeriod | null {
+  const logs = input.previous_logs ?? [];
+  if (logs.length === 0) return null;
+  const points: WeightPoint[] = logs
+    .filter(
+      (log): log is BodyAnalysisLog & { weight_kg: number } =>
+        log.weight_kg != null,
+    )
+    .map((log) => ({
+      date: log.date,
+      kg: log.weight_kg,
+      calories: log.calories,
+      protein_g: log.protein_g,
+    }));
+  const calorieValues = logs
+    .map((log) => log.calories)
+    .filter((value): value is number => value != null);
+  const proteinValues = logs
+    .map((log) => log.protein_g)
+    .filter((value): value is number => value != null);
+  const proteinHits =
+    input.proteinTarget != null && input.proteinTarget > 0
+      ? proteinValues.filter((value) => value >= (input.proteinTarget as number))
+          .length
+      : null;
+
+  return {
+    from: addDays(input.from, -input.days),
+    to: addDays(input.from, -1),
+    weight_rate_kg_per_week: ratePerWeek(points),
+    calories_average:
+      calorieValues.length > 0 ? round(average(calorieValues) as number) : null,
+    protein_hit_rate_pct:
+      proteinHits != null && proteinValues.length > 0
+        ? round((proteinHits / proteinValues.length) * 100)
+        : null,
+    weigh_ins: points.length,
+    calories_days: calorieValues.length,
+  };
+}
+
 function buildInsights(analysis: Omit<BodyAnalysis, "insights">): string[] {
   const insights: string[] = [];
-  const { weight, calories, protein, data_quality: quality } = analysis;
+  const { weight, calories, protein, data_quality: quality, weekly_pattern: pattern } = analysis;
 
   if (weight.rate_kg_per_week != null) {
     if (weight.plateau) {
@@ -210,7 +302,21 @@ function buildInsights(analysis: Omit<BodyAnalysis, "insights">): string[] {
     insights.push(`Protein averages ${protein.average} g/day${perKg}${hitLine}.`);
   }
 
+  const calorieDays = pattern.filter(
+    (day) => day.calories != null && day.days >= 2,
+  );
+  const highestCalorieDay = calorieDays.sort(
+    (a, b) => (b.calories as number) - (a.calories as number),
+  )[0];
   if (
+    highestCalorieDay &&
+    calories.average != null &&
+    (highestCalorieDay.calories as number) - calories.average >= 100
+  ) {
+    insights.push(
+      `${highestCalorieDay.label} is your highest-calorie day (${highestCalorieDay.calories} kcal average).`,
+    );
+  } else if (
     calories.weekday_avg != null &&
     calories.weekend_avg != null &&
     Math.abs(calories.weekend_avg - calories.weekday_avg) >= 100
@@ -218,6 +324,22 @@ function buildInsights(analysis: Omit<BodyAnalysis, "insights">): string[] {
     const difference = calories.weekend_avg - calories.weekday_avg;
     insights.push(
       `Weekends run ${Math.abs(difference)} kcal ${difference > 0 ? "higher" : "lower"} than weekdays.`,
+    );
+  }
+
+  const proteinDays = pattern.filter(
+    (day) => day.protein_g != null && day.days >= 2,
+  );
+  const lowestProteinDay = proteinDays.sort(
+    (a, b) => (a.protein_g as number) - (b.protein_g as number),
+  )[0];
+  if (
+    lowestProteinDay &&
+    protein.average != null &&
+    protein.average - (lowestProteinDay.protein_g as number) >= 10
+  ) {
+    insights.push(
+      `Protein is lowest on ${lowestProteinDay.label} (${lowestProteinDay.protein_g} g average).`,
     );
   } else if (
     protein.weekday_avg != null &&
@@ -265,7 +387,14 @@ export function computeBodyAnalysis(
       (log): log is BodyAnalysisLog & { weight_kg: number } =>
         log.weight_kg != null,
     )
-    .map((log) => ({ date: log.date, kg: log.weight_kg }));
+    .map((log) => ({
+      date: log.date,
+      kg: log.weight_kg,
+      // Today's intake is still partial; the chart should not present it as a
+      // completed day's calories/protein.
+      calories: log.date < input.to ? log.calories : null,
+      protein_g: log.date < input.to ? log.protein_g : null,
+    }));
 
   const latest = points.length > 0 ? points[points.length - 1] : null;
   const first = points.length > 0 ? points[0] : null;
@@ -369,6 +498,8 @@ export function computeBodyAnalysis(
     },
     calories,
     protein: { ...protein, grams_per_kg: gramsPerKg },
+    weekly_pattern: weeklyPattern(completed),
+    previous: previousPeriod(input),
     implied_maintenance: maintenance,
   };
 
@@ -394,10 +525,23 @@ export async function getBodyAnalysis(
       ? localDate
       : new Date().toISOString().slice(0, 10);
   const from = addDays(to, -(days - 1));
+  const previousTo = addDays(from, -1);
+  const previousFrom = addDays(previousTo, -(days - 1));
 
-  const [logs, user, profile] = await Promise.all([
+  const [logs, previousLogs, user, profile] = await Promise.all([
     prisma.dailyLog.findMany({
       where: { userId, date: { gte: new Date(`${from}T00:00:00Z`), lte: new Date(`${to}T00:00:00Z`) } },
+      orderBy: { date: "asc" },
+      select: { date: true, weightKg: true, calories: true, proteinG: true },
+    }),
+    prisma.dailyLog.findMany({
+      where: {
+        userId,
+        date: {
+          gte: new Date(`${previousFrom}T00:00:00Z`),
+          lte: new Date(`${previousTo}T00:00:00Z`),
+        },
+      },
       orderBy: { date: "asc" },
       select: { date: true, weightKg: true, calories: true, proteinG: true },
     }),
@@ -417,6 +561,12 @@ export async function getBodyAnalysis(
       to,
       days,
       logs: logs.map((log) => ({
+        date: log.date.toISOString().slice(0, 10),
+        weight_kg: log.weightKg == null ? null : Number(log.weightKg),
+        calories: log.calories,
+        protein_g: log.proteinG,
+      })),
+      previous_logs: previousLogs.map((log) => ({
         date: log.date.toISOString().slice(0, 10),
         weight_kg: log.weightKg == null ? null : Number(log.weightKg),
         calories: log.calories,

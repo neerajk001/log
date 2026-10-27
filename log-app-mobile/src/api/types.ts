@@ -312,6 +312,26 @@ export interface BodyAnalysisMacro {
 export interface BodyAnalysisWeightPoint {
   date: string;
   kg: number;
+  calories: number | null;
+  protein_g: number | null;
+}
+
+export interface BodyAnalysisDayPattern {
+  day: number;
+  label: string;
+  calories: number | null;
+  protein_g: number | null;
+  days: number;
+}
+
+export interface BodyAnalysisPrevious {
+  from: string;
+  to: string;
+  weight_rate_kg_per_week: number | null;
+  calories_average: number | null;
+  protein_hit_rate_pct: number | null;
+  weigh_ins: number;
+  calories_days: number;
 }
 
 export interface BodyAnalysis {
@@ -344,6 +364,8 @@ export interface BodyAnalysis {
   };
   calories: BodyAnalysisMacro;
   protein: BodyAnalysisMacro & { grams_per_kg: number | null };
+  weekly_pattern: BodyAnalysisDayPattern[];
+  previous: BodyAnalysisPrevious | null;
   implied_maintenance: {
     kcal: number;
     low: number;

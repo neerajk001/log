@@ -78,7 +78,7 @@ describe("computeBodyAnalysis", () => {
     expect(result.protein.weekday_avg).toBe(160);
     expect(result.protein.grams_per_kg).toBeGreaterThan(1.8);
     expect(result.protein.grams_per_kg).toBeLessThan(2);
-    expect(result.insights.some((line) => line.includes("Weekends run"))).toBe(true);
+    expect(result.insights.some((line) => line.includes("highest-calorie day"))).toBe(true);
   });
 
   it("estimates maintenance from intake and observed weight change", () => {
@@ -93,6 +93,41 @@ describe("computeBodyAnalysis", () => {
       result.implied_maintenance?.kcal as number,
     );
     expect(result.implied_maintenance?.kcal).toBeGreaterThan(2200);
+  });
+
+  it("exposes a Monday-first day-of-week pattern", () => {
+    const result = computeBodyAnalysis(input(), "30d");
+
+    expect(result.weekly_pattern.map((day) => day.label)).toEqual([
+      "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+    ]);
+    const saturday = result.weekly_pattern.find((day) => day.label === "Sat");
+    expect(saturday?.calories).toBe(2200);
+    expect(saturday?.protein_g).toBe(120);
+  });
+
+  it("compares the current window with the previous equal-length window", () => {
+    const previousLogs = buildLogs(30, () => 80).map((log, index) => ({
+      ...log,
+      date: new Date(
+        new Date(`${log.date}T00:00:00Z`).getTime() - 30 * DAY_MS,
+      )
+        .toISOString()
+        .slice(0, 10),
+      calories: 2000,
+      protein_g: 150,
+    }));
+
+    const result = computeBodyAnalysis(
+      input({ previous_logs: previousLogs }),
+      "30d",
+    );
+
+    expect(result.previous?.weight_rate_kg_per_week).toBe(0);
+    expect(result.previous?.calories_average).toBe(2000);
+    expect(result.previous?.protein_hit_rate_pct).toBe(100);
+    expect(result.previous?.weigh_ins).toBe(30);
+    expect(result.previous?.calories_days).toBe(30);
   });
 
   it("flags a plateau when weight is flat", () => {

@@ -12,7 +12,7 @@ import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { SegmentedControl } from "../../src/components/ui/controls";
-import { Sparkline } from "../../src/components/ui/charts";
+import { WeightChart } from "../../src/components/body/WeightChart";
 import {
   Button,
   Card,
@@ -227,6 +227,132 @@ export default function BodyAnalysisScreen() {
   );
 }
 
+function DayPatternCard({ data }: { data: BodyAnalysis }) {
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
+  const eligible = data.weekly_pattern.filter((day) => day.days >= 2);
+  const calorieValues = eligible
+    .map((day) => day.calories)
+    .filter((value): value is number => value != null);
+  const proteinValues = eligible
+    .map((day) => day.protein_g)
+    .filter((value): value is number => value != null);
+  const highestCalories = calorieValues.length > 0 ? Math.max(...calorieValues) : null;
+  const lowestProtein = proteinValues.length > 0 ? Math.min(...proteinValues) : null;
+
+  return (
+    <Card style={styles.card}>
+      <View style={styles.patternHeader}>
+        <Text style={[typography.caption, styles.patternDay]}>Day</Text>
+        <Text style={[typography.caption, styles.patternValue, styles.patternRight]}>Calories</Text>
+        <Text style={[typography.caption, styles.patternValue, styles.patternRight]}>Protein</Text>
+        <Text style={[typography.caption, styles.patternSamples, styles.patternRight]}>n</Text>
+      </View>
+      {data.weekly_pattern.map((day) => {
+        const high = day.days >= 2 && day.calories != null && day.calories === highestCalories;
+        const low = day.days >= 2 && day.protein_g != null && day.protein_g === lowestProtein;
+        return (
+          <View key={day.day} style={styles.patternRow}>
+            <Text style={[typography.small, styles.patternDay]}>{day.label}</Text>
+            <Text
+              style={[
+                typography.small,
+                styles.patternValue,
+                styles.patternRight,
+                high && { color: colors.warning, fontWeight: "700" },
+              ]}
+            >
+              {day.calories != null ? `${formatNumber(day.calories)} kcal` : "—"}
+            </Text>
+            <Text
+              style={[
+                typography.small,
+                styles.patternValue,
+                styles.patternRight,
+                low && { color: colors.warning, fontWeight: "700" },
+              ]}
+            >
+              {day.protein_g != null ? `${formatNumber(day.protein_g)} g` : "—"}
+            </Text>
+            <Text style={[typography.small, styles.patternSamples, styles.patternRight]}>
+              {day.days}
+            </Text>
+          </View>
+        );
+      })}
+      <Text style={[typography.caption, styles.note]}>
+        Average per logged day; n is the number of days with data. Highlighted: highest calories,
+        lowest protein.
+      </Text>
+    </Card>
+  );
+}
+
+function PreviousCard({ data }: { data: BodyAnalysis }) {
+  const { typography } = useTheme();
+  const styles = useStyles();
+  const previous = data.previous;
+  if (!previous) return null;
+
+  const rows = [
+    {
+      label: "Weight rate",
+      current:
+        data.weight.rate_kg_per_week != null
+          ? `${data.weight.rate_kg_per_week.toFixed(2)} kg/wk`
+          : "—",
+      previous:
+        previous.weight_rate_kg_per_week != null
+          ? `${previous.weight_rate_kg_per_week.toFixed(2)} kg/wk`
+          : "—",
+    },
+    {
+      label: "Calories",
+      current: data.calories.average != null ? `${formatNumber(data.calories.average)} kcal` : "—",
+      previous:
+        previous.calories_average != null
+          ? `${formatNumber(previous.calories_average)} kcal`
+          : "—",
+    },
+    {
+      label: "Protein hit",
+      current: data.protein.hit_rate_pct != null ? `${data.protein.hit_rate_pct}%` : "—",
+      previous:
+        previous.protein_hit_rate_pct != null ? `${previous.protein_hit_rate_pct}%` : "—",
+    },
+  ];
+
+  return (
+    <Card style={styles.card}>
+      <View style={styles.previousHeader}>
+        <Text style={typography.h3}>Vs previous period</Text>
+        <Text style={[typography.caption, styles.note]}>
+          {formatMediumDate(previous.from)}–{formatMediumDate(previous.to)}
+        </Text>
+      </View>
+      <View style={styles.previousHeader}>
+        <Text style={[typography.caption, styles.previousLabel]}> </Text>
+        <Text style={[typography.caption, styles.previousValue, styles.patternRight]}>Now</Text>
+        <Text style={[typography.caption, styles.previousValue, styles.patternRight]}>Before</Text>
+      </View>
+      {rows.map((row) => (
+        <View key={row.label} style={styles.previousRow}>
+          <Text style={[typography.small, styles.previousLabel]}>{row.label}</Text>
+          <Text style={[typography.small, styles.previousValue, styles.patternRight]}>
+            {row.current}
+          </Text>
+          <Text style={[typography.small, styles.previousValue, styles.patternRight, styles.note]}>
+            {row.previous}
+          </Text>
+        </View>
+      ))}
+      <Text style={[typography.caption, styles.note]}>
+        Previous: {previous.weigh_ins} weigh-ins, {previous.calories_days} days logged.
+      </Text>
+    </Card>
+  );
+}
+
 function AnalysisContent({
   data,
   chartWidth,
@@ -282,12 +408,12 @@ function AnalysisContent({
         </View>
 
         {weight.points.length >= 2 ? (
-          <Sparkline
-            values={weight.points.map((point) => point.kg)}
-            width={chartWidth}
-            height={92}
-            dots={weight.points.length < 40}
-          />
+          <>
+            <WeightChart points={weight.points} width={chartWidth} height={148} />
+            <Text style={[typography.caption, styles.chartHint]}>
+              Tap or drag across the chart to inspect a weigh-in.
+            </Text>
+          </>
         ) : null}
 
         <View style={styles.metrics}>
@@ -342,6 +468,9 @@ function AnalysisContent({
         }
       />
 
+      <SectionHeader title="Day-of-week pattern" />
+      <DayPatternCard data={data} />
+
       <SectionHeader title="Energy balance" />
       {maintenance ? (
         <Card style={styles.card}>
@@ -370,6 +499,13 @@ function AnalysisContent({
           </Text>
         </Card>
       )}
+
+      {data.previous ? (
+        <>
+          <SectionHeader title="Vs previous period" />
+          <PreviousCard data={data} />
+        </>
+      ) : null}
 
       {data.insights.length > 0 ? (
         <>
@@ -403,6 +539,7 @@ const useStyles = makeUseStyles((t) =>
     weightTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.sm },
     weightValueRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
     weightValue: { fontSize: 34, fontWeight: "700", color: t.colors.text },
+    chartHint: { color: t.colors.textMuted, textAlign: "center" },
     averageRow: { flexDirection: "row", alignItems: "baseline", gap: spacing.sm },
     average: { fontSize: 30, fontWeight: "700", color: t.colors.text },
     averageUnit: { color: t.colors.textDim },
@@ -417,6 +554,34 @@ const useStyles = makeUseStyles((t) =>
     metricValue: { fontSize: 14, fontWeight: "700", color: t.colors.text },
     metricLabel: { color: t.colors.textMuted },
     note: { color: t.colors.textDim },
+    patternHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingBottom: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.colors.borderStrong,
+    },
+    patternRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 5,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.colors.border,
+    },
+    patternDay: { width: 38 },
+    patternValue: { flex: 1 },
+    patternSamples: { width: 24 },
+    patternRight: { textAlign: "right" },
+    previousHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: spacing.sm },
+    previousRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: 5,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: t.colors.border,
+    },
+    previousLabel: { flex: 1, color: t.colors.textDim },
+    previousValue: { width: 86 },
     bulletRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
     dot: { width: 5, height: 5, borderRadius: 3, marginTop: 7 },
     bulletText: { flex: 1, color: t.colors.text, lineHeight: 19 },

@@ -438,7 +438,9 @@ window ending on the athlete's local `date`:
     "latest_kg": 78, "average_7d_kg": 78.2, "start_kg": 81.4,
     "change_kg": -3.4, "rate_kg_per_week": -0.48, "plateau": false,
     "weigh_ins": 41,
-    "points": [{ "date": "2026-07-27", "kg": 81.4 }],
+    "points": [
+      { "date": "2026-07-27", "kg": 81.4, "calories": 1790, "protein_g": 151 }
+    ],
     "goal": {
       "target_kg": 75, "direction": "losing",
       "weeks_to_target": 6, "target_date": "2026-12-05"
@@ -453,6 +455,15 @@ window ending on the athlete's local `date`:
     "weekday_avg": 160, "weekend_avg": 120, "variability": 24,
     "grams_per_kg": 1.9
   },
+  "weekly_pattern": [
+    { "day": 1, "label": "Mon", "calories": 1750, "protein_g": 160, "days": 12 },
+    { "day": 6, "label": "Sat", "calories": 2200, "protein_g": 120, "days": 11 }
+  ],
+  "previous": {
+    "from": "2026-04-28", "to": "2026-07-26",
+    "weight_rate_kg_per_week": -0.3, "calories_average": 1790,
+    "protein_hit_rate_pct": 62, "weigh_ins": 36, "calories_days": 70
+  },
   "implied_maintenance": {
     "kcal": 2360, "low": 2160, "high": 2560,
     "span_days": 88, "logged_days": 74,
@@ -465,6 +476,9 @@ window ending on the athlete's local `date`:
 `calories.hit_rate_pct` counts days within ±5% of the calorie target;
 `protein.hit_rate_pct` counts days at or above the protein target. Nutrition
 averages exclude the current incomplete day; weight includes today's reading.
+`weekly_pattern` is Monday-first (one row per weekday, with `days` = logged
+days), and `previous` is the equally-long window immediately before `from` so
+the client can show current-vs-previous context.
 `implied_maintenance` is `null` until there are at least three weeks of
 weigh-ins and 14 logged days in that span. The figures are directional, not
 medical advice. All newer metadata is exposed in `data_quality` so the client
