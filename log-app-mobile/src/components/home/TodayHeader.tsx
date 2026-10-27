@@ -6,12 +6,10 @@ import { radii, spacing } from "../../theme/spacing";
 import { parseIso } from "../../utils/date";
 
 function headerDate(iso: string): string {
-  return parseIso(iso).toLocaleDateString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
+  const date = parseIso(iso);
+  const weekday = date.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" });
+  const day = date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  return `${weekday}, ${day}`;
 }
 
 /**

@@ -13,7 +13,7 @@ const TAB_ICONS: Record<string, IconPair> = {
   today: { focused: "home", unfocused: "home-outline" },
   lift: { focused: "barbell", unfocused: "barbell-outline" },
   insights: { focused: "stats-chart", unfocused: "stats-chart-outline" },
-  history: { focused: "time", unfocused: "time-outline" },
+  coach: { focused: "sparkles", unfocused: "sparkles-outline" },
   plan: { focused: "clipboard", unfocused: "clipboard-outline" },
 };
 
@@ -52,8 +52,10 @@ export default function TabLayout() {
       <Tabs.Screen name="today" options={{ title: "Today" }} />
       <Tabs.Screen name="lift" options={{ title: "Lift" }} />
       <Tabs.Screen name="insights" options={{ title: "Insights" }} />
-      <Tabs.Screen name="history" options={{ title: "History" }} />
+      <Tabs.Screen name="coach" options={{ title: "Coach" }} />
       <Tabs.Screen name="plan" options={{ title: "Plan" }} />
+      <Tabs.Screen name="history" options={{ href: null }} />
     </Tabs>
   );
 }
+

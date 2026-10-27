@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View, type StyleProp, type TextStyle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../theme/ThemeContext";
@@ -40,6 +40,7 @@ export function ScreenHeader({
   variant = "page",
   title,
   subtitle,
+  titleStyle,
   onBack,
   right,
   style,
@@ -47,6 +48,7 @@ export function ScreenHeader({
   variant?: "brand" | "page" | "detail";
   title?: string;
   subtitle?: string;
+  titleStyle?: StyleProp<TextStyle>;
   onBack?: () => void;
   right?: ReactNode;
   style?: object;
@@ -81,7 +83,7 @@ export function ScreenHeader({
             <Ionicons name="arrow-back" size={22} color={colors.text} />
           </Pressable>
           <View style={styles.detailCenter}>
-            <Text style={[typography.h3, styles.detailTitle]} numberOfLines={1}>
+            <Text style={[typography.h3, styles.detailTitle, titleStyle]} numberOfLines={1}>
               {title ?? ""}
             </Text>
             {subtitle ? (
@@ -138,3 +140,4 @@ const useStyles = makeUseStyles((t) =>
     detailRight: { minWidth: 32, maxWidth: 88, alignItems: "flex-end", flexShrink: 0 },
   }),
 );
+

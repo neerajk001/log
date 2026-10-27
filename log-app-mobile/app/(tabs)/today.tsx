@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router, type ErrorBoundaryProps } from "expo-router";
-import { useClerk } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { spacing } from "../../src/theme/spacing";
-import { DateStrip } from "../../src/components/DateStrip";
 import { MetricCard } from "../../src/components/MetricCard";
+import { AppDrawer } from "../../src/components/AppDrawer";
 import { ActivitySheet } from "../../src/components/ActivitySheet";
 import { CalendarSheet } from "../../src/components/CalendarSheet";
 import { MealSheet } from "../../src/components/MealSheet";
 import { MealsSheet } from "../../src/components/MealsSheet";
 import { TodayHeader } from "../../src/components/home/TodayHeader";
-import { TodaysWorkoutCard } from "../../src/components/home/TodaysWorkoutCard";
+import { TodayPlanCard } from "../../src/components/home/TodayPlanCard";
 import { NutritionCard } from "../../src/components/home/NutritionCard";
-import { PhysiqueEntryCard } from "../../src/components/home/PhysiqueCard";
+import { MealsCard } from "../../src/components/home/MealsCard";
 import { RecentLiftsRow } from "../../src/components/home/RecentLiftsRow";
 import {
   SectionHeader,
@@ -24,7 +23,6 @@ import {
   LoadingState,
   IconBadge,
 } from "../../src/components/ui/primitives";
-import { OverflowMenu } from "../../src/components/ui/controls";
 import { useTodayLog } from "../../src/hooks/useTodayLog";
 import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
@@ -34,13 +32,11 @@ import { useMeals } from "../../src/hooks/useMeals";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useDailyComparison } from "../../src/hooks/useDailyComparison";
 import type { MealLog } from "../../src/api/types";
-import { muscleGroupsForDay } from "../../src/utils/derive";
 
 type Footnote = { text: string; tone?: "positive" | "negative" | "neutral" };
 
 export default function TodayScreen() {
   const today = useCurrentDate();
-  const { signOut } = useClerk();
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
@@ -53,7 +49,7 @@ export default function TodayScreen() {
     prevTodayRef.current = today;
   }, [today]);
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [mealsOpen, setMealsOpen] = useState(false);
@@ -62,7 +58,6 @@ export default function TodayScreen() {
   const {
     data,
     placeholder,
-    loading,
     error,
     fieldErrors,
     retry,
@@ -116,15 +111,6 @@ export default function TodayScreen() {
     return Array.from(map.entries()).map(([name, sets]) => ({ name, sets }));
   }, [lifts]);
 
-  const workoutExerciseNames = useMemo(
-    () => (day?.exercises ?? []).map((ex) => ex.name),
-    [day],
-  );
-  const workoutMuscles = useMemo(
-    () => (day ? muscleGroupsForDay(day.day_name, workoutExerciseNames) : []),
-    [day, workoutExerciseNames],
-  );
-
   const confirmDeleteActivity = useCallback(
     (id: string) => {
       Alert.alert("Delete activity?", "This removes the logged activity.", [
@@ -138,8 +124,6 @@ export default function TodayScreen() {
   const goLift = useCallback(() => {
     router.navigate({ pathname: "/(tabs)/lift", params: { date: activeDate } } as never);
   }, [activeDate]);
-  // Carry the day and date the card is showing so the Lift screen opens on them
-  // (and keeps them for the next set), rather than snapping back to today.
   const goLiftDay = useCallback(
     (dayId: string) => {
       router.navigate({
@@ -149,13 +133,13 @@ export default function TodayScreen() {
     },
     [activeDate],
   );
-  const goHistory = useCallback(() => {
-    router.navigate("/(tabs)/history" as never);
+  const goPlan = useCallback(() => {
+    router.navigate("/(tabs)/plan" as never);
   }, []);
   const goLogMeal = useCallback(() => {
     router.navigate({
-      pathname: "/coach/new",
-      params: { agent: "meal", date: activeDate },
+      pathname: "/coach/chat",
+      params: { agent: "meal", q: "", date: activeDate, fresh: "" },
     } as never);
   }, [activeDate]);
 
@@ -207,19 +191,19 @@ export default function TodayScreen() {
             actionLabel: "Retry",
             onAction: retrySave,
           }
-        : planError
+        : mealsError
           ? {
               tone: "danger" as const,
-              message: planError,
+              message: mealsError,
               actionLabel: "Retry",
-              onAction: () => refetchPlan(),
+              onAction: refetchMeals,
             }
-          : mealsError
+          : planError
             ? {
                 tone: "danger" as const,
-                message: mealsError,
+                message: planError,
                 actionLabel: "Retry",
-                onAction: refetchMeals,
+                onAction: () => refetchPlan(),
               }
             : liftsError
               ? {
@@ -229,13 +213,13 @@ export default function TodayScreen() {
                   onAction: () => refetchLifts(),
                 }
               : activitiesError
-                ? {
-                    tone: "danger" as const,
-                    message: activitiesError,
-                    actionLabel: "Retry",
-                    onAction: () => refetchActivities(),
-                  }
-                : null;
+              ? {
+                  tone: "danger" as const,
+                  message: activitiesError,
+                  actionLabel: "Retry",
+                  onAction: () => refetchActivities(),
+                }
+              : null;
 
   return (
     <View style={styles.container}>
@@ -246,7 +230,7 @@ export default function TodayScreen() {
       >
         <TodayHeader
           date={activeDate}
-          onMenu={() => setMenuOpen(true)}
+          onMenu={() => setDrawerOpen(true)}
           onCalendar={() => setCalendarOpen(true)}
           onSettings={() => router.navigate("/settings" as never)}
         />
@@ -258,10 +242,6 @@ export default function TodayScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.dateStripBlock}>
-          <DateStrip selected={activeDate} today={today} onSelect={setActiveDate} />
-        </View>
-
         {banner ? (
           <Banner
             tone={banner.tone}
@@ -272,18 +252,6 @@ export default function TodayScreen() {
           />
         ) : null}
 
-        {day ? (
-          <View style={styles.block}>
-            <TodaysWorkoutCard
-              dayName={day.day_name}
-              exerciseCount={day.exercises.length}
-              muscles={workoutMuscles}
-              onLogLift={() => goLiftDay(day.id)}
-              onOpenDay={() => goLiftDay(day.id)}
-            />
-          </View>
-        ) : null}
-
         {profile?.meal_tracking_enabled !== false ? (
           <View style={styles.block}>
             <NutritionCard
@@ -291,8 +259,6 @@ export default function TodayScreen() {
               calorieTarget={calorieTarget}
               loggedProtein={loggedProtein}
               proteinTarget={proteinTarget}
-              mealCount={meals.length}
-              onLogMeal={goLogMeal}
               onPressMeals={() => setMealsOpen(true)}
               onEdit={(field, value) => {
                 void save(field, value);
@@ -301,51 +267,30 @@ export default function TodayScreen() {
           </View>
         ) : null}
 
-        {profile?.ai_coach_enabled !== false ? (
+        {profile?.meal_tracking_enabled !== false ? (
           <View style={styles.block}>
-            <PhysiqueEntryCard />
+            <MealsCard
+              meals={meals}
+              onOpenMeals={() => setMealsOpen(true)}
+              onLogMeal={goLogMeal}
+            />
           </View>
         ) : null}
 
-        {loading && !data ? (
-          <LoadingState label="Loading today…" />
-        ) : (
-          <View style={styles.grid}>
-            {tracksWeight ? (
-              <MetricCard
-                field="weight_kg"
-                label="Weight"
-                unit="kg"
-                icon="scale-outline"
-                iconBg={colors.blueSoft}
-                iconColor={colors.blue}
-                value={data?.weight_kg ?? null}
-                placeholder={placeholder?.weight_kg ?? null}
-                onSave={(v) => save("weight_kg", v)}
-                fieldError={fieldErrors.weight_kg}
-                footnote={weightFootnote}
-              />
-            ) : null}
-            <MetricCard
-              field="sleep_hours"
-              label="Sleep"
-              unit="hours"
-              icon="moon"
-              iconBg={colors.purpleSoft}
-              iconColor={colors.purple}
-              value={data?.sleep_hours ?? null}
-              placeholder={placeholder?.sleep_hours ?? null}
-              onSave={(v) => save("sleep_hours", v)}
-              fieldError={fieldErrors.sleep_hours}
-              footnote={sleepFootnote}
-            />
-          </View>
-        )}
+        {day ? (
+          <TodayPlanCard
+            dayName={day.day_name}
+            exerciseCount={day.exercises.length}
+            totalSets={day.exercises.reduce((sum, exercise) => sum + exercise.sets, 0)}
+            onLogLift={() => goLiftDay(day.id)}
+            onViewPlan={goPlan}
+          />
+        ) : null}
 
         {liftsLoading && lifts.length === 0 ? (
           <LoadingState label="Loading lifts…" />
         ) : (
-          <RecentLiftsRow groups={groupedLifts} onViewAll={goHistory} onAddLift={goLift} />
+          <RecentLiftsRow key={activeDate} groups={groupedLifts} onAddLift={goLift} />
         )}
 
         <View style={styles.section}>
@@ -390,6 +335,37 @@ export default function TodayScreen() {
           )}
         </View>
 
+        <View style={styles.grid}>
+          {tracksWeight ? (
+            <MetricCard
+              field="weight_kg"
+              label="Weight"
+              unit="kg"
+              icon="scale-outline"
+              iconBg={colors.blueSoft}
+              iconColor={colors.blue}
+              value={data?.weight_kg ?? null}
+              placeholder={placeholder?.weight_kg ?? null}
+              onSave={(v) => save("weight_kg", v)}
+              fieldError={fieldErrors.weight_kg}
+              footnote={weightFootnote}
+            />
+          ) : null}
+          <MetricCard
+            field="sleep_hours"
+            label="Sleep"
+            unit="hours"
+            icon="moon"
+            iconBg={colors.purpleSoft}
+            iconColor={colors.purple}
+            value={data?.sleep_hours ?? null}
+            placeholder={placeholder?.sleep_hours ?? null}
+            onSave={(v) => save("sleep_hours", v)}
+            fieldError={fieldErrors.sleep_hours}
+            footnote={sleepFootnote}
+          />
+        </View>
+
         <View style={styles.footerSpace} />
       </ScrollView>
 
@@ -432,29 +408,7 @@ export default function TodayScreen() {
         onSaved={refetchMeals}
       />
 
-      <OverflowMenu
-        visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
-        actions={[
-          ...(profile?.ai_coach_enabled !== false
-            ? [
-                {
-                  label: "AI coach",
-                  icon: "sparkles-outline" as const,
-                  onPress: () => router.navigate("/coach" as never),
-                },
-              ]
-            : []),
-          {
-            label: "Log out",
-            icon: "log-out-outline",
-            destructive: true,
-            onPress: () => {
-              signOut().catch(() => {});
-            },
-          },
-        ]}
-      />
+      <AppDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </View>
   );
 }
@@ -463,19 +417,17 @@ const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
     scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl },
-    block: { marginTop: spacing.md },
+    block: { marginTop: spacing.xl },
     section: { marginTop: spacing.xxl },
     list: { gap: spacing.sm },
     footerSpace: { height: spacing.xxl },
-
-    dateStripBlock: { marginTop: spacing.lg },
 
     grid: {
       flexDirection: "row",
       flexWrap: "wrap",
       justifyContent: "space-between",
-      rowGap: spacing.sm,
-      marginTop: spacing.md,
+      rowGap: spacing.md,
+      marginTop: spacing.xxl,
     },
 
     backToday: {

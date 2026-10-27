@@ -53,8 +53,8 @@ export function AskCoachRow({
       return;
     }
     router.navigate({
-      pathname: "/coach/new",
-      params: { agent, ...(question ? { q: question } : {}) },
+      pathname: "/coach/chat",
+      params: { agent, q: question ?? "", date: "", fresh: "" },
     } as never);
   };
 

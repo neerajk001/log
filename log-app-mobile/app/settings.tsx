@@ -1,423 +1,103 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
-import { router } from "expo-router";
-import { useClerk, useUser } from "@clerk/clerk-expo";
+import { ScrollView, StyleSheet, Text, View, Pressable } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import Constants from "expo-constants";
+import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeUseStyles, useTheme } from "../src/theme/ThemeContext";
-import type { ThemePreference } from "../src/theme/colors";
-import { spacing } from "../src/theme/spacing";
-import { ScreenHeader } from "../src/components/ScreenHeader";
-import { SettingField } from "../src/components/SettingField";
-import { SegmentedControl, Chip, ChipRow } from "../src/components/ui/controls";
-import { Banner, Button, Card, Divider, IconBadge, ListRow, LoadingState, ErrorState } from "../src/components/ui/primitives";
-import { useMe } from "../src/hooks/useMe";
-import { useEntitlement } from "../src/hooks/useEntitlement";
-import { useBillingApi } from "../src/api/billing";
-import { lightTick, useHapticsPref } from "../src/hooks/useHaptics";
-import { setDevPreview } from "../src/state/onboarding";
-import { clearAllCache } from "../src/api/cache";
-import type { DevPlanMode } from "../src/api/types";
+import { radii, spacing } from "../src/theme/spacing";
+import { AccountSummary } from "../src/components/AccountSummary";
+import type { IoniconName } from "../src/components/ui/primitives";
 
-const APPEARANCE_OPTIONS: { value: ThemePreference; label: string }[] = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "trueBlack", label: "True Black" },
-];
+const VERSION = Constants.expoConfig?.version ?? "1.0.0";
 
-/** Dev-only: the four states worth exercising by hand. */
-const DEV_PLANS: { value: DevPlanMode; label: string }[] = [
-  { value: "free", label: "Free" },
-  { value: "trial", label: "Trial" },
-  { value: "trial_expired", label: "Ended" },
-  { value: "pro", label: "Pro" },
-];
-
-/** Sunday-first, matching the streak's weekday numbering (0 = Sun). */
-const WEEKDAYS: { value: number; label: string }[] = [
-  { value: 0, label: "Sun" },
-  { value: 1, label: "Mon" },
-  { value: 2, label: "Tue" },
-  { value: 3, label: "Wed" },
-  { value: 4, label: "Thu" },
-  { value: 5, label: "Fri" },
-  { value: 6, label: "Sat" },
-];
-
-/** Settings — account, appearance, targets, logging prefs, data, about. */
-export default function SettingsScreen() {
-  const { profile, loading, error, update, refetch } = useMe();
-  const { user } = useUser();
-  const { signOut } = useClerk();
-  const { colors, preference, setPreference, typography } = useTheme();
+function SettingsRow({
+  icon,
+  label,
+  value,
+  last = false,
+}: {
+  icon: IoniconName;
+  label: string;
+  value?: string;
+  last?: boolean;
+}) {
+  const { colors, typography } = useTheme();
   const styles = useStyles();
-  const { enabled: haptics, setEnabled: setHaptics } = useHapticsPref();
-  const [cacheCleared, setCacheCleared] = useState(false);
-  /** A failed preference save, surfaced instead of silently snapping back. */
-  const [writeError, setWriteError] = useState<string | null>(null);
-  const billingApi = useBillingApi();
-  const { isPro, isTrial, trialDaysLeft, refetch: refetchBilling } = useEntitlement();
 
-  const planValue = isPro ? (isTrial ? `${trialDaysLeft ?? 0}d` : "Active") : "Free";
-  const planSubtitle = isPro
-    ? isTrial
-      ? `Pro trial · ${trialDaysLeft ?? 0} ${trialDaysLeft === 1 ? "day" : "days"} left.`
-      : "Every Pro feature is unlocked."
-    : "AI coach, meal scans, plan generation and full analytics.";
-
-  // Which simulated state the account is in right now (dev section highlight).
-  const devPlanState: DevPlanMode = profile?.is_trial
-    ? "trial"
-    : profile?.is_pro
-      ? "pro"
-      : profile?.trial_ends_at
-        ? "trial_expired"
-        : "free";
-
-  /** Dev-only entitlement switch; the server 404s this in production. */
-  const simulatePlan = useCallback(
-    async (mode: DevPlanMode) => {
-      setWriteError(null);
-      try {
-        await billingApi.simulatePlan(mode);
-        lightTick();
-        await Promise.all([refetchBilling(), refetch()]);
-      } catch (err) {
-        setWriteError(err instanceof Error ? err.message : "Couldn't change the plan.");
-      }
-    },
-    [billingApi, refetchBilling, refetch],
+  return (
+    <>
+      <View style={styles.row}>
+        <Ionicons name={icon} size={19} color={colors.textDim} />
+        <Text style={[typography.body, styles.label]} numberOfLines={1}>
+          {label}
+        </Text>
+        {value ? (
+          <Text style={styles.value} numberOfLines={1}>
+            {value}
+          </Text>
+        ) : null}
+        <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+      </View>
+      {last ? null : <View style={styles.rowDivider} />}
+    </>
   );
+}
 
-  const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const version = Constants.expoConfig?.version ?? "1.0.0";
-
-  const restDays = useMemo(() => profile?.rest_days ?? [], [profile]);
-  // Track the latest intended set so two quick chip taps don't both build on the
-  // same render value (which silently dropped one of the selections).
-  const restDaysRef = useRef(restDays);
-  useEffect(() => {
-    restDaysRef.current = restDays;
-  }, [restDays]);
-
-  /** Every preference write goes through here: success ticks, failure speaks. */
-  const saveSetting = useCallback(
-    async (patch: Parameters<typeof update>[0]) => {
-      setWriteError(null);
-      try {
-        await update(patch);
-        lightTick();
-      } catch (err) {
-        setWriteError(
-          err instanceof Error ? err.message : "Couldn't save that setting. Try again.",
-        );
-        // Snap the optimistic intent (and the control) back to stored truth.
-        void refetch();
-      }
-    },
-    [update, refetch],
-  );
-
-  const toggleRestDay = (value: number) => {
-    const current = restDaysRef.current;
-    const next = current.includes(value)
-      ? current.filter((d) => d !== value)
-      : [...current, value].sort((a, b) => a - b);
-    restDaysRef.current = next;
-    void saveSetting({ rest_days: next.length > 0 ? next : null });
-  };
+/** Settings shell - visual rows only; actions are intentionally not wired yet. */
+export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
+  const { colors, typography } = useTheme();
+  const styles = useStyles();
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        <ScreenHeader variant="detail" title="Settings" onBack={() => router.back()} />
-
-        {error ? <ErrorState message={error} onRetry={refetch} /> : null}
-        {writeError ? <Banner tone="danger" message={writeError} /> : null}
-
-        <Text style={styles.sectionLabel}>Account</Text>
-        <Card style={styles.accountCard}>
-          <IconBadge name="person" bg={colors.surfaceAlt} color={colors.textDim} size={44} rounded={false} />
-          <View style={styles.accountText}>
-            <Text style={typography.bodyStrong} numberOfLines={1}>
-              {email ?? "Signed in"}
-            </Text>
-            <Text style={typography.small}>Your logs sync to this account.</Text>
-          </View>
-        </Card>
-        <Button
-          label="Sign out"
-          icon="log-out-outline"
-          variant="outline"
-          onPress={() => signOut().catch(() => {})}
-        />
-
-        <Text style={styles.sectionLabel}>Appearance</Text>
-        <SegmentedControl
-          value={preference}
-          onChange={(v) => {
-            setPreference(v);
-            lightTick();
-          }}
-          options={APPEARANCE_OPTIONS}
-        />
-        <Text style={[typography.small, styles.hint]}>
-          {preference === "system"
-            ? "Following your phone's light/dark setting."
-            : preference === "trueBlack"
-              ? "Pure-black backgrounds for maximum contrast."
-              : preference === "dark"
-                ? "Soft charcoal backgrounds, easier on the eyes at night."
-                : "Light backgrounds."}
-        </Text>
-
-        {loading && !profile ? (
-          <LoadingState label="Loading settings…" />
-        ) : (
-          <>
-            <Text style={styles.sectionLabel}>Targets</Text>
-            <SettingField
-              label="Protein target"
-              unit="g"
-              value={profile?.protein_target_g ?? null}
-              hint="Powers the adherence signal in Insights and your weekly verdict."
-              onSave={async (v) => {
-                await update({ protein_target_g: v });
-              }}
-            />
-            <SettingField
-              label="Calorie target"
-              unit="kcal"
-              value={profile?.calorie_target ?? null}
-              hint="Shown against your daily log and the Nutrition trend in Insights."
-              onSave={async (v) => {
-                await update({ calorie_target: v });
-              }}
-            />
-
-            <Banner
-              tone="info"
-              message="Values save automatically when you leave a field. Clear a field to remove the target."
-            />
-          </>
-        )}
-
-        <Text style={styles.sectionLabel}>Plan</Text>
-        <Card padded={false}>
-          <ListRow
-            icon="diamond-outline"
-            iconBg={colors.primarySoft}
-            iconColor={colors.primary}
-            title="Repora Pro"
-            subtitle={planSubtitle}
-            value={planValue}
-            onPress={() => router.navigate("/paywall" as never)}
-          />
-        </Card>
-
-        <Text style={styles.sectionLabel}>AI Coach</Text>
-        <Card padded={false}>
-          <ListRow
-            icon="sparkles"
-            iconBg={colors.primarySoft}
-            iconColor={colors.primary}
-            title="Chat with coach"
-            subtitle="Ask about your training, food or progress."
-            onPress={() => router.navigate({ pathname: "/coach/new", params: { agent: "general" } } as never)}
-          />
-          <Divider />
-          <ListRow
-            icon="options-outline"
-            title="Your goals & coaching profile"
-            subtitle="Answer a few questions so your coach can build a plan."
-            onPress={() => router.navigate("/coach/onboarding" as never)}
-          />
-          <Divider />
-          <ListRow
-            icon="bulb-outline"
-            title="What the coach remembers"
-            subtitle="The summary your coach keeps about you."
-            onPress={() => router.navigate("/coach/memory" as never)}
-          />
-          <Divider />
-          <ListRow
-            icon="time-outline"
-            title="Chat history"
-            subtitle="Reopen and manage past conversations."
-            onPress={() => router.navigate("/coach/sessions" as never)}
-          />
-        </Card>
-
-        <Text style={styles.sectionLabel}>Training</Text>
-        <Card style={styles.restCard}>
-          <Text style={typography.bodyStrong}>Rest days</Text>
-          <Text style={typography.small}>
-            {"Days you don't train. They won't break your streak."}
-          </Text>
-          <ChipRow style={styles.restRow}>
-            {WEEKDAYS.map((d) => (
-              <Chip
-                key={d.value}
-                label={d.label}
-                active={restDays.includes(d.value)}
-                onPress={() => toggleRestDay(d.value)}
-              />
-            ))}
-          </ChipRow>
-        </Card>
-
-        <Text style={styles.sectionLabel}>Features</Text>
-        <Card style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <Text style={typography.bodyStrong}>Meal tracking</Text>
-            <Text style={typography.small}>Show meals and let the coach log your food.</Text>
-          </View>
-          <Switch
-            value={profile?.meal_tracking_enabled !== false}
-            onValueChange={(v) => void saveSetting({ meal_tracking_enabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.white}
-          />
-        </Card>
-        <Card style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <Text style={typography.bodyStrong}>AI coach</Text>
-            <Text style={typography.small}>Show the coach entry points across the app.</Text>
-          </View>
-          <Switch
-            value={profile?.ai_coach_enabled !== false}
-            onValueChange={(v) => void saveSetting({ ai_coach_enabled: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.white}
-          />
-        </Card>
-
-        <Text style={styles.sectionLabel}>Logging</Text>
-        <Card style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <Text style={typography.bodyStrong}>Track bodyweight</Text>
-            <Text style={typography.small}>
-              {profile?.track_weight === false
-                ? "Off — weigh-ins are hidden and your weekly verdict judges strength and consistency instead."
-                : "Weigh-ins, your weight trend, and the weight part of your weekly verdict."}
-            </Text>
-          </View>
-          <Switch
-            value={profile?.track_weight !== false}
-            onValueChange={(v) => void saveSetting({ track_weight: v })}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.white}
-          />
-        </Card>
-        <Card style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <Text style={typography.bodyStrong}>Haptic feedback</Text>
-            <Text style={typography.small}>A gentle tick confirms every save.</Text>
-          </View>
-          <Switch
-            value={haptics}
-            onValueChange={(v) => {
-              setHaptics(v);
-              if (v) lightTick();
-            }}
-            trackColor={{ false: colors.border, true: colors.primary }}
-            thumbColor={colors.white}
-          />
-        </Card>
-        <Text style={[typography.small, styles.hint]}>
-          Lift sets save automatically about a second after you stop typing.
-        </Text>
-
-        <Text style={styles.sectionLabel}>Data</Text>
-        <Button
-          label="Clear cached data"
-          icon="refresh"
-          variant="outline"
-          onPress={() => {
-            clearAllCache();
-            setCacheCleared(true);
-            lightTick();
-          }}
-        />
-        <Text style={[typography.small, styles.hint]}>
-          {cacheCleared
-            ? "Cache cleared. Fresh data loads on next open."
-            : "Removes locally cached responses. Your logged data is never affected."}
-        </Text>
-        <View style={styles.versionRow}>
-          <Text style={typography.small}>App version</Text>
-          <Text style={typography.bodyStrong}>{version}</Text>
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + spacing.sm }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            onPress={() => router.back()}
+            style={({ pressed }) => [styles.back, pressed && styles.pressed]}
+          >
+            <Ionicons name="arrow-back" size={20} color={colors.text} />
+          </Pressable>
+          <Text style={[typography.h1, styles.title]}>Settings</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>About</Text>
-        <Card style={styles.aboutCard}>
-          <Text style={typography.bodyStrong}>How your verdict works</Text>
-          <Text style={styles.aboutLine}>• Weight trend — your 7-day rolling average, week over week.</Text>
-          <Text style={styles.aboutLine}>{"• Strength trend — this week\u2019s top sets vs last week\u2019s, per exercise."}</Text>
-          <Text style={styles.aboutLine}>• Adherence — days this week you hit your protein target.</Text>
-          <Text style={[typography.small, styles.hint]}>
-            Rule-based and computed weekly from your own data — Hold Steady, Adjust Calories, or Check
-            Recovery. No AI guessing.
-          </Text>
-        </Card>
+        <Text style={styles.sectionLabel}>Account</Text>
+        <View style={styles.card}>
+          <View style={styles.profile}>
+            <AccountSummary />
+          </View>
+          <View style={styles.rowDivider} />
+          <SettingsRow icon="person-outline" label="Edit profile" />
+          <SettingsRow icon="create-outline" label="Units & preferences" />
+          <SettingsRow icon="locate-outline" label="Goals" last />
+        </View>
 
-        {__DEV__ ? (
-          <>
-            <Text style={styles.sectionLabel}>Developer</Text>
-            <Card padded={false}>
-              <ListRow
-                icon="sparkles-outline"
-                title="Run onboarding"
-                subtitle="Open the welcome screen"
-                onPress={() => {
-                  setDevPreview(true);
-                  update({ onboarded: false }).catch(() => {});
-                  router.navigate("/onboarding/welcome" as never);
-                }}
-              />
-              <Divider />
-              <ListRow
-                icon="options-outline"
-                title="Onboarding steps"
-                subtitle="Jump to the About you step"
-                onPress={() => {
-                  setDevPreview(true);
-                  update({ onboarded: false }).catch(() => {});
-                  router.navigate("/onboarding/basics" as never);
-                }}
-              />
-              <Divider />
-              <ListRow
-                icon="checkmark-done-outline"
-                title="Mark onboarding done"
-                subtitle="Stop previewing and go to Today"
-                onPress={() => {
-                  setDevPreview(false);
-                  update({ onboarded: true }).catch(() => {});
-                  router.replace("/(tabs)/today" as never);
-                }}
-              />
-            </Card>
+        <Text style={styles.sectionLabel}>App settings</Text>
+        <View style={styles.card}>
+          <SettingsRow icon="notifications-outline" label="Notifications" />
+          <SettingsRow icon="color-palette-outline" label="Appearance" value="Dark" />
+          <SettingsRow icon="shield-checkmark-outline" label="Data & privacy" />
+          <SettingsRow icon="globe-outline" label="Language" value="English" last />
+        </View>
 
-            <Card style={styles.restCard}>
-              <Text style={typography.bodyStrong}>Test plan state</Text>
-              <Text style={typography.small}>
-                Switch the entitlement to see every gate. AI counters reset each time, so a
-                used-up state can be re-tested immediately.
-              </Text>
-              <ChipRow style={styles.restRow}>
-                {DEV_PLANS.map((p) => (
-                  <Chip
-                    key={p.value}
-                    label={p.label}
-                    active={devPlanState === p.value}
-                    onPress={() => void simulatePlan(p.value)}
-                  />
-                ))}
-              </ChipRow>
-            </Card>
-          </>
-        ) : null}
+        <Text style={styles.sectionLabel}>Integrations</Text>
+        <View style={styles.card}>
+          <SettingsRow icon="heart-outline" label="Health apps" value="Apple Health, Google Fit" />
+          <SettingsRow icon="watch-outline" label="Connect devices" value="Smart scale, Fitness band" last />
+        </View>
+
+        <Text style={styles.sectionLabel}>Other</Text>
+        <View style={styles.card}>
+          <SettingsRow icon="help-circle-outline" label="Help & support" />
+          <SettingsRow icon="chatbubble-ellipses-outline" label="Send feedback" />
+          <SettingsRow icon="information-circle-outline" label="About" value={`v${VERSION}`} last />
+        </View>
       </ScrollView>
     </View>
   );
@@ -426,17 +106,56 @@ export default function SettingsScreen() {
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg },
-    scroll: { padding: spacing.screen, paddingBottom: spacing.xxxl, gap: spacing.md },
-    sectionLabel: { ...t.typography.caption, color: t.colors.textDim, marginTop: spacing.sm },
-    hint: { color: t.colors.textDim },
-    accountCard: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    accountText: { flex: 1, gap: 2 },
-    toggleRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-    toggleText: { flex: 1, gap: 2 },
-    restCard: { gap: spacing.sm },
-    restRow: { marginTop: spacing.xs },
-    versionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-    aboutCard: { gap: spacing.sm },
-    aboutLine: { ...t.typography.small, color: t.colors.text, lineHeight: 19 },
+    scroll: { paddingHorizontal: spacing.screen, paddingBottom: spacing.xxxl },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      marginBottom: spacing.lg,
+    },
+    back: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+    },
+    pressed: { opacity: 0.7 },
+    title: { fontSize: 24, fontWeight: "800", letterSpacing: -0.4 },
+
+    sectionLabel: {
+      ...t.typography.small,
+      color: t.colors.textDim,
+      fontWeight: "600",
+      marginTop: spacing.xl,
+      marginBottom: spacing.sm,
+      marginLeft: spacing.xs,
+    },
+    card: {
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.xl,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.cardBorder,
+      overflow: "hidden",
+    },
+    profile: { padding: spacing.md },
+    row: {
+      minHeight: 48,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+    },
+    label: { flex: 1, minWidth: 0 },
+    value: { fontSize: 12, color: t.colors.textDim, flexShrink: 1, maxWidth: "52%", textAlign: "right" },
+    rowDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: t.colors.border,
+      marginLeft: spacing.md + 19 + spacing.md,
+    },
   }),
 );

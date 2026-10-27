@@ -168,8 +168,6 @@ export function NutritionCard({
   calorieTarget,
   loggedProtein,
   proteinTarget,
-  mealCount,
-  onLogMeal,
   onPressMeals,
   onEdit,
 }: {
@@ -177,14 +175,11 @@ export function NutritionCard({
   calorieTarget: number | null;
   loggedProtein: number;
   proteinTarget: number | null;
-  mealCount: number;
-  onLogMeal: () => void;
   onPressMeals: () => void;
   onEdit: (field: "calories" | "protein_g", value: number | null) => void;
 }) {
   const { colors } = useTheme();
   const styles = useStyles();
-  const mealLabel = mealCount === 0 ? "No meals yet" : `${mealCount} ${mealCount === 1 ? "meal" : "meals"}`;
 
   return (
     <Card padded={false} style={styles.card}>
@@ -225,29 +220,6 @@ export function NutritionCard({
         <Macro label="P" value={loggedProtein} color={colors.blue} />
         <View style={styles.macroDivider} />
         <Macro label="F" value={null} color={colors.pink} />
-      </View>
-
-      <View style={styles.footer}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${mealLabel}. Open meals`}
-          onPress={onPressMeals}
-          hitSlop={8}
-          style={({ pressed }) => [styles.footerButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.footerText}>{mealLabel}</Text>
-          <Ionicons name="chevron-forward" size={13} color={colors.textDim} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Log a meal with the coach"
-          onPress={onLogMeal}
-          hitSlop={8}
-          style={({ pressed }) => [styles.footerButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="add" size={16} color={colors.primary} />
-          <Text style={styles.footerAction}>Log meal</Text>
-        </Pressable>
       </View>
     </Card>
   );
@@ -298,18 +270,5 @@ const useStyles = makeUseStyles((t) =>
     macroLabel: { fontSize: 13, fontWeight: "700", color: t.colors.text },
     macroValue: { fontSize: 13, fontWeight: "500", color: t.colors.textDim },
     macroDivider: { width: StyleSheet.hairlineWidth, height: 16, backgroundColor: t.colors.border },
-
-    footer: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: t.colors.border,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-    },
-    footerButton: { flexDirection: "row", alignItems: "center", gap: 2 },
-    footerText: { fontSize: 12, fontWeight: "500", color: t.colors.textDim },
-    footerAction: { fontSize: 13, fontWeight: "700", color: t.colors.primary },
   }),
 );

@@ -6,6 +6,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -21,8 +22,11 @@ import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
 import { ScreenHeader } from "../ScreenHeader";
 import { Banner, IconBadge } from "../ui/primitives";
-import { Chip, ChipRow, IconButton, OverflowMenu } from "../ui/controls";
+import { Chip, ChipRow, IconButton } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
+import { CoachLanding, type CoachQuickAction } from "./CoachLanding";
+import { CoachChatLanding } from "./CoachChatLanding";
+import { CoachMenuSheet } from "./CoachMenuSheet";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
 import { useEntitlement } from "../../hooks/useEntitlement";
 import { useMealsApi } from "../../api/meals";
@@ -56,6 +60,10 @@ export function CoachChat({
   initialAgent,
   initialMessage,
   localDate = todayLocal(),
+  richLanding = false,
+  chatLanding = false,
+  onBack,
+  tabbed = false,
 }: {
   sessionId?: string;
   title?: string;
@@ -63,6 +71,13 @@ export function CoachChat({
   initialMessage?: string;
   /** The day this chat is logging for (defaults to today). */
   localDate?: string;
+  /** Coach-tab landing content instead of the plain empty state. */
+  richLanding?: boolean;
+  /** Full-chat welcome: greeting bubble plus prompt list. */
+  chatLanding?: boolean;
+  onBack?: () => void;
+  /** The tab bar already accounts for the bottom safe area. */
+  tabbed?: boolean;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -80,7 +95,6 @@ export function CoachChat({
     injectAssistant,
     injectUser,
     agent,
-    setAgent,
   } = useCoachChat(sessionId, initialAgent, localDate);
   const mealsApi = useMealsApi();
   const posthog = usePostHog();
@@ -98,6 +112,44 @@ export function CoachChat({
   /** Attached but not sent yet — the composer's text is its caption. */
   const [pendingPhoto, setPendingPhoto] = useState<UploadPhoto | null>(null);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const inputRef = useRef<TextInput>(null);
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false);
+  const canSend = !!(input.trim() || pendingPhoto);
+  const showComposer = !richLanding;
+
+  const openChat = (nextAgent: AgentId, prompt: string) =>
+    router.navigate({
+      pathname: "/coach/chat",
+      params: { agent: nextAgent, q: prompt, date: "", fresh: "" },
+    } as never);
+
+  const handleQuickAction = (action: CoachQuickAction) => {
+    switch (action) {
+      case "meal":
+        openChat("meal", "Log a meal — ");
+        break;
+      case "training":
+        openChat("training", "Review my training — ");
+        break;
+      case "plan":
+        openChat("training", "Change my plan — ");
+        break;
+      case "checkin":
+        openChat("general", "Give me this week's check-in");
+        break;
+    }
+  };
+
+  const selectAgent = (id: AgentId) => {
+    if (id === agent) return;
+    const params = { agent: id, q: "", date: richLanding ? "" : localDate, fresh: "" };
+    if (richLanding) {
+      router.navigate({ pathname: "/coach/chat", params } as never);
+    } else {
+      router.replace({ pathname: "/coach/chat", params } as never);
+    }
+  };
+
 
   const submit = (text: string) => {
     const caption = text.trim();
@@ -228,7 +280,9 @@ export function CoachChat({
         variant="detail"
         title={title ?? "Coach"}
         subtitle={AGENT_LABELS[agent]}
-        onBack={() => router.back()}
+        titleStyle={styles.chatTitle}
+        style={styles.header}
+        onBack={onBack ?? (() => router.back())}
         right={
           <>
             <IconButton
@@ -245,9 +299,15 @@ export function CoachChat({
         }
       />
 
-      <ChipRow style={styles.agentChips}>
+      <ChipRow style={styles.agentChips} containerStyle={styles.agentChipsContainer}>
         {AGENT_ORDER.map((id) => (
-          <Chip key={id} label={AGENT_LABELS[id]} active={agent === id} onPress={() => setAgent(id)} />
+          <Chip
+            key={id}
+            label={AGENT_LABELS[id]}
+            active={agent === id}
+            onPress={() => selectAgent(id)}
+            style={styles.agentPill}
+          />
         ))}
       </ChipRow>
 
@@ -255,19 +315,65 @@ export function CoachChat({
 
       {/* The chat transcript is free-text health conversation; keep it out of
           session replays by marking the list itself ph-no-capture (PostHog
-          checks the accessibility label on any view). No extra wrapper view —
-          wrapping the list in one broke its height on Android. */}
+          checks the accessibility label on any view). */}
+      <View style={styles.chatViewport}>
+      {loading ? null : messages.length === 0 ? (
+        <ScrollView
+          style={styles.listView}
+          contentContainerStyle={styles.list}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {richLanding ? (
+            <CoachLanding
+              onQuickAction={handleQuickAction}
+              onPrompt={(prompt) => openChat(agent, prompt)}
+              onOpenContext={() => router.navigate("/coach/memory" as never)}
+              showAllSuggestions={showAllSuggestions}
+              onToggleSuggestions={() => setShowAllSuggestions((v) => !v)}
+            />
+          ) : chatLanding ? (
+            <CoachChatLanding agent={agent} onPrompt={submit} />
+          ) : (
+            <View style={styles.empty}>
+              <IconBadge name="sparkles" bg={colors.primarySoft} color={colors.primary} size={56} rounded={false} />
+              <Text style={[typography.h3, styles.emptyTitle]}>Your AI coach</Text>
+              <Text style={[typography.small, styles.emptyText]}>
+                It can see your logs, your plan and your weekly verdict. Ask it anything, or start with one of these.
+              </Text>
+              <ChipRow style={styles.starters}>
+                {STARTERS.map((s) => (
+                  <Chip key={s} label={s} onPress={() => submit(s)} />
+                ))}
+              </ChipRow>
+            </View>
+          )}
+        </ScrollView>
+      ) : (
       <FlatList
         ref={listRef}
         data={messages}
         keyExtractor={(m) => m.id}
         accessibilityLabel="ph-no-capture"
         collapsable={false}
+        style={styles.listView}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() => {
+          if (messages.length > 0) listRef.current?.scrollToEnd({ animated: true });
+        }}
         ListEmptyComponent={
-          loading ? null : (
+          loading ? null : richLanding ? (
+            <CoachLanding
+              onQuickAction={handleQuickAction}
+              onPrompt={(prompt) => openChat(agent, prompt)}
+              onOpenContext={() => router.navigate("/coach/memory" as never)}
+              showAllSuggestions={showAllSuggestions}
+              onToggleSuggestions={() => setShowAllSuggestions((v) => !v)}
+            />
+          ) : chatLanding ? (
+            <CoachChatLanding agent={agent} onPrompt={submit} />
+          ) : (
             <View style={styles.empty}>
               <IconBadge name="sparkles" bg={colors.primarySoft} color={colors.primary} size={56} rounded={false} />
               <Text style={[typography.h3, styles.emptyTitle]}>Your AI coach</Text>
@@ -326,7 +432,10 @@ export function CoachChat({
           );
         }}
       />
+      )}
+      </View>
 
+      {showComposer ? (
       <View style={styles.composer}>
         {pendingPhoto ? (
           <View style={styles.attachRow}>
@@ -362,12 +471,10 @@ export function CoachChat({
           </Pressable>
         ) : null}
 
-        <View style={[styles.inputRow, { paddingBottom: spacing.md + insets.bottom }]}>
-          <IconButton
-            name={photoBusy ? "hourglass-outline" : "camera-outline"}
+        <View style={[styles.inputRow, { paddingBottom: spacing.md + (tabbed ? 0 : insets.bottom) }]}>
+          <Pressable
+            accessibilityRole="button"
             accessibilityLabel="Log a meal from a photo"
-            size={26}
-            color={photoBusy ? colors.textMuted : colors.text}
             onPress={
               photoBusy
                 ? undefined
@@ -375,61 +482,73 @@ export function CoachChat({
                   ? () => router.navigate("/paywall" as never)
                   : pickMealPhoto
             }
-          />
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            placeholder={pendingPhoto ? "What's in it? e.g. 2 rotis, 1 cup dal" : "Ask your coach…"}
-            placeholderTextColor={colors.textMuted}
-            style={styles.input}
-            multiline
-          />
+            style={({ pressed }) => [styles.cameraButton, pressed && styles.pressed]}
+          >
+            <Ionicons
+              name={photoBusy ? "hourglass-outline" : "camera-outline"}
+              size={20}
+              color={photoBusy ? colors.textMuted : colors.text}
+            />
+          </Pressable>
+
+          <View style={styles.inputWrap}>
+            <TextInput
+              ref={inputRef}
+              value={input}
+              onChangeText={setInput}
+              placeholder={
+                pendingPhoto
+                  ? "What's in it? e.g. 2 rotis, 1 cup dal"
+                  : richLanding
+                    ? "Ask your coach or describe an action…"
+                    : "Ask your coach…"
+              }
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              multiline
+            />
+          </View>
+
           {streaming ? (
-            <IconButton name="stop-circle" accessibilityLabel="Stop generating" size={30} color={colors.danger} onPress={stop} />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Stop generating"
+              onPress={stop}
+              style={({ pressed }) => [styles.sendButton, styles.stopButton, pressed && styles.pressed]}
+            >
+              <Ionicons name="stop" size={15} color={colors.danger} />
+            </Pressable>
           ) : photoBusy ? (
-            <View style={styles.sendBusy}>
+            <View style={styles.sendButton}>
               <ActivityIndicator size="small" color={colors.textMuted} />
             </View>
           ) : (
-            <IconButton
-              name="arrow-up-circle"
+            <Pressable
+              accessibilityRole="button"
               accessibilityLabel="Send message"
-              size={30}
-              color={input.trim() || pendingPhoto ? colors.primary : colors.textMuted}
               onPress={() => submit(input)}
-            />
+              disabled={!canSend}
+              style={({ pressed }) => [
+                styles.sendButton,
+                !canSend && styles.sendDisabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Ionicons
+                name="arrow-up"
+                size={18}
+                color={canSend ? colors.onPrimary : colors.textMuted}
+              />
+            </Pressable>
           )}
         </View>
       </View>
+      ) : null}
 
-      <OverflowMenu
+      <CoachMenuSheet
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
-        actions={[
-          {
-            label: "New chat",
-            icon: "add",
-            // `fresh` bypasses the Meals chat's one-thread-per-day reuse, and the
-            // agent keeps you in the section you were in.
-            onPress: () =>
-              router.replace({ pathname: "/coach/new", params: { agent, fresh: "1" } } as never),
-          },
-          {
-            label: "Chat history",
-            icon: "time-outline",
-            onPress: () => router.navigate("/coach/sessions" as never),
-          },
-          {
-            label: "What the coach remembers",
-            icon: "bulb-outline",
-            onPress: () => router.navigate("/coach/memory" as never),
-          },
-          {
-            label: "Your goals",
-            icon: "options-outline",
-            onPress: () => router.navigate("/coach/onboarding" as never),
-          },
-        ]}
+        agent={agent}
       />
     </KeyboardAvoidingView>
   );
@@ -478,8 +597,15 @@ function MessageBody({
 const useStyles = makeUseStyles((t) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: t.colors.bg, gap: spacing.sm },
-    agentChips: { paddingHorizontal: spacing.screen },
-    list: { padding: spacing.screen, gap: spacing.sm, flexGrow: 1 },
+    header: { flexShrink: 0 },
+    chatTitle: { fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
+    agentChips: { paddingHorizontal: spacing.screen, flexShrink: 0 },
+    agentChipsContainer: { flexGrow: 0, flexShrink: 0 },
+    agentPill: { height: 46, paddingHorizontal: spacing.xl },
+    pressed: { opacity: 0.7 },
+    chatViewport: { flex: 1, minHeight: 0 },
+    listView: { flex: 1 },
+    list: { padding: spacing.screen, gap: spacing.sm },
 
     empty: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.xxl, paddingHorizontal: spacing.md },
     emptyTitle: { marginTop: spacing.sm },
@@ -505,7 +631,8 @@ const useStyles = makeUseStyles((t) =>
     composer: {
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: t.colors.border,
-      backgroundColor: t.colors.surface,
+      backgroundColor: t.colors.bg,
+      flexShrink: 0,
     },
     lockedNotice: {
       flexDirection: "row",
@@ -534,7 +661,6 @@ const useStyles = makeUseStyles((t) =>
       backgroundColor: t.colors.surfaceAlt,
     },
     attachText: { flex: 1, ...t.typography.caption, color: t.colors.textDim },
-    sendBusy: { width: 30, alignItems: "center", justifyContent: "center" },
     inputRow: {
       flexDirection: "row",
       alignItems: "flex-end",
@@ -542,15 +668,42 @@ const useStyles = makeUseStyles((t) =>
       paddingHorizontal: spacing.screen,
       paddingTop: spacing.sm,
     },
-    input: {
+    cameraButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radii.md,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: t.colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
+    },
+    inputWrap: {
       flex: 1,
+      minHeight: 44,
       maxHeight: 120,
-      backgroundColor: t.colors.surfaceAlt,
-      borderRadius: radii.lg,
+      backgroundColor: t.colors.surface,
+      borderRadius: radii.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: t.colors.border,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+    },
+    input: {
+      maxHeight: 108,
+      paddingVertical: 12,
       fontSize: 15,
       color: t.colors.text,
     },
+    sendButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: t.colors.primary,
+    },
+    sendDisabled: { backgroundColor: t.colors.surfaceAlt },
+    stopButton: { backgroundColor: t.colors.dangerSoft },
   }),
 );
+

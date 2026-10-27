@@ -91,15 +91,19 @@ export function Chip({
 export function ChipRow({
   children,
   style,
+  containerStyle,
 }: {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  /** Outer ScrollView style; use it to stop a row from filling a flex column. */
+  containerStyle?: StyleProp<ViewStyle>;
 }) {
   const styles = useStyles();
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
+      style={containerStyle}
       contentContainerStyle={[styles.chipRow, style]}
     >
       {children}
