@@ -35,6 +35,7 @@ export function StepScaffold({
   const { typography } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const single = total <= 1;
 
   return (
     <KeyboardAvoidingView
@@ -46,10 +47,10 @@ export function StepScaffold({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
       >
-        <OnboardingProgress step={step} total={total} />
+        {single ? null : <OnboardingProgress step={step} total={total} />}
 
         <View style={styles.header}>
-          <Text style={typography.small}>{`Step ${step} of ${total}`}</Text>
+          {single ? null : <Text style={typography.small}>{`Step ${step} of ${total}`}</Text>}
           <Text style={[typography.h1, styles.title]}>{title}</Text>
           {subtitle ? <Text style={[typography.small, styles.subtitle]}>{subtitle}</Text> : null}
         </View>
@@ -68,12 +69,14 @@ export function StepScaffold({
           />
         ) : null}
         <View style={styles.footerRow}>
-          <Button
-            label="Back"
-            variant="outline"
-            onPress={onBack ?? (() => router.back())}
-            style={styles.flex}
-          />
+          {single ? null : (
+            <Button
+              label="Back"
+              variant="outline"
+              onPress={onBack ?? (() => router.back())}
+              style={styles.flex}
+            />
+          )}
           {nextLabel && onNext ? (
             <Button
               label={nextLabel}

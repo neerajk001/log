@@ -1,8 +1,8 @@
 import { darkColors, type Palette } from "./colors";
 
 /**
- * The mint-on-black brand surface used by first-run onboarding (the hero, the
- * intro carousel and the three setup steps).
+ * The mint-on-black brand surface used by first-run onboarding (the welcome
+ * hero, the account screen and the single setup step).
  *
  * The app's `dark` scheme *is* the brand surface, so this aliases it rather
  * than duplicating values — onboarding and the signed-in app can never drift

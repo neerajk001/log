@@ -62,10 +62,9 @@ function AuthGate() {
     if (isCallback) return;
 
     if (!isSignedIn) {
-      // Signed-out entry points: the welcome hero, the intro carousel and the
-      // account screen all sit ahead of sign-in.
+      // Signed-out entry points: the welcome hero and the account screen.
       const inSignedOutOnboarding =
-        first === "onboarding" && ["welcome", "intro", "account"].includes(step);
+        first === "onboarding" && ["welcome", "account"].includes(step);
       if (!inSignIn && !inSignedOutOnboarding) router.replace("/onboarding/welcome" as never);
       return;
     }
@@ -81,9 +80,9 @@ function AuthGate() {
     if (profile?.onboarded_at == null) {
       // Dev-only preview: the Settings shortcuts may walk the whole flow.
       if (__DEV__ && isDevPreview() && inOnboarding) return;
-      // The setup steps are basics → appearance → plan. The pre-auth hero and
-      // carousel (welcome / intro / account) hand over here once signed in.
-      const setupSteps = ["basics", "appearance", "plan"];
+      // The single setup step is basics. The pre-auth hero and account screen
+      // hand over here once signed in.
+      const setupSteps = ["basics"];
       if (!inOnboarding || !setupSteps.includes(step)) {
         router.replace("/onboarding/basics" as never);
       }

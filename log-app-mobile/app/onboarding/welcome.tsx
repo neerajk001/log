@@ -47,8 +47,7 @@ export default function WelcomeScreen() {
   const insets = useSafeAreaInsets();
   const styles = useStyles();
 
-  const start = () => router.navigate("/onboarding/intro" as never);
-  const skip = () => router.navigate("/onboarding/account" as never);
+  const start = () => router.navigate("/onboarding/account" as never);
 
   return (
     <ImageBackground source={BG_IMAGE} style={styles.container} resizeMode="cover">
@@ -63,12 +62,6 @@ export default function WelcomeScreen() {
           { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + spacing.lg },
         ]}
       >
-        <View style={styles.topRow}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Skip" hitSlop={10} onPress={skip}>
-            <Text style={styles.skip}>Skip</Text>
-          </Pressable>
-        </View>
-
         <View style={styles.spacerTop} />
 
         <View style={styles.brand}>
@@ -106,8 +99,6 @@ const useStyles = makeUseStyles(() =>
     bottomFade: { position: "absolute", left: 0, right: 0, bottom: 0, height: "62%" },
 
     content: { flex: 1, paddingHorizontal: spacing.lg },
-    topRow: { alignItems: "flex-end" },
-    skip: { color: "#FFFFFF", fontSize: 16, fontWeight: "600" },
 
     spacerTop: { flex: 0.8 },
 

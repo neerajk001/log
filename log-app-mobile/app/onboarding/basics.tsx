@@ -4,10 +4,11 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { StepScaffold } from "../../src/components/onboarding/StepScaffold";
 import { TextField } from "../../src/components/ui/controls";
-import type { IoniconName } from "../../src/components/ui/primitives";
+import { Banner, type IoniconName } from "../../src/components/ui/primitives";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
-import { getDraft, setDraft } from "../../src/state/onboarding";
+import { draftToPayload, getDraft, resetDraft } from "../../src/state/onboarding";
+import { useMe } from "../../src/hooks/useMe";
 
 type Sex = "male" | "female" | "other";
 
@@ -17,29 +18,46 @@ const SEX_OPTIONS: { value: Sex; label: string; icon: IoniconName }[] = [
   { value: "other", label: "Other", icon: "male-female" },
 ];
 
-/** Step 1 — about you. */
+/** The single setup step — about you. Finishing here marks onboarding complete. */
 export default function BasicsScreen() {
   const d = getDraft();
   const [sex, setSex] = useState<Sex | null>(d.sex);
   const [age, setAge] = useState(d.age);
   const [height, setHeight] = useState(d.height_cm);
   const [weight, setWeight] = useState(d.weight_kg);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { completeOnboarding } = useMe();
   const { colors, typography } = useTheme();
   const styles = useStyles();
 
   const ready = !!sex && !!age && !!height && !!weight;
 
+  const finish = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await completeOnboarding(draftToPayload({ sex, age, height_cm: height, weight_kg: weight }));
+      resetDraft();
+      router.replace("/(tabs)/today" as never);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save your setup. Try again.");
+      setBusy(false);
+    }
+  };
+
   return (
     <StepScaffold
       step={1}
+      total={1}
       title="Tell us about yourself"
       subtitle="A few basics so your insights and targets fit you."
-      nextDisabled={!ready}
-      onNext={() => {
-        setDraft({ sex, age, height_cm: height, weight_kg: weight });
-        router.navigate("/onboarding/appearance" as never);
-      }}
+      nextLabel="Finish"
+      nextDisabled={!ready || busy}
+      onNext={finish}
     >
+      {error ? <Banner tone="danger" message={error} /> : null}
+
       <View style={styles.sexRow}>
         {SEX_OPTIONS.map((option) => {
           const active = sex === option.value;
