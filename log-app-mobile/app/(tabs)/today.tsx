@@ -4,14 +4,14 @@ import { router, type ErrorBoundaryProps } from "expo-router";
 import { useClerk } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
-import { radii, spacing } from "../../src/theme/spacing";
-import { ScreenHeader } from "../../src/components/ScreenHeader";
+import { spacing } from "../../src/theme/spacing";
 import { DateStrip } from "../../src/components/DateStrip";
 import { MetricCard } from "../../src/components/MetricCard";
 import { ActivitySheet } from "../../src/components/ActivitySheet";
 import { CalendarSheet } from "../../src/components/CalendarSheet";
 import { MealSheet } from "../../src/components/MealSheet";
 import { MealsSheet } from "../../src/components/MealsSheet";
+import { TodayHeader } from "../../src/components/home/TodayHeader";
 import { TodaysWorkoutCard } from "../../src/components/home/TodaysWorkoutCard";
 import { NutritionCard } from "../../src/components/home/NutritionCard";
 import { PhysiqueEntryCard } from "../../src/components/home/PhysiqueCard";
@@ -24,7 +24,7 @@ import {
   LoadingState,
   IconBadge,
 } from "../../src/components/ui/primitives";
-import { IconButton, OverflowMenu } from "../../src/components/ui/controls";
+import { OverflowMenu } from "../../src/components/ui/controls";
 import { useTodayLog } from "../../src/hooks/useTodayLog";
 import { useMe } from "../../src/hooks/useMe";
 import { useCurrentDate } from "../../src/hooks/useCurrentDate";
@@ -34,27 +34,7 @@ import { useMeals } from "../../src/hooks/useMeals";
 import { usePlanToday } from "../../src/hooks/usePlanToday";
 import { useDailyComparison } from "../../src/hooks/useDailyComparison";
 import type { MealLog } from "../../src/api/types";
-import { formatMediumDate, parseIso } from "../../src/utils/date";
 import { muscleGroupsForDay } from "../../src/utils/derive";
-
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good Morning";
-  if (h < 18) return "Good Afternoon";
-  return "Good Evening";
-}
-
-/** "THU, OCT 22" — the day the strip is pointed at. */
-function dateLabel(iso: string): string {
-  const date = parseIso(iso);
-  const weekday = date
-    .toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" })
-    .toUpperCase();
-  const month = date
-    .toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" })
-    .toUpperCase();
-  return `${weekday}, ${month} ${date.getUTCDate()}`;
-}
 
 type Footnote = { text: string; tone?: "positive" | "negative" | "neutral" };
 
@@ -264,27 +244,11 @@ export default function TodayScreen() {
         keyboardShouldPersistTaps="handled"
         refreshControl={<RefreshControl refreshing={manualRefreshing} onRefresh={refetchAll} tintColor={colors.primary} />}
       >
-        <ScreenHeader
-          variant="brand"
-          right={
-            <>
-              <Pressable onPress={() => setCalendarOpen(true)} style={styles.todayChip}>
-                <Ionicons name="calendar-outline" size={16} color={colors.text} />
-                <Text style={styles.todayChipText} numberOfLines={1}>
-                  {activeDate === today ? "Today" : formatMediumDate(activeDate)}
-                </Text>
-              </Pressable>
-              {profile?.ai_coach_enabled !== false ? (
-                <IconButton
-                  name="sparkles"
-                  color={colors.primary}
-                  accessibilityLabel="Open AI coach"
-                  onPress={() => router.navigate("/coach" as never)}
-                />
-              ) : null}
-              <IconButton name="ellipsis-horizontal" accessibilityLabel="More options" onPress={() => setMenuOpen(true)} />
-            </>
-          }
+        <TodayHeader
+          date={activeDate}
+          onMenu={() => setMenuOpen(true)}
+          onCalendar={() => setCalendarOpen(true)}
+          onSettings={() => router.navigate("/settings" as never)}
         />
 
         {activeDate !== today ? (
@@ -294,9 +258,7 @@ export default function TodayScreen() {
           </Pressable>
         ) : null}
 
-        <View style={styles.greetingBlock}>
-          <Text style={typography.h2}>{greeting()}</Text>
-          <Text style={styles.dateCaption}>{dateLabel(activeDate)}</Text>
+        <View style={styles.dateStripBlock}>
           <DateStrip selected={activeDate} today={today} onSelect={setActiveDate} />
         </View>
 
@@ -474,7 +436,15 @@ export default function TodayScreen() {
         visible={menuOpen}
         onClose={() => setMenuOpen(false)}
         actions={[
-          { label: "Settings", icon: "settings-outline", onPress: () => router.navigate("/settings" as never) },
+          ...(profile?.ai_coach_enabled !== false
+            ? [
+                {
+                  label: "AI coach",
+                  icon: "sparkles-outline" as const,
+                  onPress: () => router.navigate("/coach" as never),
+                },
+              ]
+            : []),
           {
             label: "Log out",
             icon: "log-out-outline",
@@ -498,8 +468,7 @@ const useStyles = makeUseStyles((t) =>
     list: { gap: spacing.sm },
     footerSpace: { height: spacing.xxl },
 
-    greetingBlock: { gap: spacing.sm, marginTop: spacing.lg },
-    dateCaption: { ...t.typography.caption, color: t.colors.textDim },
+    dateStripBlock: { marginTop: spacing.lg },
 
     grid: {
       flexDirection: "row",
@@ -508,21 +477,6 @@ const useStyles = makeUseStyles((t) =>
       rowGap: spacing.sm,
       marginTop: spacing.md,
     },
-
-    todayChip: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: spacing.xs,
-      backgroundColor: t.colors.surface,
-      borderWidth: 1,
-      borderColor: t.colors.border,
-      borderRadius: radii.pill,
-      paddingHorizontal: spacing.md,
-      height: 38,
-      maxWidth: 150,
-      flexShrink: 1,
-    },
-    todayChipText: { fontSize: 13, fontWeight: "600", color: t.colors.text, flexShrink: 1 },
 
     backToday: {
       flexDirection: "row",
