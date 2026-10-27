@@ -133,6 +133,13 @@ export default function InsightsScreen() {
   const [nutritionMetric, setNutritionMetric] = useState<"calories" | "protein">("calories");
   const [nutritionWeeks, setNutritionWeeks] = useState(1);
   const [nutritionDetailOpen, setNutritionDetailOpen] = useState(false);
+
+  // The daily detail list is a 7-day view. Leaving 1W must close it so a 2W/3W
+  // average is never paired with last week's daily numbers.
+  const changeNutritionWindow = (weeks: number) => {
+    setNutritionWeeks(weeks);
+    if (weeks !== 1) setNutritionDetailOpen(false);
+  };
   const [weightRowsOpen, setWeightRowsOpen] = useState(false);
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -302,6 +309,9 @@ export default function InsightsScreen() {
     [weekSeries, nutritionMetric],
   );
   const weekLoggedDays = weekSeries.reduce((sum, b) => sum + b.days, 0);
+  // Logged days in the window whose average is on screen (weekly buckets for
+  // 2W+); the bars stay on the last seven days and are labelled as such.
+  const windowLoggedDays = nutritionCurrent.reduce((sum, b) => sum + b.days, 0);
 
   /* ------------------------------------------------------------- weight rows */
   const recentWeightRows = useMemo(() => {
@@ -646,7 +656,7 @@ export default function InsightsScreen() {
                   key={w.weeks}
                   label={w.label}
                   active={nutritionWeeks === w.weeks}
-                  onPress={() => setNutritionWeeks(w.weeks)}
+                  onPress={() => changeNutritionWindow(w.weeks)}
                 />
               ))}
             </ChipRow>
@@ -708,27 +718,29 @@ export default function InsightsScreen() {
                   <Ionicons name="calendar-outline" size={14} color={colors.textDim} />
                   <Text style={[typography.caption, styles.footerText]} numberOfLines={2}>
                     {barsDimmed
-                      ? `Showing last week · from ${weekLoggedDays} log${weekLoggedDays === 1 ? "" : "s"}`
-                      : `From ${weekLoggedDays} logged day${weekLoggedDays === 1 ? "" : "s"} · completed days only`}
+                      ? `Average over the last ${nutritionWindow.phrase} · ${windowLoggedDays} of ${nutritionWeeks * 7} days logged · bars show the last 7 days`
+                      : `From ${weekLoggedDays} of 7 logged days · completed days only`}
                   </Text>
-                  <Pressable
-                    onPress={() => setNutritionDetailOpen((open) => !open)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Daily nutrition breakdown"
-                    accessibilityState={{ expanded: nutritionDetailOpen }}
-                    hitSlop={8}
-                    style={styles.footerLink}
-                  >
-                    <Text style={styles.footerLinkText}>View details</Text>
-                    <Ionicons
-                      name={nutritionDetailOpen ? "chevron-up" : "chevron-forward"}
-                      size={14}
-                      color={colors.primary}
-                    />
-                  </Pressable>
+                  {nutritionWeeks === 1 ? (
+                    <Pressable
+                      onPress={() => setNutritionDetailOpen((open) => !open)}
+                      accessibilityRole="button"
+                      accessibilityLabel="Daily nutrition breakdown"
+                      accessibilityState={{ expanded: nutritionDetailOpen }}
+                      hitSlop={8}
+                      style={styles.footerLink}
+                    >
+                      <Text style={styles.footerLinkText}>View details</Text>
+                      <Ionicons
+                        name={nutritionDetailOpen ? "chevron-up" : "chevron-forward"}
+                        size={14}
+                        color={colors.primary}
+                      />
+                    </Pressable>
+                  ) : null}
                 </View>
 
-                {nutritionDetailOpen ? (
+                {nutritionDetailOpen && nutritionWeeks === 1 ? (
                   <View style={styles.detailRows}>
                     {nutritionChart.map((d) => (
                       <View key={d.iso} style={styles.detailRow}>
