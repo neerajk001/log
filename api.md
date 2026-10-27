@@ -605,7 +605,13 @@ Returns the user's chats, newest first: `[{ id, title, updated_at, message_count
 
 ## `GET /api/coach/sessions/:id/messages`
 
-Returns that chat's turns (oldest first): `[{ id, role, content, created_at }]`.
+Returns that chat's turns (oldest first): `[{ id, role, content, proposals, created_at }]`.
+Stored proposals include their `status` once the athlete applies or dismisses them.
+
+## `POST /api/coach/proposals/:id`
+
+Body `{ status: "applied" | "dismissed" }`. Persists the decision on the stored
+proposal so reopening the chat does not show the same confirmation card again.
 
 ## `DELETE /api/coach/sessions/:id`
 

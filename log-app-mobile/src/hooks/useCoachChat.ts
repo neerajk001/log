@@ -55,6 +55,10 @@ export function useCoachChat(
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
   const [agent, setAgent] = useState<AgentId>(initialAgent ?? "general");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const [loading, setLoading] = useState(Boolean(initialSessionId));
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -92,6 +96,7 @@ export function useCoachChat(
           proposals: (m.proposals ?? []).map((proposal, i) => ({
             id: proposal.id ?? `${m.id}-p${i + 1}`,
             proposal,
+            status: proposal.status,
           })),
         })),
       );
@@ -176,7 +181,7 @@ export function useCoachChat(
               onStatus: (next) => setStatus(next),
               onProposal: (proposal) => {
                 proposalSeq += 1;
-                const id = `${assistantId}-p${proposalSeq}`;
+                const id = proposal.id ?? `${assistantId}-p${proposalSeq}`;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantId
@@ -282,6 +287,23 @@ export function useCoachChat(
     abortRef.current = null;
   }, []);
 
+  /** Switch agent in place: abandon the current turn and start a fresh chat. */
+  const reset = useCallback((nextAgent?: AgentId) => {
+    // Invalidate any in-flight history load before clearing the transcript.
+    begin();
+    abortRef.current?.abort();
+    abortRef.current = null;
+    streamingRef.current = false;
+    setSessionId(null);
+    setMessages([]);
+    setLoading(false);
+    setStreaming(false);
+    setStatus(null);
+    setError(null);
+    setPendingCorrection(null);
+    if (nextAgent) setAgent(nextAgent);
+  }, [begin]);
+
   const retry = useCallback(() => {
     if (streamingRef.current || loading) return;
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
@@ -306,8 +328,22 @@ export function useCoachChat(
             : m,
         ),
       );
+      if (status !== "error") {
+        const target = messagesRef.current
+          .find((m) => m.id === messageId)
+          ?.proposals?.find((p) => p.id === proposalId);
+        const serverId = target?.proposal.id;
+        // Plan updates are only really applied after the preview save; keep
+        // those cards re-openable until then. Photo estimates have no stored
+        // proposal, so there is nothing to update.
+        if (serverId && target?.proposal.kind !== "plan_update") {
+          // Persist the decision with the stored proposal so reopening the chat
+          // never asks them to confirm the same change twice.
+          void api.resolveProposal(serverId, status).catch(() => {});
+        }
+      }
     },
-    [],
+    [api],
   );
 
   /**
@@ -334,7 +370,9 @@ export function useCoachChat(
         id,
         role: "assistant",
         content: text,
-        proposals: proposal ? [{ id: `${id}-p1`, proposal }] : undefined,
+        proposals: proposal
+          ? [{ id: proposal.id ?? `${id}-p1`, proposal }]
+          : undefined,
       },
     ]);
   }, []);
@@ -371,6 +409,7 @@ export function useCoachChat(
     error,
     send,
     stop,
+    reset,
     retry,
     resolveProposal,
     dismissMealProposal,

@@ -25,6 +25,12 @@ export default function TabLayout() {
     <Tabs
       screenOptions={({ route }) => ({
         headerShown: false,
+        sceneStyle: { backgroundColor: colors.bg },
+        animation: "fade",
+        transitionSpec: {
+          animation: "timing",
+          config: { duration: 120 },
+        },
         tabBarIcon: ({ focused, size }) => {
           const icons = TAB_ICONS[route.name];
           if (!icons) return null;

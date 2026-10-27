@@ -468,6 +468,11 @@ export const revenueCatWebhookSchema = z
 
 export type RevenueCatEvent = z.infer<typeof revenueCatEventSchema>;
 
+/** `/api/coach/proposals/:id` - persist that a card was acted on. */
+export const proposalResolutionSchema = z.object({
+  status: z.enum(["applied", "dismissed"]),
+});
+
 export const coachChatSchema = z.object({
   message: z.string().min(1).max(2000),
   sessionId: z.string().uuid().optional(),

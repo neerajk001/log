@@ -24,7 +24,7 @@ import { ScreenHeader } from "../ScreenHeader";
 import { Banner, IconBadge } from "../ui/primitives";
 import { Chip, ChipRow, IconButton } from "../ui/controls";
 import { ProposalCard } from "./ProposalCard";
-import { CoachLanding, type CoachQuickAction } from "./CoachLanding";
+import { CoachLanding } from "./CoachLanding";
 import { CoachChatLanding } from "./CoachChatLanding";
 import { CoachMenuSheet } from "./CoachMenuSheet";
 import { useCoachChat, type ChatMessage } from "../../hooks/useCoachChat";
@@ -89,6 +89,7 @@ export function CoachChat({
     error,
     send,
     stop,
+    reset,
     retry,
     resolveProposal,
     dismissMealProposal,
@@ -123,31 +124,16 @@ export function CoachChat({
       params: { agent: nextAgent, q: prompt, date: "", fresh: "" },
     } as never);
 
-  const handleQuickAction = (action: CoachQuickAction) => {
-    switch (action) {
-      case "meal":
-        openChat("meal", "Log a meal — ");
-        break;
-      case "training":
-        openChat("training", "Review my training — ");
-        break;
-      case "plan":
-        openChat("training", "Change my plan — ");
-        break;
-      case "checkin":
-        openChat("general", "Give me this week's check-in");
-        break;
-    }
+  const handleQuickAction = (nextAgent: AgentId, prompt: string) => {
+    openChat(nextAgent, prompt);
   };
 
   const selectAgent = (id: AgentId) => {
     if (id === agent) return;
-    const params = { agent: id, q: "", date: richLanding ? "" : localDate, fresh: "" };
-    if (richLanding) {
-      router.navigate({ pathname: "/coach/chat", params } as never);
-    } else {
-      router.replace({ pathname: "/coach/chat", params } as never);
-    }
+    setInput("");
+    setPendingPhoto(null);
+    setShowAllSuggestions(false);
+    reset(id);
   };
 
 
@@ -326,6 +312,7 @@ export function CoachChat({
         >
           {richLanding ? (
             <CoachLanding
+              agent={agent}
               onQuickAction={handleQuickAction}
               onPrompt={(prompt) => openChat(agent, prompt)}
               onOpenContext={() => router.navigate("/coach/memory" as never)}
@@ -365,6 +352,7 @@ export function CoachChat({
         ListEmptyComponent={
           loading ? null : richLanding ? (
             <CoachLanding
+              agent={agent}
               onQuickAction={handleQuickAction}
               onPrompt={(prompt) => openChat(agent, prompt)}
               onOpenContext={() => router.navigate("/coach/memory" as never)}
@@ -706,4 +694,5 @@ const useStyles = makeUseStyles((t) =>
     stopButton: { backgroundColor: t.colors.dangerSoft },
   }),
 );
+
 

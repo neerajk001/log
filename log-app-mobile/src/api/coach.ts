@@ -31,6 +31,8 @@ export function useCoachApi() {
           `/api/coach/sessions/${id}/messages`,
         ),
       deleteSession: (id: string) => client.del<{ ok: true }>(`/api/coach/sessions/${id}`),
+      resolveProposal: (id: string, status: "applied" | "dismissed") =>
+        client.post<{ ok: true }>(`/api/coach/proposals/${id}`, { status }),
       getMemory: () => client.get<CoachMemory | null>("/api/coach/memory"),
       clearMemory: () => client.del<{ ok: true }>("/api/coach/memory"),
       getDecisions: (limit = 20) =>

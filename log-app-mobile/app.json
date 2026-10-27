@@ -7,6 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "log",
     "userInterfaceStyle": "automatic",
+    "backgroundColor": "#0A0A0B",
     "ios": {
       "supportsTablet": true
     },
@@ -25,6 +26,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-system-ui",
       [
         "expo-splash-screen",
         {

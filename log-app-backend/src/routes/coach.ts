@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response, Router } from "express";
+import { Prisma } from "@prisma/client";
 import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db/client";
@@ -18,7 +19,13 @@ import {
 } from "../services/physiqueCheckins";
 import { isPhysiqueEncryptionConfigured } from "../services/physiqueImage";
 import { incrementCounter } from "../utils/metricRegistry";
-import { coachChatSchema, coachPlanSchema, coachProfileSchema, idParamSchema } from "../validation/schemas";
+import {
+  coachChatSchema,
+  coachPlanSchema,
+  coachProfileSchema,
+  idParamSchema,
+  proposalResolutionSchema,
+} from "../validation/schemas";
 
 const router = Router();
 
@@ -216,6 +223,52 @@ router.get(
           created_at: m.createdAt.toISOString(),
         })),
       });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+router.post(
+  "/proposals/:id",
+  requireAuth,
+  validate(idParamSchema, "params"),
+  validate(proposalResolutionSchema),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const proposalId = req.params.id as string;
+      const { status } = req.body as { status: "applied" | "dismissed" };
+      const rows = await prisma.coachMessage.findMany({
+        where: { userId: req.userId },
+        orderBy: { createdAt: "desc" },
+        take: 200,
+        select: { id: true, proposals: true },
+      });
+      const message = rows.find((row) => {
+        const proposals = Array.isArray(row.proposals) ? row.proposals : [];
+        return proposals.some(
+          (proposal) =>
+            proposal !== null &&
+            typeof proposal === "object" &&
+            "id" in proposal &&
+            (proposal as { id?: string }).id === proposalId,
+        );
+      });
+      if (!message) {
+        next(new AppError(404, "NOT_FOUND", "Proposal not found"));
+        return;
+      }
+      const proposals = (message.proposals as unknown as Record<string, unknown>[]).map(
+        (proposal) =>
+          proposal.id === proposalId
+            ? { ...proposal, status, resolved_at: new Date().toISOString() }
+            : proposal,
+      );
+      await prisma.coachMessage.update({
+        where: { id: message.id },
+        data: { proposals: proposals as Prisma.InputJsonValue },
+      });
+      res.json({ ok: true });
     } catch (err) {
       next(err);
     }
@@ -504,3 +557,4 @@ router.post(
 );
 
 export default router;
+

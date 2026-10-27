@@ -3,6 +3,7 @@ import { ClerkProvider, useAuth } from "@clerk/clerk-expo";
 import { tokenCache } from "@clerk/clerk-expo/token-cache";
 import { Stack, usePathname, useRouter, useSegments } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
+import * as SystemUI from "expo-system-ui";
 import { StatusBar } from "expo-status-bar";
 import { PostHogProvider, usePostHog } from "posthog-react-native";
 import { useEffect, useRef } from "react";
@@ -128,6 +129,13 @@ function AuthGate() {
 
 function ThemedRoot() {
   const { colors, isDark, ready } = useTheme();
+
+  // Keep the native root/window background in sync with the theme. Without
+  // this, tab and stack transitions can show a white frame between screens.
+  useEffect(() => {
+    if (!ready) return;
+    void SystemUI.setBackgroundColorAsync(colors.bg).catch(() => {});
+  }, [colors.bg, ready]);
 
   useEffect(() => {
     if (ready) {

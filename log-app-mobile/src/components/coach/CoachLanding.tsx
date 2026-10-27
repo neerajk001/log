@@ -3,64 +3,160 @@ import { Ionicons } from "@expo/vector-icons";
 import { makeUseStyles, useTheme } from "../../theme/ThemeContext";
 import { radii, spacing } from "../../theme/spacing";
 import { IconBadge, type IoniconName } from "../ui/primitives";
+import type { AgentId } from "../../api/types";
 
-export type CoachQuickAction = "meal" | "training" | "plan" | "checkin";
-
-const QUICK_ACTIONS: {
-  key: CoachQuickAction;
+type QuickAction = {
   title: string;
   subtitle: string;
   icon: IoniconName;
   bg: "green" | "blue" | "neutral";
-}[] = [
-  {
-    key: "meal",
-    title: "Log or estimate a meal",
-    subtitle: "Describe it or attach a photo",
-    icon: "restaurant",
-    bg: "green",
-  },
-  {
-    key: "training",
-    title: "Review my training",
-    subtitle: "Progress, volume, exercise swaps",
-    icon: "barbell",
-    bg: "blue",
-  },
-  {
-    key: "plan",
-    title: "Change my plan",
-    subtitle: "Adjust days, sets or exercises",
-    icon: "document-text",
-    bg: "neutral",
-  },
-  {
-    key: "checkin",
-    title: "Weekly check-in",
-    subtitle: "Weight, protein and adherence",
-    icon: "stats-chart",
-    bg: "green",
-  },
-];
+  agent: AgentId;
+  prompt: string;
+};
 
-const SUGGESTIONS = [
-  "Am I on track this week?",
-  "How can I hit my protein target?",
-  "Should I change my calories?",
-  "How is my training volume?",
-];
+const QUICK_ACTIONS: Record<AgentId, QuickAction[]> = {
+  general: [
+    {
+      title: "Log or estimate a meal",
+      subtitle: "Describe it or attach a photo",
+      icon: "restaurant",
+      bg: "green",
+      agent: "meal",
+      prompt: "Log a meal — ",
+    },
+    {
+      title: "Review my training",
+      subtitle: "Progress, volume, exercise swaps",
+      icon: "barbell",
+      bg: "blue",
+      agent: "training",
+      prompt: "Review my training — ",
+    },
+    {
+      title: "Change my plan",
+      subtitle: "Adjust days, sets or exercises",
+      icon: "document-text",
+      bg: "neutral",
+      agent: "training",
+      prompt: "Change my plan — ",
+    },
+    {
+      title: "Weekly check-in",
+      subtitle: "Weight, protein and adherence",
+      icon: "stats-chart",
+      bg: "green",
+      agent: "general",
+      prompt: "Give me this week's check-in",
+    },
+  ],
+  meal: [
+    {
+      title: "Log or estimate a meal",
+      subtitle: "Describe it or attach a photo",
+      icon: "restaurant",
+      bg: "green",
+      agent: "meal",
+      prompt: "Log a meal — ",
+    },
+    {
+      title: "Review today's meals",
+      subtitle: "Calories and protein so far",
+      icon: "fast-food",
+      bg: "blue",
+      agent: "meal",
+      prompt: "Review today's meals",
+    },
+    {
+      title: "Check my protein",
+      subtitle: "How today's intake is tracking",
+      icon: "stats-chart",
+      bg: "green",
+      agent: "meal",
+      prompt: "Is my protein intake on track?",
+    },
+    {
+      title: "Calorie check",
+      subtitle: "Balance for the rest of today",
+      icon: "flame",
+      bg: "neutral",
+      agent: "meal",
+      prompt: "Am I over my calories today?",
+    },
+  ],
+  training: [
+    {
+      title: "Review my training",
+      subtitle: "Progress, volume, exercise swaps",
+      icon: "barbell",
+      bg: "blue",
+      agent: "training",
+      prompt: "Review my training — ",
+    },
+    {
+      title: "Change my plan",
+      subtitle: "Adjust days, sets or exercises",
+      icon: "document-text",
+      bg: "neutral",
+      agent: "training",
+      prompt: "Change my plan — ",
+    },
+    {
+      title: "Check my progress",
+      subtitle: "Lifts, volume and consistency",
+      icon: "trending-up",
+      bg: "green",
+      agent: "training",
+      prompt: "How is my progress?",
+    },
+    {
+      title: "Recovery check",
+      subtitle: "Sleep, fatigue and readiness",
+      icon: "moon",
+      bg: "neutral",
+      agent: "training",
+      prompt: "How is my recovery?",
+    },
+  ],
+};
 
-const RECENT = ["Give me this week's check-in", "Is my training volume enough?"];
+const SUGGESTIONS: Record<AgentId, string[]> = {
+  general: [
+    "Am I on track this week?",
+    "How can I hit my protein target?",
+    "Should I change my calories?",
+    "How is my training volume?",
+  ],
+  meal: [
+    "Am I over my calories today?",
+    "How is my protein intake?",
+    "What should I eat next?",
+    "Is my meal balanced?",
+  ],
+  training: [
+    "Is my training volume enough?",
+    "Am I progressing on my lifts?",
+    "Should I deload?",
+    "How is my recovery?",
+  ],
+};
+
+const RECENT: Record<AgentId, string[]> = {
+  general: ["Give me this week's check-in", "Is my training volume enough?"],
+  meal: ["How is my protein intake?", "Log my lunch"],
+  training: ["Is my volume enough?", "Review my split"],
+};
 
 /** The rich landing state for the Coach tab conversation. */
 export function CoachLanding({
+  agent,
   onQuickAction,
   onPrompt,
   onOpenContext,
   showAllSuggestions,
   onToggleSuggestions,
 }: {
-  onQuickAction: (action: CoachQuickAction) => void;
+  agent: AgentId;
+  onQuickAction: (agent: AgentId, prompt: string) => void;
   onPrompt: (prompt: string) => void;
   onOpenContext: () => void;
   showAllSuggestions: boolean;
@@ -68,7 +164,10 @@ export function CoachLanding({
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
-  const suggestions = showAllSuggestions ? SUGGESTIONS : SUGGESTIONS.slice(0, 2);
+  const actions = QUICK_ACTIONS[agent];
+  const allSuggestions = SUGGESTIONS[agent];
+  const suggestions = showAllSuggestions ? allSuggestions : allSuggestions.slice(0, 2);
+  const recent = RECENT[agent];
 
   return (
     <View style={styles.landing}>
@@ -97,7 +196,7 @@ export function CoachLanding({
       </View>
 
       <View style={styles.quickGrid}>
-        {QUICK_ACTIONS.map((action) => {
+        {actions.map((action) => {
           const iconBg =
             action.bg === "green"
               ? colors.greenSoft
@@ -113,10 +212,10 @@ export function CoachLanding({
 
           return (
             <Pressable
-              key={action.key}
+              key={action.title}
               accessibilityRole="button"
               accessibilityLabel={action.title}
-              onPress={() => onQuickAction(action.key)}
+              onPress={() => onQuickAction(action.agent, action.prompt)}
               style={({ pressed }) => [styles.quickCard, pressed && styles.pressed]}
             >
               <View style={styles.quickTop}>
@@ -167,7 +266,7 @@ export function CoachLanding({
 
       <Text style={styles.recentTitle}>Recent in this chat</Text>
       <View style={styles.recentCard}>
-        {RECENT.map((prompt, i) => (
+        {recent.map((prompt, i) => (
           <View key={prompt}>
             {i > 0 ? <View style={styles.recentDivider} /> : null}
             <Pressable

@@ -618,6 +618,9 @@ export type CoachProposal = (
    * replays the same create request instead of logging the meal twice.
    */
   id?: string;
+  /** Persisted only after the athlete acts on the card. */
+  status?: "applied" | "dismissed";
+  resolved_at?: string;
 };
 
 /**

@@ -92,6 +92,15 @@ export function ProposalCard({
     );
   }
 
+  if (item.status === "dismissed") {
+    return (
+      <View style={[styles.card, styles.dismissed]}>
+        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+        <Text style={[typography.small, styles.dismissedText]}>Dismissed.</Text>
+      </View>
+    );
+  }
+
   const applyPlanUpdate = () => {
     setPendingPlan({
       editingPlanId: proposal.kind === "plan_update" ? proposal.plan_id : undefined,
@@ -379,5 +388,13 @@ const useStyles = makeUseStyles((t) =>
       borderColor: t.colors.successSoft,
     },
     doneText: { color: t.colors.success, flex: 1 },
+    dismissed: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      backgroundColor: t.colors.surfaceAlt,
+      borderColor: t.colors.border,
+    },
+    dismissedText: { color: t.colors.textDim, flex: 1 },
   }),
 );
