@@ -390,6 +390,8 @@ export interface TrendsResponse {
   series: TrendBucket[];
   /** Weekly nutrient averages over the nutrition card's own window. */
   nutrition: TrendBucket[];
+  /** The last 14 completed days (ending yesterday), daily buckets. */
+  nutrition_days: TrendBucket[];
   /** Last six calendar months, newest first. */
   months: MonthSummary[];
   lifts: LiftDelta[];

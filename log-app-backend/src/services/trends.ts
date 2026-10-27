@@ -38,6 +38,12 @@ export interface TrendsResult {
   series: TrendBucket[];
   /** Weekly nutrient averages for the nutrition card (its own window). */
   nutrition: TrendBucket[];
+  /**
+   * The last 14 completed days (ending yesterday), daily buckets. The nutrition
+   * card uses the last seven for its 1W view so "7 days" really means seven
+   * completed days, not six calendar days plus the unfinished today.
+   */
+  nutrition_days: TrendBucket[];
   months: MonthSummary[];
   lifts: LiftDelta[];
   adherence_pct: number | null;
@@ -251,6 +257,16 @@ export async function computeTrends(
     nutritionWeeks,
     todayUtcMidnight,
   );
+  // Rolling, fully-completed days for the 1W nutrition view. Anchoring on
+  // yesterday avoids the "6 of 7" off-by-one caused by excluding today's
+  // half-finished intake.
+  const nutritionDays = buildBuckets(
+    logs,
+    addDays(todayUtcMidnight, -1),
+    "day",
+    14,
+    todayUtcMidnight,
+  );
 
   const workoutDays = liftDates.map((row) => row.date.getTime());
   const currentMonthStart = startOfMonth(todayUtcMidnight);
@@ -323,6 +339,7 @@ export async function computeTrends(
     bucket,
     series,
     nutrition,
+    nutrition_days: nutritionDays,
     months,
     lifts: liftDeltas,
     adherence_pct: hitsPct(weekLogs, (l) => l.proteinG, proteinTarget, weekElapsedDays),

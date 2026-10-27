@@ -14,6 +14,7 @@ import { makeUseStyles, useTheme } from "../../src/theme/ThemeContext";
 import { radii, spacing } from "../../src/theme/spacing";
 import { ScreenHeader } from "../../src/components/ScreenHeader";
 import { BarChart, DonutChart, Sparkline } from "../../src/components/ui/charts";
+import { WeightChart } from "../../src/components/body/WeightChart";
 import {
   Banner,
   Button,
@@ -42,7 +43,7 @@ import {
   progressChange,
   progressSparkValues,
 } from "../../src/utils/liftProgress";
-import { startOfWeek, todayLocal, weekDayLabels } from "../../src/utils/date";
+import { weekDayLabels } from "../../src/utils/date";
 import type { TrendBucket, TrendRange } from "../../src/api/types";
 
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -195,6 +196,18 @@ export default function InsightsScreen() {
         .map((b) => ({ start: b.start, value: b.weight_kg as number })),
     [series],
   );
+  // The Insights weight series is daily for 7d and bucketed averages for wider
+  // ranges; the interactive chart shows whichever point is under the finger.
+  const interactiveWeightPoints = useMemo(
+    () =>
+      weightPoints.map((point) => ({
+        date: point.start,
+        kg: point.value,
+        calories: null,
+        protein_g: null,
+      })),
+    [weightPoints],
+  );
   const weightValues = weightPoints.map((p) => p.value);
   const latestWeight = weightValues.length > 0 ? weightValues[weightValues.length - 1] : null;
   const firstWeight = weightValues.length > 0 ? weightValues[0] : null;
@@ -218,13 +231,28 @@ export default function InsightsScreen() {
     trends != null && nutritionBuckets.length === requestedNutritionBuckets;
   // The chosen window is the tail of the fetched buckets; the slice before it is the
   // previous, equally-long window it is compared against.
+  // `nutrition_days` is the rolling, fully-completed day series. For the 1W
+  // view it gives seven real completed days (ending yesterday) instead of the
+  // six calendar days left after excluding the unfinished today.
+  const nutritionDays = weekTrends?.nutrition_days;
+  const dailyNutritionReady = (nutritionDays?.length ?? 0) >= 14;
   const nutritionCurrent = useMemo(
-    () => (nutritionFresh ? nutritionBuckets.slice(-nutritionWeeks) : []),
-    [nutritionBuckets, nutritionFresh, nutritionWeeks],
+    () =>
+      nutritionWeeks === 1 && dailyNutritionReady && nutritionDays
+        ? nutritionDays.slice(-7)
+        : nutritionFresh
+          ? nutritionBuckets.slice(-nutritionWeeks)
+          : [],
+    [dailyNutritionReady, nutritionBuckets, nutritionDays, nutritionFresh, nutritionWeeks],
   );
   const nutritionPrevious = useMemo(
-    () => (nutritionFresh ? nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks) : []),
-    [nutritionBuckets, nutritionFresh, nutritionWeeks],
+    () =>
+      nutritionWeeks === 1 && dailyNutritionReady && nutritionDays
+        ? nutritionDays.slice(0, 7)
+        : nutritionFresh
+          ? nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks)
+          : [],
+    [dailyNutritionReady, nutritionBuckets, nutritionDays, nutritionFresh, nutritionWeeks],
   );
   const nutritionAverage = windowAverage(nutritionCurrent, pickNutrient(nutritionMetric));
   const nutritionPrevAverage = windowAverage(nutritionPrevious, pickNutrient(nutritionMetric));
@@ -245,24 +273,25 @@ export default function InsightsScreen() {
   // The average spans the chosen window (weekly averages)…
   const nutritionWindow =
     NUTRITION_WINDOWS.find((w) => w.weeks === nutritionWeeks) ?? NUTRITION_WINDOWS[0];
-  const newestNutritionWeek = nutritionCurrent[nutritionCurrent.length - 1] ?? null;
   const nutritionWindowLabel =
-    nutritionWeeks === 1
-      ? newestNutritionWeek?.start === startOfWeek(todayLocal())
-        ? "This week"
-        : "Last week"
-      : `Last ${nutritionWindow.phrase}`;
+    nutritionWeeks === 1 ? "Last 7 days" : `Last ${nutritionWindow.phrase}`;
   const nutritionCompareLabel =
     nutritionWeeks === 52
       ? "no prior year loaded"
       : nutritionWeeks === 1
-        ? "vs last week"
+        ? "vs previous 7 days"
         : `vs previous ${nutritionWindow.phrase}`;
 
   // …but the bars stay on the last 7 days of daily intake, so a wider window
   // fades them (they only cover a week) and only the average follows the filter.
   const barsDimmed = nutritionWeeks > 1;
-  const weekSeries = useMemo(() => weekTrends?.series ?? [], [weekTrends]);
+  const weekSeries = useMemo(
+    () =>
+      dailyNutritionReady && nutritionDays
+        ? nutritionDays.slice(-7)
+        : weekTrends?.series ?? [],
+    [dailyNutritionReady, nutritionDays, weekTrends],
+  );
   const nutritionChart = useMemo(
     () =>
       weekSeries.map((b) => ({
@@ -516,7 +545,13 @@ export default function InsightsScreen() {
                     {RANGE_PHRASE[range]}
                   </Text>
                 ) : null}
-                <Sparkline values={weightValues} width={chartWidth} height={90} />
+                <WeightChart
+                  points={interactiveWeightPoints}
+                  width={chartWidth}
+                  height={112}
+                  showTrailingAverage={false}
+                  showRange={false}
+                />
                 <View style={styles.xLabels}>
                   {weightPoints.map((p) => (
                     <Text
@@ -551,7 +586,7 @@ export default function InsightsScreen() {
                   </View>
                 ) : null}
                 <Text style={[typography.caption, styles.note]}>
-                  Average of your weigh-ins per {bucket}.
+                  Tap the chart to inspect a point · average of your weigh-ins per {bucket}.
                 </Text>
               </>
             ) : (

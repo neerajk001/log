@@ -35,11 +35,17 @@ export function WeightChart({
   width,
   height = 140,
   color,
+  showTrailingAverage = true,
+  showRange = true,
 }: {
   points: BodyAnalysisWeightPoint[];
   width: number;
   height?: number;
   color?: string;
+  /** Hide the 7-day average when the points are already weekly/monthly averages. */
+  showTrailingAverage?: boolean;
+  /** Hide the min/max labels when the caller supplies its own axis labels. */
+  showRange?: boolean;
 }) {
   const { colors, typography } = useTheme();
   const styles = useStyles();
@@ -158,7 +164,7 @@ export function WeightChart({
         >
           <Text style={styles.tooltipDate}>{formatMediumDate(selected.date)}</Text>
           <Text style={styles.tooltipValue}>{selected.kg.toFixed(1)} kg</Text>
-          {selectedAverage != null ? (
+          {showTrailingAverage && selectedAverage != null ? (
             <Text style={[typography.caption, styles.tooltipAverage]}>
               7-day avg {selectedAverage.toFixed(1)} kg
             </Text>
@@ -173,10 +179,12 @@ export function WeightChart({
         </View>
       ) : null}
 
-      <View style={styles.rangeRow} pointerEvents="none">
-        <Text style={[typography.caption, styles.rangeLabel]}>{geometry.max.toFixed(1)} kg</Text>
-        <Text style={[typography.caption, styles.rangeLabel]}>{geometry.min.toFixed(1)} kg</Text>
-      </View>
+      {showRange ? (
+        <View style={styles.rangeRow} pointerEvents="none">
+          <Text style={[typography.caption, styles.rangeLabel]}>{geometry.max.toFixed(1)} kg</Text>
+          <Text style={[typography.caption, styles.rangeLabel]}>{geometry.min.toFixed(1)} kg</Text>
+        </View>
+      ) : null}
     </View>
   );
 }

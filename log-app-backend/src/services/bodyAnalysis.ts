@@ -524,7 +524,10 @@ export async function getBodyAnalysis(
     localDate && isCalendarDate(localDate)
       ? localDate
       : new Date().toISOString().slice(0, 10);
-  const from = addDays(to, -(days - 1));
+  // The analysis covers the last `days` completed days plus today's weight:
+  // starting one day earlier than a calendar window keeps a 7-day view at 7
+  // completed days instead of 6 plus an unfinished today.
+  const from = addDays(to, -days);
   const previousTo = addDays(from, -1);
   const previousFrom = addDays(previousTo, -(days - 1));
 
