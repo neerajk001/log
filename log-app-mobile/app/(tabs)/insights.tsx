@@ -238,15 +238,18 @@ export default function InsightsScreen() {
     trends != null && nutritionBuckets.length === requestedNutritionBuckets;
   // The chosen window is the tail of the fetched buckets; the slice before it is the
   // previous, equally-long window it is compared against.
-  // `nutrition_days` is the rolling, fully-completed day series. For the 1W
-  // view it gives seven real completed days (ending yesterday) instead of the
-  // six calendar days left after excluding the unfinished today.
+  // `nutrition_days` holds the selected window plus the preceding equally-long
+  // window as completed daily buckets (ending yesterday). That keeps "2 weeks"
+  // equal to 14 completed days instead of two calendar weeks with only 8
+  // elapsed days so far.
   const nutritionDays = weekTrends?.nutrition_days;
-  const dailyNutritionReady = (nutritionDays?.length ?? 0) >= 14;
+  const dailyNutritionReady =
+    (nutritionDays?.length ?? 0) >= nutritionWeeks * 14;
+  const nutritionReady = dailyNutritionReady || nutritionFresh;
   const nutritionCurrent = useMemo(
     () =>
-      nutritionWeeks === 1 && dailyNutritionReady && nutritionDays
-        ? nutritionDays.slice(-7)
+      dailyNutritionReady && nutritionDays
+        ? nutritionDays.slice(-nutritionWeeks * 7)
         : nutritionFresh
           ? nutritionBuckets.slice(-nutritionWeeks)
           : [],
@@ -254,8 +257,8 @@ export default function InsightsScreen() {
   );
   const nutritionPrevious = useMemo(
     () =>
-      nutritionWeeks === 1 && dailyNutritionReady && nutritionDays
-        ? nutritionDays.slice(0, 7)
+      dailyNutritionReady && nutritionDays
+        ? nutritionDays.slice(-nutritionWeeks * 14, -nutritionWeeks * 7)
         : nutritionFresh
           ? nutritionBuckets.slice(-nutritionWeeks * 2, -nutritionWeeks)
           : [],
@@ -661,7 +664,7 @@ export default function InsightsScreen() {
               ))}
             </ChipRow>
 
-            {!nutritionFresh && !trendsError ? (
+            {!nutritionReady && !trendsError ? (
               <LoadingState label="Loading your nutrition…" />
             ) : nutritionAverage != null ? (
               <>
@@ -718,8 +721,8 @@ export default function InsightsScreen() {
                   <Ionicons name="calendar-outline" size={14} color={colors.textDim} />
                   <Text style={[typography.caption, styles.footerText]} numberOfLines={2}>
                     {barsDimmed
-                      ? `Average over the last ${nutritionWindow.phrase} · ${windowLoggedDays} of ${nutritionWeeks * 7} days logged · bars show the last 7 days`
-                      : `From ${weekLoggedDays} of 7 logged days · completed days only`}
+                      ? `Average over the last ${nutritionWindow.phrase} · ${windowLoggedDays} of ${nutritionWeeks * 7} nutrition days · bars show the last 7 days`
+                      : `From ${weekLoggedDays} of 7 nutrition days · completed days only`}
                   </Text>
                   {nutritionWeeks === 1 ? (
                     <Pressable

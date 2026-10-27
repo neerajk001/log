@@ -39,9 +39,10 @@ export interface TrendsResult {
   /** Weekly nutrient averages for the nutrition card (its own window). */
   nutrition: TrendBucket[];
   /**
-   * The last 14 completed days (ending yesterday), daily buckets. The nutrition
-   * card uses the last seven for its 1W view so "7 days" really means seven
-   * completed days, not six calendar days plus the unfinished today.
+   * The selected nutrition window plus the preceding equally-long window, as
+   * completed daily buckets ending yesterday (2 × weeks × 7 days). The card
+   * uses the tail for the current window and the slice before it for the
+   * comparison, so "2 weeks" really means 14 completed days.
    */
   nutrition_days: TrendBucket[];
   months: MonthSummary[];
@@ -206,7 +207,9 @@ export async function computeTrends(
   // Wide enough for the 1y monthly buckets, the six-month rollup, and the
   // selected nutrition window (up to 52 weeks plus its comparison week).
   const monthlyStart = addMonths(startOfMonth(todayUtcMidnight), -(MONTHS_BACK + 5));
-  const nutritionStart = addDays(currentWeekStart, -(nutritionWeeks * 7 + 7));
+  // The daily nutrition series needs the selected window plus the equally-long
+  // previous window for the comparison.
+  const nutritionStart = addDays(currentWeekStart, -(nutritionWeeks * 14 + 7));
   const historyStart = new Date(Math.min(monthlyStart.getTime(), nutritionStart.getTime()));
 
   const [logs, liftDates, lifts, user] = await Promise.all([
@@ -257,14 +260,14 @@ export async function computeTrends(
     nutritionWeeks,
     todayUtcMidnight,
   );
-  // Rolling, fully-completed days for the 1W nutrition view. Anchoring on
-  // yesterday avoids the "6 of 7" off-by-one caused by excluding today's
-  // half-finished intake.
+  // Rolling, fully-completed days for every nutrition window: the selected
+  // N weeks plus the preceding N weeks. Anchoring on yesterday avoids the
+  // "6 of 7" off-by-one caused by excluding today's half-finished intake.
   const nutritionDays = buildBuckets(
     logs,
     addDays(todayUtcMidnight, -1),
     "day",
-    14,
+    nutritionWeeks * 14,
     todayUtcMidnight,
   );
 
