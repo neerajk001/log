@@ -98,6 +98,15 @@ export function CoachMenuSheet({
         router.navigate("/coach/memory" as never);
       },
     },
+    {
+      icon: "body-outline",
+      title: "Physique check-ins",
+      subtitle: "Weekly photos and progress",
+      onPress: () => {
+        onClose();
+        router.navigate("/physique" as never);
+      },
+    },
   ];
 
   const quickAccess: MenuItem[] = [

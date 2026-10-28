@@ -277,8 +277,8 @@ export function CoachChat({
               onPress={() => router.navigate("/coach/sessions" as never)}
             />
             <IconButton
-              name="ellipsis-horizontal"
-              accessibilityLabel="More options"
+              name="menu"
+              accessibilityLabel="Coach menu"
               onPress={() => setMenuOpen(true)}
             />
           </>
